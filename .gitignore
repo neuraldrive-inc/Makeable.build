@@ -1,0 +1,7 @@
+.env
+.env.local
+config.local.js
+.DS_Store
+node_modules/
+tmp/
+.circuitcodex/
