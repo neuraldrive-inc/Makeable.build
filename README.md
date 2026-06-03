@@ -48,6 +48,28 @@ Web Serial works best in Chrome or Edge on desktop. Localhost is treated as a se
 
 The app uses Arduino IDE's bundled `arduino-cli` when present. It compiles generated sketches server-side, returns the flashable `.bin` images to the browser, and flashes them over Web Serial using esptool-js. It flashes the smaller bootloader, partition table, boot app, and application images instead of the padded merged binary so the image does not exceed detected flash size. ESP Web Tools is still included as an advanced fallback for hosted firmware manifests.
 
+## Hosted mode
+
+This repo includes a Netlify configuration for the online app:
+
+- `netlify.toml` publishes the static app and bundles `netlify/functions/api.mjs`.
+- The hosted API proxies OpenAI and GitHub requests so secrets stay server-side.
+- The browser compresses uploaded photos before sending them to the hosted AI endpoint.
+- Firmware compilation and direct ESP32 loading still require the local desktop server, because Netlify Functions are serverless and do not include Arduino CLI plus the ESP32 toolchain.
+
+Set these Netlify environment variables for the hosted AI/documentation flow:
+
+```bash
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5.5
+OPENAI_REASONING_MODEL=gpt-5.5
+OPENAI_REASONING_EFFORT=high
+GITHUB_TOKEN=
+GITHUB_OWNER=
+```
+
+Voice input in the browser needs a browser-safe Deepgram token. Use `DEEPGRAM_BROWSER_KEY` for a public or short-lived key. Do not expose your main Deepgram secret unless you intentionally set `ALLOW_BROWSER_DEEPGRAM_KEY=true`.
+
 ## Files
 
 - `index.html` - static app shell

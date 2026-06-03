@@ -443,18 +443,38 @@ function handlePhotoUpload(event) {
 
   const reader = new FileReader();
   reader.onload = () => {
-    state.imageDataUrl = String(reader.result || "");
     const img = new Image();
     img.onload = () => {
-      state.imageElement = img;
-      drawPartsCanvas();
-      setStatus(els.transcriptBox, `Photo ready. Now tell me what you want this project to do.`, "ok");
+      state.imageDataUrl = resizePhotoForAi(img);
+      const displayImg = new Image();
+      displayImg.onload = () => {
+        state.imageElement = displayImg;
+        drawPartsCanvas();
+        setStatus(els.transcriptBox, `Photo ready. Now tell me what you want this project to do.`, "ok");
+      };
+      displayImg.onerror = () => setStatus(els.transcriptBox, "I couldn’t prepare that image. Try another photo.", "danger");
+      displayImg.src = state.imageDataUrl;
     };
     img.onerror = () => setStatus(els.transcriptBox, "I couldn’t read that image. Try a clear JPG or PNG.", "danger");
-    img.src = state.imageDataUrl;
+    img.src = String(reader.result || "");
   };
   reader.onerror = () => setStatus(els.transcriptBox, "I couldn’t load that photo. Try choosing it again.", "danger");
   reader.readAsDataURL(file);
+}
+
+function resizePhotoForAi(img) {
+  const maxSide = 1800;
+  const scale = Math.min(1, maxSide / img.naturalWidth, maxSide / img.naturalHeight);
+  const width = Math.max(1, Math.round(img.naturalWidth * scale));
+  const height = Math.max(1, Math.round(img.naturalHeight * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(img, 0, 0, width, height);
+  return canvas.toDataURL("image/jpeg", 0.86);
 }
 
 function clearPhoto() {
@@ -1526,6 +1546,17 @@ function loadEspManifest() {
 async function refreshArduinoStatus() {
   try {
     const status = await apiJson("/api/arduino/status");
+    if (status.hostedMode) {
+      setStatus(
+        els.arduinoStatus,
+        "Online guide mode is ready. To put code on a real ESP32, open this project locally where Arduino is installed.",
+        "warn",
+      );
+      els.compileFlashButton.disabled = true;
+      els.compileFlashButton.textContent = "Local app needed";
+      setFlashProgress(0, "");
+      return;
+    }
     const tone = status.hasArduinoCli && status.hasEsp32Core ? "ok" : "warn";
     setStatus(
       els.arduinoStatus,
@@ -1544,6 +1575,15 @@ async function refreshArduinoStatus() {
 }
 
 async function compileAndFlashFirmware() {
+  if (serverConfig.hostedMode || serverConfig.firmwareCompileSupported === false) {
+    setStatus(
+      els.arduinoStatus,
+      "This online version can guide the build and write the code. Loading it onto the ESP32 needs the local app with Arduino installed.",
+      "warn",
+    );
+    return;
+  }
+
   if (!("serial" in navigator)) {
     setStatus(els.arduinoStatus, "This browser can’t talk to the board. Use Chrome or Edge on desktop.", "danger");
     return;

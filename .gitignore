@@ -5,3 +5,4 @@ config.local.js
 node_modules/
 tmp/
 .circuitcodex/
+.netlify/
