@@ -504,6 +504,8 @@ function drawPartsCanvas() {
   const x = (width - drawWidth) / 2;
   const y = (height - drawHeight) / 2;
   state.imageFit = { x, y, width: drawWidth, height: drawHeight };
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(img, x, y, drawWidth, drawHeight);
 
   if (state.plan?.parts?.length) {
@@ -534,35 +536,150 @@ function drawAnnotations(ctx, parts) {
   const fit = state.imageFit;
   if (!fit) return;
   const colors = ["#ffffff", "#8b5cf6", "#d4d4d8", "#a1a1aa", "#f5f5f5", "#71717a"];
+  const placedLabels = [];
 
-  parts.forEach((part, index) => {
+  const annotations = parts.map((part, index) => {
     const bbox = normalizeBbox(part.bbox, index, parts.length);
+    return {
+      part,
+      index,
+      bbox,
+      box: {
+        x: fit.x + (bbox.x / 100) * fit.width,
+        y: fit.y + (bbox.y / 100) * fit.height,
+        width: (bbox.width / 100) * fit.width,
+        height: (bbox.height / 100) * fit.height,
+      },
+    };
+  });
+
+  annotations.forEach(({ part, index, box }) => {
     const color = colors[index % colors.length];
-    const x = fit.x + (bbox.x / 100) * fit.width;
-    const y = fit.y + (bbox.y / 100) * fit.height;
-    const w = (bbox.width / 100) * fit.width;
-    const h = (bbox.height / 100) * fit.height;
 
     ctx.save();
     ctx.strokeStyle = color;
     ctx.lineWidth = 3;
-    ctx.strokeRect(x, y, w, h);
+    ctx.strokeRect(box.x, box.y, box.width, box.height);
     ctx.shadowColor = color;
     ctx.shadowBlur = color === "#ffffff" ? 12 : 18;
 
-    const label = `${index + 1}. ${part.name}`;
     ctx.font = "800 13px Inter, system-ui, sans-serif";
-    const labelWidth = Math.min(ctx.measureText(label).width + 18, fit.width - 12);
+    const maxLabelWidth = Math.min(270, fit.width - 12);
+    const label = trimCanvasText(ctx, `${index + 1}. ${compactPartName(part.name)}`, maxLabelWidth - 18);
+    const labelWidth = Math.min(ctx.measureText(label).width + 18, maxLabelWidth);
     const labelHeight = 28;
-    const labelX = Math.max(fit.x + 6, Math.min(x, fit.x + fit.width - labelWidth - 6));
-    const labelY = Math.max(fit.y + 6, y - labelHeight - 6);
+    const labelRect = placeAnnotationLabel(box, labelWidth, labelHeight, fit, placedLabels);
+    placedLabels.push(labelRect);
+
     ctx.shadowBlur = 0;
+    drawLabelLeader(ctx, labelRect, box, color);
     ctx.fillStyle = color === "#ffffff" || color === "#e5e7eb" ? "rgba(255,255,255,0.92)" : color;
-    ctx.fillRect(labelX, labelY, labelWidth, labelHeight);
+    ctx.fillRect(labelRect.x, labelRect.y, labelRect.width, labelRect.height);
     ctx.fillStyle = color === "#ffffff" || color === "#e5e7eb" ? "#050507" : "#fff";
-    ctx.fillText(label, labelX + 9, labelY + 18);
+    ctx.fillText(label, labelRect.x + 9, labelRect.y + 18);
     ctx.restore();
   });
+}
+
+function compactPartName(name) {
+  const value = String(name || "Part").trim();
+  const normalized = value.toLowerCase();
+  if (/esp32|devkit/.test(normalized)) return "ESP32 DevKit";
+  if (/\bpir\b|motion/.test(normalized)) return "PIR sensor";
+  if (/jumper|wire/.test(normalized)) return "jumper wires";
+  if (/resistor/.test(normalized)) return "resistor";
+  if (/\bleds?\b/.test(normalized)) return "LED";
+  return value
+    .replace(/\s+(with|including|and)\s+.*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function trimCanvasText(ctx, text, maxWidth) {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  const suffix = "...";
+  let trimmed = text.trim();
+  while (trimmed.length > 1 && ctx.measureText(`${trimmed}${suffix}`).width > maxWidth) {
+    trimmed = trimmed.slice(0, -1).trimEnd();
+  }
+  return `${trimmed}${suffix}`;
+}
+
+function placeAnnotationLabel(box, width, height, fit, placedLabels) {
+  const gap = 6;
+  const candidates = [
+    { x: box.x, y: box.y - height - gap },
+    { x: box.x + box.width / 2 - width / 2, y: box.y - height - gap },
+    { x: box.x + box.width - width, y: box.y - height - gap },
+    { x: box.x, y: box.y + box.height + gap },
+    { x: box.x + box.width / 2 - width / 2, y: box.y + box.height + gap },
+    { x: box.x + box.width - width, y: box.y + box.height + gap },
+    { x: box.x + box.width + gap, y: box.y },
+    { x: box.x - width - gap, y: box.y },
+    { x: box.x + gap, y: box.y + gap },
+  ].map((candidate) => clampLabelRect(candidate.x, candidate.y, width, height, fit));
+
+  const cleanCandidate = candidates.find((candidate) => !placedLabels.some((label) => rectsOverlap(candidate, label, 4)));
+  if (cleanCandidate) return cleanCandidate;
+
+  for (let y = fit.y + gap; y <= fit.y + fit.height - height - gap; y += height + gap) {
+    const scanned = clampLabelRect(box.x, y, width, height, fit);
+    if (!placedLabels.some((label) => rectsOverlap(scanned, label, 4))) return scanned;
+  }
+
+  return candidates
+    .map((candidate) => ({
+      candidate,
+      score: placedLabels.reduce((total, label) => total + overlapArea(candidate, label), 0),
+    }))
+    .sort((a, b) => a.score - b.score)[0].candidate;
+}
+
+function clampLabelRect(x, y, width, height, fit) {
+  const inset = 6;
+  return {
+    x: Math.max(fit.x + inset, Math.min(x, fit.x + fit.width - width - inset)),
+    y: Math.max(fit.y + inset, Math.min(y, fit.y + fit.height - height - inset)),
+    width,
+    height,
+  };
+}
+
+function rectsOverlap(a, b, padding = 0) {
+  return !(
+    a.x + a.width + padding <= b.x ||
+    b.x + b.width + padding <= a.x ||
+    a.y + a.height + padding <= b.y ||
+    b.y + b.height + padding <= a.y
+  );
+}
+
+function overlapArea(a, b) {
+  const xOverlap = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+  const yOverlap = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+  return xOverlap * yOverlap;
+}
+
+function drawLabelLeader(ctx, label, box, color) {
+  const labelCenter = {
+    x: label.x + label.width / 2,
+    y: label.y + label.height / 2,
+  };
+  const boxCenter = {
+    x: box.x + box.width / 2,
+    y: box.y + box.height / 2,
+  };
+  if (Math.abs(labelCenter.x - boxCenter.x) < 28 && Math.abs(labelCenter.y - boxCenter.y) < 28) return;
+
+  ctx.save();
+  ctx.strokeStyle = color === "#ffffff" ? "rgba(255,255,255,0.68)" : color;
+  ctx.globalAlpha = 0.74;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(labelCenter.x, labelCenter.y);
+  ctx.lineTo(boxCenter.x, boxCenter.y);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function normalizeBbox(bbox, index, total) {
@@ -641,7 +758,7 @@ async function analyzeHardware() {
         {
           role: "system",
           content:
-            "You are CircuitCodex, an expert hardware build agent for beginners. Identify the actual visible IoT parts from the uploaded photo, produce tight normalized bounding boxes, make conservative ESP32 wiring choices, flag uncertainty, avoid unsafe pins, and output only schema-valid JSON. Never use canned/demo component names or boxes. Do not generate source code in this step.",
+            "You are CircuitCodex, an expert hardware build agent for beginners. Identify only the actual visible parts needed for the user's stated project, produce tight normalized bounding boxes for those required parts, make conservative ESP32 wiring choices, flag uncertainty, avoid unsafe pins, and output only schema-valid JSON. Ignore visible parts that are unrelated to the requested build. Never use canned/demo component names or boxes. Do not generate source code in this step.",
         },
         {
           role: "user",
@@ -713,6 +830,9 @@ function buildAnalysisPrompt(idea) {
     `Project idea: ${idea}`,
     "",
     "Return a beginner-safe hardware plan for the actual visible parts in this uploaded image.",
+    "Only include parts that are necessary for the described project. Ignore unrelated visible parts even if you can identify them.",
+    "Every returned part must either appear in a wiring step or be required to make those wiring steps possible, such as a controller, sensor, output, current-limiting resistor, power connection, or jumper wire.",
+    "Use short label-friendly names, such as ESP32 DevKit, PIR sensor, LED, resistor, and jumper wires.",
     "Do not use example/demo/static values. Every part name and bounding box must be based on visual evidence in this exact photo.",
     "Use tight bounding boxes around each physical component. Coordinates may be 0-100 percentages or 0-1000 normalized image coordinates.",
     "Assign stable part ids like esp32_main, pir_sensor, led_pack, resistor_strip, servo_motor. Use those ids in wiringSteps.fromPartId and wiringSteps.toPartId.",
@@ -844,23 +964,71 @@ function normalizeFirmware(firmware) {
 }
 
 function normalizePlan(plan) {
+  const wiringSteps = Array.isArray(plan.wiringSteps) ? plan.wiringSteps.map(normalizeWiringStep) : [];
+  const rawParts = Array.isArray(plan.parts) ? plan.parts : [];
+  const firmwareSpec = plan.firmwareSpec || {
+    board: "ESP32",
+    behavior: plan.summary || "",
+    libraries: [],
+    pinAssignments: [],
+    serialProtocol: [],
+  };
+  const projectParts = filterProjectParts(rawParts, wiringSteps, firmwareSpec, plan.summary || "");
+
   return {
     projectTitle: plan.projectTitle || "CircuitCodex Build",
     summary: plan.summary || "",
-    parts: Array.isArray(plan.parts) ? plan.parts : [],
+    parts: projectParts.length ? projectParts : rawParts,
     warnings: Array.isArray(plan.warnings) ? plan.warnings : [],
-    wiringSteps: Array.isArray(plan.wiringSteps) ? plan.wiringSteps.map(normalizeWiringStep) : [],
+    wiringSteps,
     diagnosticTests: Array.isArray(plan.diagnosticTests) ? plan.diagnosticTests : [],
-    firmwareSpec: plan.firmwareSpec || {
-      board: "ESP32",
-      behavior: plan.summary || "",
-      libraries: [],
-      pinAssignments: [],
-      serialProtocol: [],
-    },
+    firmwareSpec,
     firmware: plan.firmware ? normalizeFirmware(plan.firmware) : null,
     readmeMarkdown: plan.readmeMarkdown || "",
   };
+}
+
+function filterProjectParts(parts, wiringSteps, firmwareSpec, summary) {
+  if (!parts.length || !wiringSteps.length) return parts;
+
+  const explicitRefs = new Set();
+  const projectText = normalizeText(
+    [
+      summary,
+      firmwareSpec?.behavior,
+      ...(firmwareSpec?.pinAssignments || []).map((pin) => `${pin.label} ${pin.purpose}`),
+      ...wiringSteps.map((step) => `${step.title} ${step.instruction} ${step.from} ${step.to} ${step.fromPartId} ${step.toPartId} ${step.pin}`),
+    ].join(" "),
+  );
+
+  wiringSteps.forEach((step) => {
+    [step.fromPartId, step.toPartId, step.from, step.to].forEach((value) => {
+      const normalized = normalizeText(value);
+      if (normalized) explicitRefs.add(normalized);
+    });
+  });
+
+  return parts.filter((part) => {
+    const id = normalizeText(part.id);
+    const name = normalizeText(part.name);
+    const type = normalizeText(part.type);
+    const role = normalizeText(part.role);
+    const partText = `${id} ${name} ${type} ${role}`.trim();
+
+    if (/\b(unused|not used|not needed|unrelated|spare|ignore|optional)\b/.test(role)) return false;
+    if (id && explicitRefs.has(id)) return true;
+    if (name && explicitRefs.has(name)) return true;
+    if (id && projectText.includes(id)) return true;
+    if (name && projectText.includes(name)) return true;
+    if (type && projectText.includes(type)) return true;
+    if (/esp32|devkit|microcontroller|controller/.test(partText)) return true;
+    if (/jumper|wire|dupont/.test(partText)) return true;
+    if (/resistor|current limit/.test(partText) && /leds?|resistor|current limit/.test(projectText)) return true;
+    if (/\bleds?\b|light/.test(partText) && /\bleds?\b|light|lamp|output/.test(projectText)) return true;
+    if (/\bpir\b|motion/.test(partText) && /\bpir\b|motion|movement|nearby|presence/.test(projectText)) return true;
+    if (/sensor/.test(partText) && /sensor|detect|nearby|motion|measure|input/.test(projectText)) return true;
+    return false;
+  });
 }
 
 function normalizeWiringStep(step, index) {
@@ -894,10 +1062,12 @@ function validatePlan(plan) {
 }
 
 function renderEmptyPlan() {
+  const controls = getBuildStepControls();
   els.partsList.innerHTML = "";
   els.wiringList.innerHTML = "";
   els.diagnosticsList.innerHTML = "";
   els.visualStepList.innerHTML = `<div class="visual-step-empty"><strong>Your guide will appear here</strong><span>Once I read the photo, I’ll show one clear move at a time.</span></div>`;
+  restoreBuildStepControls(controls);
   if (els.buildStepCounter) els.buildStepCounter.textContent = "Move 0 of 0";
   if (els.buildStepDots) els.buildStepDots.innerHTML = "";
   if (els.prevBuildStepButton) els.prevBuildStepButton.disabled = true;
@@ -969,18 +1139,26 @@ function renderVisualSteps() {
   state.activeBuildStepIndex = activeIndex;
   const step = steps[activeIndex];
 
+  const controls = getBuildStepControls();
   els.visualStepList.innerHTML = "";
   const card = document.createElement("div");
   card.className = "visual-step-card is-active";
   const canvas = document.createElement("canvas");
+  const copy = document.createElement("div");
+  copy.className = "visual-step-copy";
   const title = document.createElement("strong");
   const body = document.createElement("span");
   const check = document.createElement("em");
   title.textContent = `Move ${step.order || activeIndex + 1}: ${step.title}`;
   body.textContent = step.instruction;
   check.textContent = step.check ? `Before you continue: ${step.check}` : "";
-  card.append(canvas, title, body);
-  if (check.textContent) card.append(check);
+  copy.append(title, body);
+  if (check.textContent) copy.append(check);
+  if (controls) {
+    controls.classList.add("is-inline");
+    copy.append(controls);
+  }
+  card.append(canvas, copy);
   els.visualStepList.append(card);
 
   if (els.buildStepCounter) els.buildStepCounter.textContent = `Move ${activeIndex + 1} of ${steps.length}`;
@@ -989,6 +1167,17 @@ function renderVisualSteps() {
   if (els.nextBuildStepButton) els.nextBuildStepButton.disabled = activeIndex === steps.length - 1;
 
   requestAnimationFrame(() => drawVisualStep(canvas, step, activeIndex));
+}
+
+function getBuildStepControls() {
+  return document.querySelector("#plan .carousel-controls");
+}
+
+function restoreBuildStepControls(controls = getBuildStepControls()) {
+  const panel = document.querySelector("#plan .visual-guide-panel");
+  if (!controls || !panel) return;
+  controls.classList.remove("is-inline");
+  panel.append(controls);
 }
 
 function renderBuildStepDots(count, activeIndex) {
@@ -1021,22 +1210,37 @@ function drawVisualStep(canvas, step, index) {
   const fromPart = findStepPart(step.fromPartId || step.from, step, parts, "from");
   const toPart = findStepPart(step.toPartId || step.to, step, parts, "to");
   const color = stepColor(step.wireColor, index);
+  const placedBadges = [];
 
   ctx.save();
   ctx.fillStyle = "rgba(0, 0, 0, 0.26)";
   ctx.fillRect(fit.x, fit.y, fit.width, fit.height);
   ctx.restore();
 
-  if (fromPart) drawStepPart(ctx, fit, fromPart, "#ffffff", "Start");
-  if (toPart && toPart !== fromPart) drawStepPart(ctx, fit, toPart, color, "Connect");
+  if (fromPart) drawStepPart(ctx, fit, fromPart, "#ffffff", "Start", placedBadges);
+  if (toPart && toPart !== fromPart) drawStepPart(ctx, fit, toPart, color, "Connect", placedBadges);
 
   if (fromPart && toPart && fromPart !== toPart) {
     const fromCenter = partCenter(fromPart, fit);
     const toCenter = partCenter(toPart, fit);
     drawArrow(ctx, fromCenter.x, fromCenter.y, toCenter.x, toCenter.y, color);
-    drawStepBadge(ctx, `${step.pin || "wire"}`, (fromCenter.x + toCenter.x) / 2, (fromCenter.y + toCenter.y) / 2, color);
+    drawPlacedStepBadge(
+      ctx,
+      `${step.pin || "wire"}`,
+      anchorBox((fromCenter.x + toCenter.x) / 2, (fromCenter.y + toCenter.y) / 2),
+      fit,
+      color,
+      placedBadges,
+    );
   } else {
-    drawStepBadge(ctx, step.pin || step.from || "wire", fit.x + fit.width / 2, fit.y + 28, color);
+    drawPlacedStepBadge(
+      ctx,
+      step.pin || step.from || "wire",
+      anchorBox(fit.x + fit.width / 2, fit.y + 28),
+      fit,
+      color,
+      placedBadges,
+    );
   }
 }
 
@@ -1065,6 +1269,8 @@ function drawImageCanvasBase(ctx, width, height) {
   const drawHeight = img.naturalHeight * scale;
   const x = (width - drawWidth) / 2;
   const y = (height - drawHeight) / 2;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(img, x, y, drawWidth, drawHeight);
   return { x, y, width: drawWidth, height: drawHeight };
 }
@@ -1120,7 +1326,7 @@ function partCenter(part, fit) {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-function drawStepPart(ctx, fit, part, color, prefix) {
+function drawStepPart(ctx, fit, part, color, prefix, placedBadges) {
   const box = partBox(part, fit);
   ctx.save();
   ctx.strokeStyle = color;
@@ -1128,7 +1334,7 @@ function drawStepPart(ctx, fit, part, color, prefix) {
   ctx.strokeRect(box.x, box.y, box.width, box.height);
   ctx.fillStyle = "rgba(255,255,255,0.18)";
   ctx.fillRect(box.x, box.y, box.width, box.height);
-  drawStepBadge(ctx, `${prefix}: ${part.name}`, box.x + box.width / 2, Math.max(fit.y + 24, box.y - 14), color);
+  drawPlacedStepBadge(ctx, `${prefix}: ${compactPartName(part.name)}`, box, fit, color, placedBadges);
   ctx.restore();
 }
 
@@ -1153,20 +1359,31 @@ function drawArrow(ctx, fromX, fromY, toX, toY, color) {
   ctx.restore();
 }
 
-function drawStepBadge(ctx, text, centerX, centerY, color) {
-  const safeText = String(text || "").slice(0, 42);
+function anchorBox(centerX, centerY) {
+  return {
+    x: centerX - 3,
+    y: centerY - 3,
+    width: 6,
+    height: 6,
+  };
+}
+
+function drawPlacedStepBadge(ctx, text, anchor, fit, color, placedBadges = []) {
+  const safeText = String(text || "").slice(0, 34);
   ctx.save();
   ctx.font = "800 13px Inter, system-ui, sans-serif";
-  const width = Math.min(ctx.measureText(safeText).width + 18, 260);
+  const width = Math.min(ctx.measureText(safeText).width + 18, 220);
   const height = 28;
-  const x = clamp(centerX - width / 2, 8, ctx.canvas.width / (window.devicePixelRatio || 1) - width - 8);
-  const y = clamp(centerY - height / 2, 8, ctx.canvas.height / (window.devicePixelRatio || 1) - height - 8);
+  const rect = placeAnnotationLabel(anchor, width, height, fit, placedBadges);
+  placedBadges.push(rect);
+  drawLabelLeader(ctx, rect, anchor, color);
   const paleBadge = color === "#ffffff" || color === "#e5e7eb" || color === "#f5f5f5";
   ctx.fillStyle = paleBadge ? "rgba(255,255,255,0.92)" : color;
-  ctx.fillRect(x, y, width, height);
+  ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
   ctx.fillStyle = paleBadge ? "#050507" : "#fff";
-  ctx.fillText(safeText, x + 9, y + 18, width - 18);
+  ctx.fillText(safeText, rect.x + 9, rect.y + 18, rect.width - 18);
   ctx.restore();
+  return rect;
 }
 
 function stepColor(value, index) {
