@@ -4,6 +4,8 @@ let serverConfig = window.CIRCUIT_CODEX_CONFIG || {};
 let localOverrides = readLocalOverrides();
 const FRONTIER_MODEL = "gpt-5.5";
 const LEGACY_MODEL_DEFAULTS = new Set(["gpt-5.4-mini"]);
+const AI_BACKGROUND_TIMEOUT_MS = 8 * 60 * 1000;
+const AI_POLL_BASE_INTERVAL_MS = 2200;
 const WORKFLOW_STAGES = [
   {
     hash: "#capture",
@@ -688,9 +690,15 @@ async function analyzeHardware() {
       },
     };
 
-    const data = await apiJson("/api/openai/responses", {
-      method: "POST",
-      body: JSON.stringify(payload),
+    const data = await openAiResponse(payload, {
+      label: "hardware plan",
+      onProgress: ({ elapsedLabel }) => {
+        setStatus(
+          els.transcriptBox,
+          `I’m still studying the photo (${elapsedLabel}). Keep this tab open; I’ll bring the guide back here.`,
+          "warn",
+        );
+      },
     });
     state.plan = normalizePlan(parseStructuredJson(data, "hardware plan"));
     state.plan.warnings = [...validatePlan(state.plan), ...state.plan.warnings];
@@ -764,9 +772,15 @@ function extractOutputText(data) {
 }
 
 function parseStructuredJson(data, label) {
+  if (data.status === "failed") {
+    throw new Error(`${label} failed: ${openAiErrorMessage(data)}`);
+  }
+  if (data.status === "cancelled") {
+    throw new Error(`${label} was cancelled before it finished.`);
+  }
   if (data.status === "incomplete") {
     const reason = data.incomplete_details?.reason || "unknown reason";
-    throw new Error(`${label} response was incomplete (${reason}). Try again with a smaller photo or lower detail.`);
+    throw new Error(`${label} response was incomplete (${reason}). Try again with the same photo; I’ll keep the long request in the background now.`);
   }
   const text = extractOutputText(data);
   try {
@@ -777,6 +791,110 @@ function parseStructuredJson(data, label) {
       `${label} JSON was invalid, likely because the model response was truncated. ${error.message}. Tail: ${preview}`,
     );
   }
+}
+
+async function openAiResponse(payload, options = {}) {
+  const label = options.label || "AI response";
+  const progress = typeof options.onProgress === "function" ? options.onProgress : () => {};
+  const backgroundPayload = {
+    ...payload,
+    background: true,
+    store: payload.store ?? true,
+  };
+  delete backgroundPayload.stream;
+
+  try {
+    const started = await apiJson("/api/openai/background", {
+      method: "POST",
+      body: JSON.stringify(backgroundPayload),
+    });
+    return waitForOpenAiResponse(started, label, progress);
+  } catch (error) {
+    if (!shouldFallbackToDirectOpenAi(error)) throw error;
+    progress({
+      status: "direct",
+      elapsedMs: 0,
+      elapsedLabel: "0s",
+      message: "Switching to direct AI mode.",
+    });
+    return apiJson("/api/openai/responses", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+}
+
+async function waitForOpenAiResponse(started, label, progress) {
+  const firstStatus = normalizeOpenAiStatus(started.status);
+  if (!started.id || isOpenAiTerminalStatus(firstStatus)) return assertOpenAiResponseUsable(started, label);
+
+  const startedAt = Date.now();
+  let pollCount = 0;
+  let latest = started;
+  while (true) {
+    const elapsedMs = Date.now() - startedAt;
+    progress({
+      status: normalizeOpenAiStatus(latest.status),
+      elapsedMs,
+      elapsedLabel: formatElapsed(elapsedMs),
+      id: started.id,
+    });
+
+    if (elapsedMs > AI_BACKGROUND_TIMEOUT_MS) {
+      throw new Error(
+        `${label} is still running after ${formatElapsed(elapsedMs)}. Please try again in a moment; the hosted app is keeping long AI work in the background now.`,
+      );
+    }
+
+    await sleep(Math.min(6500, AI_POLL_BASE_INTERVAL_MS + pollCount * 450));
+    latest = await apiJson(`/api/openai/responses/${encodeURIComponent(started.id)}`);
+    const status = normalizeOpenAiStatus(latest.status);
+    if (isOpenAiTerminalStatus(status)) return assertOpenAiResponseUsable(latest, label);
+    pollCount += 1;
+  }
+}
+
+function assertOpenAiResponseUsable(data, label) {
+  if (data.status === "failed") {
+    throw new Error(`${label} failed: ${openAiErrorMessage(data)}`);
+  }
+  if (data.status === "cancelled") {
+    throw new Error(`${label} was cancelled before it finished.`);
+  }
+  return data;
+}
+
+function isOpenAiTerminalStatus(status) {
+  return !status || ["completed", "failed", "cancelled", "incomplete"].includes(status);
+}
+
+function normalizeOpenAiStatus(status) {
+  return String(status || "completed").toLowerCase();
+}
+
+function shouldFallbackToDirectOpenAi(error) {
+  return /\b(404|405)\b|not found|unknown parameter.*background|unsupported.*background/i.test(
+    String(error?.message || error),
+  );
+}
+
+function openAiErrorMessage(data) {
+  if (typeof data.error === "string") return data.error;
+  if (data.error?.message) return data.error.message;
+  if (data.incomplete_details?.reason) return data.incomplete_details.reason;
+  return "OpenAI could not finish the request.";
+}
+
+function formatElapsed(ms) {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (!minutes) return `${seconds}s`;
+  return `${minutes}m ${seconds}s`;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function generateFirmwareForPlan(idea) {
@@ -812,9 +930,11 @@ async function generateFirmwareForPlan(idea) {
     },
   };
 
-  const data = await apiJson("/api/openai/responses", {
-    method: "POST",
-    body: JSON.stringify(payload),
+  const data = await openAiResponse(payload, {
+    label: "firmware",
+    onProgress: ({ elapsedLabel }) => {
+      els.firmwareOutput.textContent = `Still writing the board code (${elapsedLabel}). This is normal for a careful build.`;
+    },
   });
   state.plan.firmware = normalizeFirmware(parseStructuredJson(data, "firmware"));
 }
@@ -1505,9 +1625,15 @@ async function verifyBehavior() {
         },
       },
     };
-    const data = await apiJson("/api/openai/responses", {
-      method: "POST",
-      body: JSON.stringify(payload),
+    const data = await openAiResponse(payload, {
+      label: "visual check",
+      onProgress: ({ elapsedLabel }) => {
+        setStatus(
+          els.behaviorEvaluation,
+          `I’m comparing the photo and board messages (${elapsedLabel}). Keep the project in view.`,
+          "warn",
+        );
+      },
     });
     const result = JSON.parse(extractOutputText(data));
     const tone = result.status === "pass" ? "ok" : result.status === "fail" ? "danger" : "warn";
@@ -1871,10 +1997,31 @@ async function apiJson(path, options = {}) {
     data = { message: text };
   }
   if (!response.ok) {
-    const message = data.error?.message || data.message || data.error || `HTTP ${response.status}`;
+    const message = formatApiError(response.status, data, text);
     throw new Error(`${response.status} ${message}`);
   }
   return data;
+}
+
+function formatApiError(status, data, rawText) {
+  const rawMessage = data.error?.message || data.message || data.error || `HTTP ${status}`;
+  const text = String(rawMessage || rawText || "").trim();
+  if (status === 504 && /inactivity timeout/i.test(`${rawText} ${text}`)) {
+    return "The hosted AI request went quiet for too long. I’ve moved long guide work into the background; refresh and try again.";
+  }
+  if (/^\s*</.test(text) || /<html/i.test(text)) {
+    return stripHtml(text).slice(0, 260) || `HTTP ${status}`;
+  }
+  return text;
+}
+
+function stripHtml(value) {
+  return String(value || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function setStatus(element, text, tone) {

@@ -15,6 +15,15 @@ export default async function handler(req) {
       return proxyOpenAI(req, env);
     }
 
+    if (url.pathname === "/api/openai/background" && req.method === "POST") {
+      return createOpenAIBackgroundResponse(req, env);
+    }
+
+    const responseMatch = url.pathname.match(/^\/api\/openai\/responses\/([^/]+)$/);
+    if (responseMatch && req.method === "GET") {
+      return retrieveOpenAIResponse(responseMatch[1], env);
+    }
+
     if (url.pathname === "/api/arduino/status") {
       return jsonResponse({
         hasArduinoCli: false,
@@ -108,19 +117,15 @@ function publicConfigScript(env) {
 }
 
 async function proxyOpenAI(req, env) {
-  if (!env.OPENAI_API_KEY) {
-    return jsonResponse({ error: "OPENAI_API_KEY is missing in Netlify environment variables" }, 401);
-  }
+  const missing = missingOpenAIKey(env);
+  if (missing) return missing;
 
   const body = await req.json();
   if (!body.model) body.model = env.OPENAI_MODEL || "gpt-5.5";
 
   const upstream = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
+    headers: openAIHeaders(env),
     body: JSON.stringify(body),
   });
 
@@ -130,6 +135,50 @@ async function proxyOpenAI(req, env) {
       "Content-Type": upstream.headers.get("content-type") || "application/json; charset=utf-8",
     },
   });
+}
+
+async function createOpenAIBackgroundResponse(req, env) {
+  const missing = missingOpenAIKey(env);
+  if (missing) return missing;
+
+  const body = await req.json();
+  const payload = {
+    ...body,
+    model: body.model || env.OPENAI_MODEL || "gpt-5.5",
+    background: true,
+    store: body.store ?? true,
+  };
+  delete payload.stream;
+
+  const upstream = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: openAIHeaders(env),
+    body: JSON.stringify(payload),
+  });
+  return pipeJson(upstream);
+}
+
+async function retrieveOpenAIResponse(responseId, env) {
+  const missing = missingOpenAIKey(env);
+  if (missing) return missing;
+
+  const id = encodeURIComponent(decodeURIComponent(responseId));
+  const upstream = await fetch(`https://api.openai.com/v1/responses/${id}`, {
+    headers: openAIHeaders(env),
+  });
+  return pipeJson(upstream);
+}
+
+function missingOpenAIKey(env) {
+  if (env.OPENAI_API_KEY) return null;
+  return jsonResponse({ error: "OPENAI_API_KEY is missing in Netlify environment variables" }, 401);
+}
+
+function openAIHeaders(env) {
+  return {
+    Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+    "Content-Type": "application/json",
+  };
 }
 
 async function createGitHubRepo(req, env) {
@@ -224,4 +273,3 @@ function textResponse(text, contentType, status = 200) {
     },
   });
 }
-

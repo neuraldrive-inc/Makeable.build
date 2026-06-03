@@ -1187,6 +1187,10 @@ textarea {
   white-space: nowrap;
 }
 
+.orientation-card {
+  display: none;
+}
+
 @media (max-width: 1240px) {
   body {
     min-width: 1024px;
@@ -1249,5 +1253,52 @@ textarea {
 
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) and (orientation: portrait) {
+  body {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .topbar,
+  .shell,
+  .stage-controls {
+    display: none;
+  }
+
+  .orientation-card {
+    position: fixed;
+    inset: 14px;
+    display: grid;
+    align-content: center;
+    justify-items: center;
+    gap: 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.09), transparent 36%),
+      rgba(8, 8, 10, 0.9);
+    box-shadow: var(--shadow);
+    padding: 28px;
+    text-align: center;
+  }
+
+  .orientation-card .brand-mark {
+    margin-bottom: 8px;
+  }
+
+  .orientation-card h2 {
+    max-width: 12ch;
+    font-size: 2.15rem;
+  }
+
+  .orientation-card p {
+    max-width: 28ch;
+    color: var(--muted);
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.5;
   }
 }

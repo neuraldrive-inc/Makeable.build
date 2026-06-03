@@ -54,6 +54,7 @@ This repo includes a Netlify configuration for the online app:
 
 - `netlify.toml` publishes the static app and bundles `netlify/functions/api.mjs`.
 - The hosted API proxies OpenAI and GitHub requests so secrets stay server-side.
+- Long OpenAI guide, firmware, and visual-check jobs run through background Responses API polling so Netlify does not have to hold one silent request open.
 - The browser compresses uploaded photos before sending them to the hosted AI endpoint.
 - Firmware compilation and direct ESP32 loading still require the local desktop server, because Netlify Functions are serverless and do not include Arduino CLI plus the ESP32 toolchain.
 

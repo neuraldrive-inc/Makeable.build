@@ -43,6 +43,15 @@ const server = createServer(async (req, res) => {
       return proxyOpenAI(req, res, env);
     }
 
+    if (url.pathname === "/api/openai/background" && req.method === "POST") {
+      return createOpenAIBackgroundResponse(req, res, env);
+    }
+
+    const responseMatch = url.pathname.match(/^\/api\/openai\/responses\/([^/]+)$/);
+    if (responseMatch && req.method === "GET") {
+      return retrieveOpenAIResponse(responseMatch[1], res, env);
+    }
+
     if (url.pathname === "/api/arduino/status") {
       return arduinoStatus(req, res, env);
     }
@@ -149,19 +158,14 @@ async function serveStatic(pathname, res) {
 }
 
 async function proxyOpenAI(req, res, env) {
-  if (!env.OPENAI_API_KEY) {
-    return sendJson(res, { error: "OPENAI_API_KEY is missing in .env" }, 401);
-  }
+  if (!env.OPENAI_API_KEY) return sendJson(res, { error: "OPENAI_API_KEY is missing in .env" }, 401);
 
   const body = await readJsonBody(req);
   if (!body.model) body.model = env.OPENAI_MODEL || "gpt-5.5";
 
   const upstream = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-      "Content-Type": "application/json",
-    },
+    headers: openAIHeaders(env),
     body: JSON.stringify(body),
   });
 
@@ -170,6 +174,43 @@ async function proxyOpenAI(req, res, env) {
     "Content-Type": upstream.headers.get("content-type") || "application/json; charset=utf-8",
   });
   res.end(text);
+}
+
+async function createOpenAIBackgroundResponse(req, res, env) {
+  if (!env.OPENAI_API_KEY) return sendJson(res, { error: "OPENAI_API_KEY is missing in .env" }, 401);
+
+  const body = await readJsonBody(req);
+  const payload = {
+    ...body,
+    model: body.model || env.OPENAI_MODEL || "gpt-5.5",
+    background: true,
+    store: body.store ?? true,
+  };
+  delete payload.stream;
+
+  const upstream = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: openAIHeaders(env),
+    body: JSON.stringify(payload),
+  });
+  return pipeJson(upstream, res);
+}
+
+async function retrieveOpenAIResponse(responseId, res, env) {
+  if (!env.OPENAI_API_KEY) return sendJson(res, { error: "OPENAI_API_KEY is missing in .env" }, 401);
+
+  const id = encodeURIComponent(decodeURIComponent(responseId));
+  const upstream = await fetch(`https://api.openai.com/v1/responses/${id}`, {
+    headers: openAIHeaders(env),
+  });
+  return pipeJson(upstream, res);
+}
+
+function openAIHeaders(env) {
+  return {
+    Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+    "Content-Type": "application/json",
+  };
 }
 
 async function arduinoStatus(req, res, env) {
