@@ -123,18 +123,13 @@ async function proxyOpenAI(req, env) {
   const body = await req.json();
   if (!body.model) body.model = env.OPENAI_MODEL || "gpt-5.5";
 
-  const upstream = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: openAIHeaders(env),
-    body: JSON.stringify(body),
-  });
-
-  return new Response(await upstream.text(), {
-    status: upstream.status,
-    headers: {
-      "Content-Type": upstream.headers.get("content-type") || "application/json; charset=utf-8",
-    },
-  });
+  return streamJsonUpstream(
+    fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: openAIHeaders(env),
+      body: JSON.stringify(body),
+    }),
+  );
 }
 
 async function createOpenAIBackgroundResponse(req, env) {
@@ -150,12 +145,13 @@ async function createOpenAIBackgroundResponse(req, env) {
   };
   delete payload.stream;
 
-  const upstream = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: openAIHeaders(env),
-    body: JSON.stringify(payload),
-  });
-  return pipeJson(upstream);
+  return streamJsonUpstream(
+    fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: openAIHeaders(env),
+      body: JSON.stringify(payload),
+    }),
+  );
 }
 
 async function retrieveOpenAIResponse(responseId, env) {
@@ -179,6 +175,54 @@ function openAIHeaders(env) {
     Authorization: `Bearer ${env.OPENAI_API_KEY}`,
     "Content-Type": "application/json",
   };
+}
+
+function streamJsonUpstream(upstreamPromise) {
+  const encoder = new TextEncoder();
+  let keepAlive;
+
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        const send = (text) => controller.enqueue(encoder.encode(text));
+        send(" \n");
+        keepAlive = setInterval(() => send(" \n"), 8000);
+
+        upstreamPromise
+          .then(async (upstream) => {
+            const text = await upstream.text();
+            clearInterval(keepAlive);
+            send(upstream.ok ? text || "{}" : upstreamErrorJson(upstream.status, text));
+          })
+          .catch((error) => {
+            clearInterval(keepAlive);
+            send(JSON.stringify({ error: String(error.message || error), upstreamStatus: 502 }));
+          })
+          .finally(() => controller.close());
+      },
+      cancel() {
+        clearInterval(keepAlive);
+      },
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+      },
+    },
+  );
+}
+
+function upstreamErrorJson(status, text) {
+  let parsed;
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch {
+    parsed = { message: text };
+  }
+  const message = parsed.error?.message || parsed.message || parsed.error || `OpenAI returned HTTP ${status}`;
+  return JSON.stringify({ error: message, upstreamStatus: status });
 }
 
 async function createGitHubRepo(req, env) {

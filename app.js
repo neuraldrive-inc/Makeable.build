@@ -465,7 +465,9 @@ function handlePhotoUpload(event) {
 }
 
 function resizePhotoForAi(img) {
-  const maxSide = 1800;
+  const hostedMode = Boolean(serverConfig.hostedMode);
+  const maxSide = hostedMode ? 1400 : 1800;
+  const quality = hostedMode ? 0.78 : 0.86;
   const scale = Math.min(1, maxSide / img.naturalWidth, maxSide / img.naturalHeight);
   const width = Math.max(1, Math.round(img.naturalWidth * scale));
   const height = Math.max(1, Math.round(img.naturalHeight * scale));
@@ -476,7 +478,7 @@ function resizePhotoForAi(img) {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
   ctx.drawImage(img, 0, 0, width, height);
-  return canvas.toDataURL("image/jpeg", 0.86);
+  return canvas.toDataURL("image/jpeg", quality);
 }
 
 function clearPhoto() {
@@ -1999,6 +2001,9 @@ async function apiJson(path, options = {}) {
   if (!response.ok) {
     const message = formatApiError(response.status, data, text);
     throw new Error(`${response.status} ${message}`);
+  }
+  if (data?.upstreamStatus && data?.error) {
+    throw new Error(`${data.upstreamStatus} ${formatApiError(data.upstreamStatus, data, text)}`);
   }
   return data;
 }
