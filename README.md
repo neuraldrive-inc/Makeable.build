@@ -1,80 +1,236 @@
-# CircuitCodex
+# GeckCo AI 🦎✨
 
-CircuitCodex is a lightweight browser prototype for an AI-guided hardware and IoT workflow. It accepts a parts photo, transcribes a spoken project idea with Deepgram, asks OpenAI to produce a structured wiring and firmware plan, compiles/flashes ESP32 firmware through the browser, monitors serial logs through Web Serial, captures webcam evidence, and prepares README/GitHub output.
+## Codex for Hardware
 
-## Run locally
+**GeckCo AI** is an AI hardware-building buddy that turns messy IoT prototyping into a fun, LEGO-like experience.
+
+Building with ESP32s can feel scary when you are new: sensors, wires, pin diagrams, Arduino setup, firmware, flashing, terminal logs, and debugging all show up at once. GeckCo AI turns that chaos into a friendly step-by-step build guide using your own parts photo.
+
+Upload a photo. Say what you want to build. Let GeckCo guide the rest. 🧩⚡
+
+![GeckCo AI upload photo and describe project idea](images/step%201%20-%20upload%20pic%20and%20speak%20your%20idea.jpg)
+
+---
+
+## The Big Idea 💡
+
+Instead of making beginners jump between wiring diagrams, Arduino IDE, random tutorials, and serial monitors, GeckCo AI keeps the whole hardware journey in one place.
+
+It can:
+
+- 📸 Look at your real parts photo
+- 🧠 Identify only the components your project needs
+- 🏷️ Label the useful parts directly on the image
+- 🔌 Walk you through the wiring one move at a time
+- 💻 Generate ESP32 firmware for your idea
+- 🚀 Flash the code into the board without touching Arduino IDE
+- 👀 Debug the real build using terminal logs and webcam evidence
+- 📚 Package the final project into GitHub documentation
+
+---
+
+## Why We Built It 🛠️
+
+Tiny hardware mistakes can break the whole project.
+
+Wrong pin? Nothing works.
+
+Missing ground? Mystery bug.
+
+Bad code upload? More confusion.
+
+Serial log error? Time to panic-scroll forums.
+
+GeckCo AI is designed to feel like a calm friend beside you saying:
+
+> “No worries. Pick up this wire. Put it here. I’ll check the next part with you.”
+
+That is the heart of **Codex for Hardware**.
+
+---
+
+## Visual Proof: The Build Journey 🧪
+
+### 1. Start With What You Have 📸
+
+Lay out your parts, upload one clear photo, then type or speak the thing you want to make.
+
+In this demo, the user wants a motion-triggered light build.
+
+![Step 1 upload photo and speak your idea](images/step%201%20-%20upload%20pic%20and%20speak%20your%20idea.jpg)
+
+### 2. AI Finds the Useful Parts 🧠
+
+GeckCo AI reads the photo and focuses on the parts needed for the project. Extra parts are ignored so the screen does not become label soup.
+
+![AI labels the needed hardware parts](images/step%202%20-%20image%201.jpg)
+
+### 3. One Connection at a Time 🔌
+
+The guide does not dump every wire on you at once. It highlights the current move, shows the exact parts on your own photo, and keeps the instruction simple.
+
+![GeckCo AI shows one wiring move at a time](images/step%202%20-%20image%202.jpg)
+
+### 4. A Clean Final Guide ✅
+
+Each step is built around the photo, the selected parts, and a clear action. It feels closer to LEGO instructions than a scary circuit diagram.
+
+![Final guided wiring image](images/step%202%20-%20final%20image.jpg)
+
+### 5. Pick the Board Settings ⚙️
+
+GeckCo AI keeps the board setup visible so users can confirm the ESP32 target before flashing.
+
+![Selected ESP32 board settings](images/flashing%20selected%20board.jpg)
+
+### 6. Flash the Code Into the Board 🚀
+
+The app generates firmware and loads it directly into the ESP32. No Arduino IDE adventure required.
+
+![Flashing code into the ESP32 board](images/flashing%20loading%20code%20into%20board.jpg)
+
+### 7. Closed-Loop Debugging 👀⚡
+
+After flashing, GeckCo AI can check terminal logs and webcam footage to confirm the physical project is actually doing what it should.
+
+![Closed loop debugging with terminal logs and webcam](images/closed%20loop%20debugging%20system%20with%20terminal%20logs%20and%20webcam.jpg)
+
+### 8. One-Click GitHub Documentation 📚
+
+When the build works, GeckCo AI packages the project into GitHub-friendly documentation so it is easy to save, share, and show off.
+
+![One button upload project to GitHub](images/one%20button%20click%20upload%20project%20to%20github.jpg)
+
+---
+
+## What Makes It Different 🦎
+
+| Old Hardware Workflow 😵 | GeckCo AI Workflow ✨ |
+| --- | --- |
+| Search for wiring diagrams | Upload your own parts photo |
+| Guess which parts matter | AI marks only the needed parts |
+| Read a giant pinout chart | Follow one small move at a time |
+| Copy random Arduino code | Generate firmware for your exact idea |
+| Manually compile and flash | Load code directly into the ESP32 |
+| Debug alone with serial logs | AI checks logs + webcam evidence |
+| Write docs after everything | One-click GitHub documentation |
+
+---
+
+## Core Features 🌟
+
+### 📷 Photo-Based Part Detection
+
+GeckCo AI uses the user’s real photo as the source of truth. The guide is not generic. It points to the actual objects on the table.
+
+### 🪜 Step-by-Step Wiring
+
+The guide shows one connection at a time so beginners can move slowly and confidently.
+
+### 💻 Firmware Generation
+
+The app generates ESP32-ready code based on the project goal and detected components.
+
+### 🔌 Direct Flashing
+
+With Arduino CLI and Web Serial support, GeckCo AI can compile and flash firmware without forcing the user into Arduino IDE.
+
+### 👀 Closed-Loop Debugging
+
+The app can inspect serial logs and webcam evidence, then explain whether the physical build is behaving correctly.
+
+### 📚 GitHub Export
+
+The final project can be packaged into a shareable README and uploaded to GitHub.
+
+---
+
+## Tech Stack 🧰
+
+- **Frontend:** HTML, CSS, JavaScript
+- **AI planning:** OpenAI Responses API
+- **Voice input:** Deepgram browser transcription
+- **Firmware compile:** Arduino CLI
+- **Board flashing:** Web Serial + ESP flashing flow
+- **Debugging:** Serial logs + webcam evidence
+- **Publishing:** GitHub API
+- **Hosting-ready flow:** Netlify Functions for server-side API proxying
+
+---
+
+## Run Locally 🏃
 
 ```bash
+npm install
 node server.mjs
 ```
 
-Open `http://localhost:8787`.
+Then open:
 
-The app is plain HTML, CSS, and JavaScript. The tiny local server only serves static files, reads `.env`, and proxies OpenAI/GitHub requests so those keys do not need to sit in browser code.
+```text
+http://127.0.0.1:8787
+```
 
-## Keys
+Chrome or Edge is recommended because Web Serial support is needed for board flashing.
 
-Add keys to `.env`:
+---
+
+## Environment Setup 🔐
+
+Create a `.env` file:
 
 ```bash
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-5.5
 OPENAI_REASONING_MODEL=gpt-5.5
 OPENAI_REASONING_EFFORT=high
+
 DEEPGRAM_API_KEY=
+
 GITHUB_TOKEN=
 GITHUB_OWNER=
-ARDUINO_CLI_PATH=/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli
+
+ARDUINO_CLI_PATH=C:\Program Files\Arduino CLI\arduino-cli.exe
 ARDUINO_FQBN=esp32:esp32:esp32
+
 PORT=8787
 ```
 
-Deepgram is exposed to the browser in this local prototype because browser WebSockets cannot attach arbitrary `Authorization` headers. For a hosted version, replace that with a short-lived token endpoint.
+For ESP32 builds, make sure Arduino CLI is installed and the ESP32 board core is available.
 
-## Current Flow
+---
 
-1. Upload a photo of the laid-out components.
-2. Type or record the project idea.
-3. Run AI analysis to get part labels, wiring steps, picture-based build steps, diagnostics, firmware, and README text.
-4. Compile the generated ESP32 sketch with Arduino CLI.
-5. Flash the ESP32 directly from the app with esptool-js and Web Serial.
-6. Reconnect serial and monitor logs.
-7. Capture webcam evidence and ask AI to verify visible behavior.
-8. Publish README and firmware to GitHub.
+## Beginner Safety Notes 🧯
 
-## Hardware Notes
+- Power the board by USB first.
+- Always connect ground before trusting signal wires.
+- Double-check the board pin labels before flashing.
+- Disconnect power before changing messy wiring.
+- If something gets hot, stop immediately.
 
-Web Serial works best in Chrome or Edge on desktop. Localhost is treated as a secure context for development. For production hosting, serve over HTTPS.
+Hardware should feel fun, not frightening. 🦎
 
-The app uses Arduino IDE's bundled `arduino-cli` when present. It compiles generated sketches server-side, returns the flashable `.bin` images to the browser, and flashes them over Web Serial using esptool-js. It flashes the smaller bootloader, partition table, boot app, and application images instead of the padded merged binary so the image does not exceed detected flash size. ESP Web Tools is still included as an advanced fallback for hosted firmware manifests.
+---
 
-## Hosted mode
+## Project Vision 🌈
 
-This repo includes a Netlify configuration for the online app:
+GeckCo AI is not just a code generator.
 
-- `netlify.toml` publishes the static app and bundles `netlify/functions/api.mjs`.
-- The hosted API proxies OpenAI and GitHub requests so secrets stay server-side.
-- Long OpenAI guide, firmware, and visual-check jobs run through background Responses API polling so Netlify does not have to hold one silent request open.
-- The browser compresses uploaded photos before sending them to the hosted AI endpoint.
-- Firmware compilation and direct ESP32 loading still require the local desktop server, because Netlify Functions are serverless and do not include Arduino CLI plus the ESP32 toolchain.
+It is a hardware companion that watches the whole loop:
 
-Set these Netlify environment variables for the hosted AI/documentation flow:
-
-```bash
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-5.5
-OPENAI_REASONING_MODEL=gpt-5.5
-OPENAI_REASONING_EFFORT=high
-GITHUB_TOKEN=
-GITHUB_OWNER=
+```text
+parts photo → AI guide → wiring steps → firmware → flashing → real-world check → GitHub docs
 ```
 
-Voice input in the browser needs a browser-safe Deepgram token. Use `DEEPGRAM_BROWSER_KEY` for a public or short-lived key. Do not expose your main Deepgram secret unless you intentionally set `ALLOW_BROWSER_DEEPGRAM_KEY=true`.
+The dream is simple:
 
-## Files
+> Anyone should be able to build useful electronics without feeling lost in the wires.
 
-- `index.html` - static app shell
-- `styles.css` - product UI styling
-- `app.js` - browser workflow logic
-- `server.mjs` - no-dependency local static server and API proxy
-- `docs/API_NOTES.md` - documentation references and implementation notes
+---
+
+## Name
+
+**GeckCo AI**<br>
+**Tagline:** Codex for Hardware
+
+Small lizard. Big hardware energy. 🦎⚡

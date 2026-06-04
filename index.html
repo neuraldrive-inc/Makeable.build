@@ -15,9 +15,32 @@
       src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"
     ></script>
   </head>
-  <body>
+  <body class="intro-active">
+    <section class="intro-page" id="introPage" aria-label="CircuitCodex introduction">
+      <div class="intro-frame">
+        <div class="intro-nav">
+          <a class="intro-brand" href="#introPage" aria-label="CircuitCodex introduction">
+            <span>ELECTRONICS LAB</span>
+          </a>
+          <div class="intro-process" aria-label="Build flow">
+            <span>Photo</span>
+            <span>Wiring</span>
+            <span>Code</span>
+          </div>
+        </div>
+        <div class="intro-copy">
+          <h1>Codex for Hardware</h1>
+          <p class="intro-statement">Upload one clear photo. I will mark only the parts your idea needs, map each connection, and prepare the board code.</p>
+          <button class="intro-start" id="introStartButton" type="button">Enter the builder</button>
+        </div>
+        <div class="intro-visual" aria-hidden="true">
+          <canvas id="introCanvas"></canvas>
+        </div>
+      </div>
+    </section>
+
     <header class="topbar">
-      <a class="brand" href="#capture" aria-label="CircuitCodex home">
+      <a class="brand" id="homeBrandLink" href="#introPage" aria-label="CircuitCodex home">
         <span class="brand-mark">CC</span>
         <span>CircuitCodex</span>
       </a>
@@ -48,7 +71,10 @@
           <em>Save the project</em>
         </button>
       </nav>
-      <button class="ghost-button" id="settingsButton" type="button">Settings</button>
+      <div class="top-actions">
+        <button class="ghost-button" id="homeButton" type="button">Home</button>
+        <button class="ghost-button" id="settingsButton" type="button">Settings</button>
+      </div>
     </header>
 
     <main class="shell">
@@ -311,6 +337,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="./app.js?v=timeout-keepalive-20260603"></script>
+    <script type="module" src="./app.js?v=guide-hierarchy-20260605"></script>
   </body>
 </html>

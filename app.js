@@ -4,8 +4,13 @@ let serverConfig = window.CIRCUIT_CODEX_CONFIG || {};
 let localOverrides = readLocalOverrides();
 const FRONTIER_MODEL = "gpt-5.5";
 const LEGACY_MODEL_DEFAULTS = new Set(["gpt-5.4-mini"]);
+const DEFAULT_REASONING_EFFORT = "high";
+const LEGACY_REASONING_EFFORT_DEFAULTS = new Set(["low"]);
 const AI_BACKGROUND_TIMEOUT_MS = 8 * 60 * 1000;
 const AI_POLL_BASE_INTERVAL_MS = 2200;
+const AI_TRANSIENT_RETRY_ATTEMPTS = 2;
+const ANNOTATION_LABEL_PADDING = 12;
+const ANNOTATION_LABEL_GAP = 10;
 const WORKFLOW_STAGES = [
   {
     hash: "#capture",
@@ -40,8 +45,10 @@ const settings = {
   openaiModel: pickModel(localOverrides.openaiModel, serverConfig.openaiModel, FRONTIER_MODEL),
   openaiReasoningModel:
     pickModel(localOverrides.openaiReasoningModel, serverConfig.openaiReasoningModel, FRONTIER_MODEL),
-  openaiReasoningEffort:
-    localOverrides.openaiReasoningEffort || serverConfig.openaiReasoningEffort || "high",
+  openaiReasoningEffort: pickReasoningEffort(
+    localOverrides.openaiReasoningEffort,
+    serverConfig.openaiReasoningEffort,
+  ),
   arduinoFqbn: localOverrides.arduinoFqbn || serverConfig.arduinoFqbn || "esp32:esp32:esp32",
 };
 
@@ -68,6 +75,11 @@ const state = {
 };
 
 const els = {
+  introPage: $("#introPage"),
+  introStartButton: $("#introStartButton"),
+  introCanvas: $("#introCanvas"),
+  homeButton: $("#homeButton"),
+  homeBrandLink: $("#homeBrandLink"),
   canvas: $("#partsCanvas"),
   photoInput: $("#partsPhotoInput"),
   clearPhotoButton: $("#clearPhotoButton"),
@@ -262,18 +274,30 @@ const behaviorSchema = {
 };
 
 bindEvents();
+initIntro();
+const initialIntroActive = document.body.classList.contains("intro-active");
 renderSettings();
 renderEmptyPlan();
-setActiveWorkflowStage(0, { updateHash: true, replace: true });
+const initialStageIndex = WORKFLOW_STAGES.findIndex((stage) => stage.hash === window.location.hash);
+setActiveWorkflowStage(initialIntroActive ? 0 : Math.max(initialStageIndex, 0), {
+  updateHash: !initialIntroActive,
+  replace: true,
+});
 drawPartsCanvas();
+drawIntroCanvas();
 refreshServerConfig();
 refreshArduinoStatus();
 window.addEventListener("resize", () => {
+  drawIntroCanvas();
   drawPartsCanvas();
   renderVisualSteps();
 });
 
 function bindEvents() {
+  els.introPage?.addEventListener("click", enterBuilder);
+  els.introStartButton?.addEventListener("click", enterBuilder);
+  els.homeButton?.addEventListener("click", showIntro);
+  els.homeBrandLink?.addEventListener("click", showIntro);
   els.photoInput.addEventListener("change", handlePhotoUpload);
   els.clearPhotoButton.addEventListener("click", clearPhoto);
   els.startVoiceButton.addEventListener("click", startVoiceCapture);
@@ -307,6 +331,216 @@ function bindEvents() {
   els.settingsButton.addEventListener("click", () => els.settingsDialog.showModal());
   els.saveSettingsButton.addEventListener("click", saveSettings);
   els.clearSettingsButton.addEventListener("click", clearLocalOverrides);
+}
+
+function initIntro() {
+  const shouldShowIntro = !window.location.hash || window.location.hash === "#introPage";
+  document.body.classList.toggle("intro-active", shouldShowIntro);
+  if (!shouldShowIntro) return;
+  requestAnimationFrame(drawIntroCanvas);
+}
+
+function enterBuilder(event) {
+  event?.preventDefault();
+  document.body.classList.remove("intro-active");
+  setActiveWorkflowStage(0, { updateHash: true, replace: true });
+}
+
+function showIntro(event) {
+  event?.preventDefault();
+  document.body.classList.add("intro-active");
+  window.history.replaceState(null, "", `${window.location.pathname}#introPage`);
+  requestAnimationFrame(drawIntroCanvas);
+}
+
+function drawIntroCanvas() {
+  const canvas = els.introCanvas;
+  if (!canvas) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const width = Math.max(480, rect.width || 900);
+  const height = Math.max(480, rect.height || 900);
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  const cx = width * 0.54;
+  const cy = height * 0.5;
+  const moduleWidth = Math.min(width * 0.94, height * 2.35);
+  const moduleHeight = Math.min(height * 0.48, moduleWidth * 0.25);
+  const chip = moduleHeight * 0.72;
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(-0.09);
+
+  ctx.save();
+  ctx.shadowColor = "rgba(79, 70, 229, 0.2)";
+  ctx.shadowBlur = 46;
+  ctx.shadowOffsetY = 24;
+  const boardGradient = ctx.createLinearGradient(-moduleWidth / 2, -moduleHeight / 2, moduleWidth / 2, moduleHeight / 2);
+  boardGradient.addColorStop(0, "#ffffff");
+  boardGradient.addColorStop(0.28, "#eef2ff");
+  boardGradient.addColorStop(0.68, "#e0e7ff");
+  boardGradient.addColorStop(1, "#f5f3ff");
+  roundRectPath(ctx, -moduleWidth / 2, -moduleHeight / 2, moduleWidth, moduleHeight, moduleHeight * 0.28);
+  ctx.fillStyle = boardGradient;
+  ctx.fill();
+  ctx.restore();
+
+  roundRectPath(ctx, -moduleWidth / 2, -moduleHeight / 2, moduleWidth, moduleHeight, moduleHeight * 0.28);
+  ctx.strokeStyle = "rgba(99, 102, 241, 0.34)";
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.38)";
+  ctx.lineWidth = 1;
+  for (let y = -moduleHeight * 0.35; y <= moduleHeight * 0.35; y += moduleHeight * 0.16) {
+    ctx.beginPath();
+    ctx.moveTo(-moduleWidth * 0.44, y);
+    ctx.lineTo(moduleWidth * 0.44, y);
+    ctx.stroke();
+  }
+  for (let x = -moduleWidth * 0.42; x <= moduleWidth * 0.42; x += moduleWidth * 0.08) {
+    ctx.beginPath();
+    ctx.moveTo(x, -moduleHeight * 0.38);
+    ctx.lineTo(x, moduleHeight * 0.38);
+    ctx.stroke();
+  }
+
+  const traceTargets = [
+    [-0.42, -0.2, -0.16, -0.14],
+    [-0.42, 0.16, -0.16, 0.12],
+    [0.43, -0.24, 0.18, -0.12],
+    [0.44, 0.2, 0.18, 0.1],
+    [-0.02, -0.37, -0.02, -0.14],
+    [0.08, 0.37, 0.08, 0.14],
+  ];
+
+  ctx.strokeStyle = "rgba(79, 70, 229, 0.72)";
+  ctx.lineWidth = 4.2;
+  ctx.lineCap = "round";
+  traceTargets.forEach(([sx, sy, ex, ey], index) => {
+    const startX = sx * moduleWidth;
+    const startY = sy * moduleHeight;
+    const endX = ex * moduleWidth;
+    const endY = ey * moduleHeight;
+    const bendX = (startX + endX) * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(bendX, startY);
+    ctx.lineTo(bendX, endY);
+    ctx.lineTo(endX, endY);
+    ctx.stroke();
+    ctx.fillStyle = index % 2 ? "#7c3aed" : "#0f172a";
+    ctx.beginPath();
+    ctx.arc(startX, startY, Math.max(6, moduleHeight * 0.035), 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  const coreGradient = ctx.createLinearGradient(-chip / 2, -chip / 2, chip / 2, chip / 2);
+  coreGradient.addColorStop(0, "#d7c8ff");
+  coreGradient.addColorStop(0.5, "#8b5cf6");
+  coreGradient.addColorStop(1, "#2b3cff");
+  roundRectPath(ctx, -chip / 2, -chip / 2, chip, chip, 18);
+  ctx.fillStyle = coreGradient;
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(79, 70, 229, 0.64)";
+  ctx.lineWidth = 2;
+  for (let pin = -5; pin <= 5; pin += 1) {
+    const pos = (pin / 6) * chip * 0.48;
+    ctx.beginPath();
+    ctx.moveTo(-chip * 0.66, pos);
+    ctx.lineTo(-chip * 0.52, pos);
+    ctx.moveTo(chip * 0.52, pos);
+    ctx.lineTo(chip * 0.66, pos);
+    ctx.moveTo(pos, -chip * 0.66);
+    ctx.lineTo(pos, -chip * 0.52);
+    ctx.moveTo(pos, chip * 0.52);
+    ctx.lineTo(pos, chip * 0.66);
+    ctx.stroke();
+  }
+
+  const sensorX = -moduleWidth * 0.33;
+  const sensorR = moduleHeight * 0.24;
+  const sensorGradient = ctx.createRadialGradient(sensorX - sensorR * 0.25, -sensorR * 0.25, sensorR * 0.1, sensorX, 0, sensorR);
+  sensorGradient.addColorStop(0, "#ffffff");
+  sensorGradient.addColorStop(0.36, "#a5b4fc");
+  sensorGradient.addColorStop(1, "#4f46e5");
+  ctx.fillStyle = sensorGradient;
+  ctx.beginPath();
+  ctx.arc(sensorX, 0, sensorR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(79, 70, 229, 0.34)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  const connectorX = moduleWidth * 0.35;
+  ctx.fillStyle = "rgba(71, 85, 105, 0.22)";
+  for (let index = 0; index < 8; index += 1) {
+    const x = connectorX + index * moduleWidth * 0.025;
+    roundRectPath(ctx, x, -moduleHeight * 0.24, moduleWidth * 0.014, moduleHeight * 0.48, 3);
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = "rgba(139, 92, 246, 0.86)";
+  ctx.lineWidth = 2;
+  for (let radius = chip * 0.82; radius <= moduleHeight * 0.86; radius += chip * 0.28) {
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, -Math.PI * 0.2, Math.PI * 1.16);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(99, 102, 241, 0.4)";
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([7, 10]);
+  ctx.beginPath();
+  ctx.moveTo(width * 0.18, height * 0.3);
+  ctx.bezierCurveTo(width * 0.32, height * 0.17, width * 0.58, height * 0.18, width * 0.77, height * 0.28);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(width * 0.24, height * 0.72);
+  ctx.bezierCurveTo(width * 0.42, height * 0.82, width * 0.64, height * 0.78, width * 0.84, height * 0.66);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "rgba(79, 70, 229, 0.68)";
+  for (const [x, y, r] of [
+    [0.17, 0.47, 5],
+    [0.67, 0.24, 4],
+    [0.86, 0.55, 5],
+    [0.39, 0.73, 4],
+  ]) {
+    ctx.beginPath();
+    ctx.arc(width * x, height * y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function roundRectPath(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
 }
 
 function setActiveWorkflowStage(index, options = {}) {
@@ -359,6 +593,11 @@ function pickModel(localValue, serverValue, fallback) {
   return fallback;
 }
 
+function pickReasoningEffort(localValue, serverValue) {
+  if (localValue && !LEGACY_REASONING_EFFORT_DEFAULTS.has(localValue)) return localValue;
+  return serverValue || DEFAULT_REASONING_EFFORT;
+}
+
 async function refreshServerConfig() {
   try {
     const freshConfig = await apiJson("/api/config");
@@ -374,8 +613,11 @@ async function refreshServerConfig() {
     ) {
       settings.openaiReasoningModel = pickModel("", freshConfig.openaiReasoningModel, FRONTIER_MODEL);
     }
-    if (!localOverrides.openaiReasoningEffort) {
-      settings.openaiReasoningEffort = freshConfig.openaiReasoningEffort || "high";
+    if (
+      !localOverrides.openaiReasoningEffort ||
+      LEGACY_REASONING_EFFORT_DEFAULTS.has(localOverrides.openaiReasoningEffort)
+    ) {
+      settings.openaiReasoningEffort = pickReasoningEffort("", freshConfig.openaiReasoningEffort);
     }
     if (!localOverrides.arduinoFqbn) {
       settings.arduinoFqbn = freshConfig.arduinoFqbn || "esp32:esp32:esp32";
@@ -409,7 +651,7 @@ function clearLocalOverrides() {
   settings.githubOwner = serverConfig.githubOwner || "";
   settings.openaiModel = pickModel("", serverConfig.openaiModel, FRONTIER_MODEL);
   settings.openaiReasoningModel = pickModel("", serverConfig.openaiReasoningModel, FRONTIER_MODEL);
-  settings.openaiReasoningEffort = serverConfig.openaiReasoningEffort || "high";
+  settings.openaiReasoningEffort = pickReasoningEffort("", serverConfig.openaiReasoningEffort);
   settings.arduinoFqbn = serverConfig.arduinoFqbn || "esp32:esp32:esp32";
   els.boardFqbnInput.value = settings.arduinoFqbn;
   renderSettings();
@@ -506,17 +748,17 @@ function drawPartsCanvas() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
 
-  ctx.fillStyle = "#050507";
+  ctx.fillStyle = "#f8fafc";
   ctx.fillRect(0, 0, width, height);
   drawGrid(ctx, width, height);
 
   if (!state.imageElement) {
-    ctx.fillStyle = "rgba(255, 255, 255, 0.86)";
+    ctx.fillStyle = "#0f172a";
     ctx.font = "800 20px Inter, system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText("Choose one clear photo of your parts", width / 2, height / 2 - 8);
     ctx.font = "600 14px Inter, system-ui, sans-serif";
-    ctx.fillStyle = "rgba(255, 255, 255, 0.48)";
+    ctx.fillStyle = "rgba(100, 116, 139, 0.82)";
     ctx.fillText("Leave a little space between each piece", width / 2, height / 2 + 22);
     return;
   }
@@ -539,7 +781,7 @@ function drawPartsCanvas() {
 
 function drawGrid(ctx, width, height) {
   ctx.save();
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.075)";
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.34)";
   ctx.lineWidth = 1;
   for (let x = 0; x <= width; x += 28) {
     ctx.beginPath();
@@ -559,7 +801,7 @@ function drawGrid(ctx, width, height) {
 function drawAnnotations(ctx, parts) {
   const fit = state.imageFit;
   if (!fit) return;
-  const colors = ["#ffffff", "#8b5cf6", "#d4d4d8", "#a1a1aa", "#f5f5f5", "#71717a"];
+  const colors = ["#7c3aed", "#2563eb", "#0f172a", "#14b8a6", "#a855f7", "#475569"];
   const placedLabels = [];
 
   const annotations = parts.map((part, index) => {
@@ -579,30 +821,54 @@ function drawAnnotations(ctx, parts) {
 
   annotations.forEach(({ part, index, box }) => {
     const color = colors[index % colors.length];
+    const otherPartBoxes = annotations
+      .filter((annotation) => annotation.part !== part)
+      .map((annotation) => annotation.box);
 
     ctx.save();
     ctx.strokeStyle = color;
     ctx.lineWidth = 3;
     ctx.strokeRect(box.x, box.y, box.width, box.height);
     ctx.shadowColor = color;
-    ctx.shadowBlur = color === "#ffffff" ? 12 : 18;
+    ctx.shadowBlur = 14;
 
     ctx.font = "800 13px Inter, system-ui, sans-serif";
-    const maxLabelWidth = Math.min(270, fit.width - 12);
-    const label = trimCanvasText(ctx, `${index + 1}. ${compactPartName(part.name)}`, maxLabelWidth - 18);
+    const maxLabelWidth = Math.min(150, fit.width - 12);
+    const label = trimCanvasText(ctx, `${index + 1}. ${shortPartLabel(part.name)}`, maxLabelWidth - 18);
     const labelWidth = Math.min(ctx.measureText(label).width + 18, maxLabelWidth);
     const labelHeight = 28;
-    const labelRect = placeAnnotationLabel(box, labelWidth, labelHeight, fit, placedLabels);
+    const labelRect = placeAnnotationLabel(box, labelWidth, labelHeight, fit, placedLabels, otherPartBoxes);
     placedLabels.push(labelRect);
 
     ctx.shadowBlur = 0;
     drawLabelLeader(ctx, labelRect, box, color);
-    ctx.fillStyle = color === "#ffffff" || color === "#e5e7eb" ? "rgba(255,255,255,0.92)" : color;
+    ctx.fillStyle = color;
     ctx.fillRect(labelRect.x, labelRect.y, labelRect.width, labelRect.height);
-    ctx.fillStyle = color === "#ffffff" || color === "#e5e7eb" ? "#050507" : "#fff";
+    ctx.fillStyle = "#fff";
     ctx.fillText(label, labelRect.x + 9, labelRect.y + 18);
     ctx.restore();
   });
+}
+
+function shortPartLabel(name) {
+  const value = String(name || "Part").trim();
+  const normalized = value.toLowerCase();
+  if (/esp32|devkit|microcontroller/.test(normalized)) return "ESP32";
+  if (/\bpir\b|motion/.test(normalized)) return "PIR";
+  if (/jumper|wire/.test(normalized)) return "Wires";
+  if (/resistor/.test(normalized)) return "Resistor";
+  if (/\bleds?\b|diode/.test(normalized)) return "LED";
+  if (/servo/.test(normalized)) return "Servo";
+  if (/relay/.test(normalized)) return "Relay";
+  if (/display|screen|oled|lcd/.test(normalized)) return "Display";
+  if (/power|battery|supply/.test(normalized)) return "Power";
+  if (/bulb|lamp|light/.test(normalized)) return "Light";
+  return value
+    .replace(/\s+(with|including|and)\s+.*$/i, "")
+    .replace(/\b(board|module|sensor|pack|strip|style|development)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 18) || "Part";
 }
 
 function compactPartName(name) {
@@ -629,34 +895,62 @@ function trimCanvasText(ctx, text, maxWidth) {
   return `${trimmed}${suffix}`;
 }
 
-function placeAnnotationLabel(box, width, height, fit, placedLabels) {
-  const gap = 6;
+function placeAnnotationLabel(box, width, height, fit, placedLabels, avoidRects = []) {
+  const gap = ANNOTATION_LABEL_GAP;
   const candidates = [
-    { x: box.x, y: box.y - height - gap },
     { x: box.x + box.width / 2 - width / 2, y: box.y - height - gap },
+    { x: box.x, y: box.y - height - gap },
     { x: box.x + box.width - width, y: box.y - height - gap },
-    { x: box.x, y: box.y + box.height + gap },
     { x: box.x + box.width / 2 - width / 2, y: box.y + box.height + gap },
+    { x: box.x, y: box.y + box.height + gap },
     { x: box.x + box.width - width, y: box.y + box.height + gap },
     { x: box.x + box.width + gap, y: box.y },
     { x: box.x - width - gap, y: box.y },
+    { x: box.x + box.width + gap, y: box.y + box.height / 2 - height / 2 },
+    { x: box.x - width - gap, y: box.y + box.height / 2 - height / 2 },
     { x: box.x + gap, y: box.y + gap },
   ].map((candidate) => clampLabelRect(candidate.x, candidate.y, width, height, fit));
 
-  const cleanCandidate = candidates.find((candidate) => !placedLabels.some((label) => rectsOverlap(candidate, label, 4)));
+  const cleanCandidate = candidates.find((candidate) =>
+    labelPlacementIsClean(candidate, box, placedLabels, avoidRects),
+  );
   if (cleanCandidate) return cleanCandidate;
 
   for (let y = fit.y + gap; y <= fit.y + fit.height - height - gap; y += height + gap) {
-    const scanned = clampLabelRect(box.x, y, width, height, fit);
-    if (!placedLabels.some((label) => rectsOverlap(scanned, label, 4))) return scanned;
+    const scanXs = [box.x, box.x + box.width + gap, box.x - width - gap, fit.x + gap, fit.x + fit.width - width - gap];
+    for (const scanX of scanXs) {
+      const scanned = clampLabelRect(scanX, y, width, height, fit);
+      if (labelPlacementIsClean(scanned, box, placedLabels, avoidRects)) return scanned;
+    }
   }
 
   return candidates
     .map((candidate) => ({
       candidate,
-      score: placedLabels.reduce((total, label) => total + overlapArea(candidate, label), 0),
+      score: labelPlacementScore(candidate, box, placedLabels, avoidRects),
     }))
     .sort((a, b) => a.score - b.score)[0].candidate;
+}
+
+function labelPlacementIsClean(candidate, sourceBox, placedLabels, avoidRects) {
+  return (
+    !placedLabels.some((label) => rectsOverlap(candidate, label, ANNOTATION_LABEL_PADDING)) &&
+    !avoidRects.some((rect) => rectsOverlap(candidate, rect, 4)) &&
+    labelAvoidsLine(candidate, sourceBox, placedLabels)
+  );
+}
+
+function labelPlacementScore(candidate, sourceBox, placedLabels, avoidRects) {
+  const labelPenalty = placedLabels.reduce(
+    (total, label) => total + overlapArea(expandRect(candidate, ANNOTATION_LABEL_PADDING), label) * 100,
+    0,
+  );
+  const partPenalty = avoidRects.reduce((total, rect) => total + overlapArea(candidate, rect) * 40, 0);
+  const linePenalty = labelAvoidsLine(candidate, sourceBox, placedLabels) ? 0 : 9000;
+  const sourceCenter = rectCenter(sourceBox);
+  const candidateCenter = rectCenter(candidate);
+  const distancePenalty = Math.hypot(candidateCenter.x - sourceCenter.x, candidateCenter.y - sourceCenter.y) * 0.08;
+  return labelPenalty + partPenalty + linePenalty + distancePenalty;
 }
 
 function clampLabelRect(x, y, width, height, fit) {
@@ -684,24 +978,83 @@ function overlapArea(a, b) {
   return xOverlap * yOverlap;
 }
 
+function expandRect(rect, padding) {
+  return {
+    x: rect.x - padding,
+    y: rect.y - padding,
+    width: rect.width + padding * 2,
+    height: rect.height + padding * 2,
+  };
+}
+
+function rectCenter(rect) {
+  return {
+    x: rect.x + rect.width / 2,
+    y: rect.y + rect.height / 2,
+  };
+}
+
+function labelAvoidsLine(label, box, placedLabels) {
+  const lineStart = pointOnRectEdge(label, rectCenter(box));
+  const lineEnd = pointOnRectEdge(box, rectCenter(label));
+  return !placedLabels.some((placed) => lineIntersectsRect(lineStart, lineEnd, expandRect(placed, 3)));
+}
+
+function pointOnRectEdge(rect, toward) {
+  const center = rectCenter(rect);
+  const dx = toward.x - center.x;
+  const dy = toward.y - center.y;
+  if (!dx && !dy) return center;
+  const scaleX = dx ? rect.width / 2 / Math.abs(dx) : Number.POSITIVE_INFINITY;
+  const scaleY = dy ? rect.height / 2 / Math.abs(dy) : Number.POSITIVE_INFINITY;
+  const scale = Math.min(scaleX, scaleY);
+  return {
+    x: center.x + dx * scale,
+    y: center.y + dy * scale,
+  };
+}
+
+function lineIntersectsRect(start, end, rect) {
+  if (pointInRect(start, rect) || pointInRect(end, rect)) return true;
+  const topLeft = { x: rect.x, y: rect.y };
+  const topRight = { x: rect.x + rect.width, y: rect.y };
+  const bottomRight = { x: rect.x + rect.width, y: rect.y + rect.height };
+  const bottomLeft = { x: rect.x, y: rect.y + rect.height };
+  return (
+    segmentsIntersect(start, end, topLeft, topRight) ||
+    segmentsIntersect(start, end, topRight, bottomRight) ||
+    segmentsIntersect(start, end, bottomRight, bottomLeft) ||
+    segmentsIntersect(start, end, bottomLeft, topLeft)
+  );
+}
+
+function pointInRect(point, rect) {
+  return point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height;
+}
+
+function segmentsIntersect(a, b, c, d) {
+  const direction = (p, q, r) => (r.x - p.x) * (q.y - p.y) - (q.x - p.x) * (r.y - p.y);
+  const d1 = direction(c, d, a);
+  const d2 = direction(c, d, b);
+  const d3 = direction(a, b, c);
+  const d4 = direction(a, b, d);
+  return d1 * d2 < 0 && d3 * d4 < 0;
+}
+
 function drawLabelLeader(ctx, label, box, color) {
-  const labelCenter = {
-    x: label.x + label.width / 2,
-    y: label.y + label.height / 2,
-  };
-  const boxCenter = {
-    x: box.x + box.width / 2,
-    y: box.y + box.height / 2,
-  };
+  const labelCenter = rectCenter(label);
+  const boxCenter = rectCenter(box);
   if (Math.abs(labelCenter.x - boxCenter.x) < 28 && Math.abs(labelCenter.y - boxCenter.y) < 28) return;
+  const start = pointOnRectEdge(label, boxCenter);
+  const end = pointOnRectEdge(box, labelCenter);
 
   ctx.save();
-  ctx.strokeStyle = color === "#ffffff" ? "rgba(255,255,255,0.68)" : color;
+  ctx.strokeStyle = color;
   ctx.globalAlpha = 0.74;
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(labelCenter.x, labelCenter.y);
-  ctx.lineTo(boxCenter.x, boxCenter.y);
+  ctx.moveTo(start.x, start.y);
+  ctx.lineTo(end.x, end.y);
   ctx.stroke();
   ctx.restore();
 }
@@ -777,7 +1130,7 @@ async function analyzeHardware() {
 
     const payload = {
       model: settings.openaiModel,
-      reasoning: { effort: settings.openaiReasoningEffort || "high" },
+      reasoning: { effort: settings.openaiReasoningEffort || DEFAULT_REASONING_EFFORT },
       input: [
         {
           role: "system",
@@ -811,9 +1164,10 @@ async function analyzeHardware() {
 
     const data = await openAiResponse(payload, {
       label: "hardware plan",
-      onProgress: ({ elapsedLabel }) => {
+      onProgress: ({ elapsedLabel, message }) => {
         setStatus(
           els.transcriptBox,
+          message ||
           `I’m still studying the photo (${elapsedLabel}). Keep this tab open; I’ll bring the guide back here.`,
           "warn",
         );
@@ -925,25 +1279,61 @@ async function openAiResponse(payload, options = {}) {
   };
   delete backgroundPayload.stream;
 
+  for (let attempt = 0; attempt <= AI_TRANSIENT_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      const started = await apiJson("/api/openai/background", {
+        method: "POST",
+        body: JSON.stringify(backgroundPayload),
+      });
+      return waitForOpenAiResponse(started, label, progress);
+    } catch (error) {
+      if (shouldFallbackToDirectOpenAi(error)) break;
+      if (!isTransientOpenAiError(error) || attempt === AI_TRANSIENT_RETRY_ATTEMPTS) {
+        if (isTransientOpenAiError(error)) break;
+        throw error;
+      }
+      const retryDelay = 1200 + attempt * 1800;
+      progress({
+        status: "retrying",
+        elapsedMs: retryDelay,
+        elapsedLabel: formatElapsed(retryDelay),
+        message: `OpenAI had a temporary hiccup while making the ${label}. Retrying now...`,
+      });
+      await sleep(retryDelay);
+    }
+  }
+
+  progress({
+    status: "direct",
+    elapsedMs: 0,
+    elapsedLabel: "0s",
+    message: `OpenAI's background request stumbled, so I'm trying the ${label} directly now.`,
+  });
   try {
-    const started = await apiJson("/api/openai/background", {
-      method: "POST",
-      body: JSON.stringify(backgroundPayload),
-    });
-    return waitForOpenAiResponse(started, label, progress);
-  } catch (error) {
-    if (!shouldFallbackToDirectOpenAi(error)) throw error;
-    progress({
-      status: "direct",
-      elapsedMs: 0,
-      elapsedLabel: "0s",
-      message: "Switching to direct AI mode.",
-    });
-    return apiJson("/api/openai/responses", {
+    return await apiJson("/api/openai/responses", {
       method: "POST",
       body: JSON.stringify(payload),
     });
+  } catch (error) {
+    if (isTransientOpenAiError(error)) {
+      throw new Error(
+        `OpenAI had a temporary server problem while making the ${label}. Wait a few seconds and press the button again.`,
+      );
+    }
+    throw error;
   }
+}
+
+function shouldFallbackToDirectOpenAi(error) {
+  return /\b(404|405)\b|not found|unknown parameter.*background|unsupported.*background/i.test(
+    String(error?.message || error),
+  );
+}
+
+function isTransientOpenAiError(error) {
+  return /\b(408|409|429|500|502|503|504|529)\b|server had an error|temporarily|timeout|rate limit/i.test(
+    String(error?.message || error),
+  );
 }
 
 async function waitForOpenAiResponse(started, label, progress) {
@@ -994,12 +1384,6 @@ function normalizeOpenAiStatus(status) {
   return String(status || "completed").toLowerCase();
 }
 
-function shouldFallbackToDirectOpenAi(error) {
-  return /\b(404|405)\b|not found|unknown parameter.*background|unsupported.*background/i.test(
-    String(error?.message || error),
-  );
-}
-
 function openAiErrorMessage(data) {
   if (typeof data.error === "string") return data.error;
   if (data.error?.message) return data.error.message;
@@ -1025,7 +1409,7 @@ async function generateFirmwareForPlan(idea) {
 
   const payload = {
     model: settings.openaiReasoningModel,
-    reasoning: { effort: settings.openaiReasoningEffort || "high" },
+    reasoning: { effort: settings.openaiReasoningEffort || DEFAULT_REASONING_EFFORT },
     input: [
       {
         role: "system",
@@ -1054,8 +1438,9 @@ async function generateFirmwareForPlan(idea) {
 
   const data = await openAiResponse(payload, {
     label: "firmware",
-    onProgress: ({ elapsedLabel }) => {
-      els.firmwareOutput.textContent = `Still writing the board code (${elapsedLabel}). This is normal for a careful build.`;
+    onProgress: ({ elapsedLabel, message }) => {
+      els.firmwareOutput.textContent =
+        message || `Still writing the board code (${elapsedLabel}). This is normal for a careful build.`;
     },
   });
   state.plan.firmware = normalizeFirmware(parseStructuredJson(data, "firmware"));
@@ -1288,14 +1673,28 @@ function renderVisualSteps() {
   const canvas = document.createElement("canvas");
   const copy = document.createElement("div");
   copy.className = "visual-step-copy";
+  const meta = document.createElement("p");
   const title = document.createElement("strong");
   const body = document.createElement("span");
-  const check = document.createElement("em");
-  title.textContent = `Move ${step.order || activeIndex + 1}: ${step.title}`;
+  meta.className = "step-copy-kicker";
+  title.className = "step-copy-title";
+  body.className = "step-copy-instruction";
+  meta.textContent = `Move ${step.order || activeIndex + 1} of ${steps.length}`;
+  title.textContent = step.title || "Next connection";
   body.textContent = step.instruction;
-  check.textContent = step.check ? `Before you continue: ${step.check}` : "";
-  copy.append(title, body);
-  if (check.textContent) copy.append(check);
+  copy.append(meta, title, body);
+  if (step.check) {
+    const check = document.createElement("aside");
+    const checkLabel = document.createElement("span");
+    const checkText = document.createElement("p");
+    check.className = "step-copy-tip";
+    checkLabel.className = "step-copy-tip-label";
+    checkText.className = "step-copy-tip-text";
+    checkLabel.textContent = "Quick check";
+    checkText.textContent = step.check;
+    check.append(checkLabel, checkText);
+    copy.append(check);
+  }
   if (controls) {
     controls.classList.add("is-inline");
     copy.append(controls);
@@ -1355,20 +1754,32 @@ function drawVisualStep(canvas, step, index) {
   const placedBadges = [];
 
   ctx.save();
-  ctx.fillStyle = "rgba(0, 0, 0, 0.26)";
+  ctx.fillStyle = "rgba(99, 102, 241, 0.08)";
   ctx.fillRect(fit.x, fit.y, fit.width, fit.height);
   ctx.restore();
 
-  if (fromPart) drawStepPart(ctx, fit, fromPart, "#ffffff", "Start", placedBadges);
-  if (toPart && toPart !== fromPart) drawStepPart(ctx, fit, toPart, color, "Connect", placedBadges);
+  if (fromPart) drawStepPartFrame(ctx, fit, fromPart, "#4f46e5");
+  if (toPart && toPart !== fromPart) drawStepPartFrame(ctx, fit, toPart, color);
+
+  if (fromPart && toPart && fromPart !== toPart) {
+    const fromBox = partBox(fromPart, fit);
+    const toBox = partBox(toPart, fit);
+    const fromCenter = rectCenter(fromBox);
+    const toCenter = rectCenter(toBox);
+    const fromPoint = pointOnRectEdge(fromBox, toCenter);
+    const toPoint = pointOnRectEdge(toBox, fromCenter);
+    drawArrow(ctx, fromPoint.x, fromPoint.y, toPoint.x, toPoint.y, color);
+  }
+
+  if (fromPart) drawStepPartLabel(ctx, fit, fromPart, "#4f46e5", placedBadges);
+  if (toPart && toPart !== fromPart) drawStepPartLabel(ctx, fit, toPart, color, placedBadges);
 
   if (fromPart && toPart && fromPart !== toPart) {
     const fromCenter = partCenter(fromPart, fit);
     const toCenter = partCenter(toPart, fit);
-    drawArrow(ctx, fromCenter.x, fromCenter.y, toCenter.x, toCenter.y, color);
     drawPlacedStepBadge(
       ctx,
-      `${step.pin || "wire"}`,
+      cleanPinLabel(step.pin || "wire"),
       anchorBox((fromCenter.x + toCenter.x) / 2, (fromCenter.y + toCenter.y) / 2),
       fit,
       color,
@@ -1377,7 +1788,7 @@ function drawVisualStep(canvas, step, index) {
   } else {
     drawPlacedStepBadge(
       ctx,
-      step.pin || step.from || "wire",
+      cleanPinLabel(step.pin || step.from || "wire"),
       anchorBox(fit.x + fit.width / 2, fit.y + 28),
       fit,
       color,
@@ -1400,7 +1811,7 @@ function prepareCanvas(canvas) {
 }
 
 function drawImageCanvasBase(ctx, width, height) {
-  ctx.fillStyle = "#050507";
+  ctx.fillStyle = "#f8fafc";
   ctx.fillRect(0, 0, width, height);
   drawGrid(ctx, width, height);
   if (!state.imageElement) return null;
@@ -1468,16 +1879,20 @@ function partCenter(part, fit) {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-function drawStepPart(ctx, fit, part, color, prefix, placedBadges) {
+function drawStepPartFrame(ctx, fit, part, color) {
   const box = partBox(part, fit);
   ctx.save();
   ctx.strokeStyle = color;
   ctx.lineWidth = 4;
   ctx.strokeRect(box.x, box.y, box.width, box.height);
-  ctx.fillStyle = "rgba(255,255,255,0.18)";
+  ctx.fillStyle = "rgba(99, 102, 241, 0.12)";
   ctx.fillRect(box.x, box.y, box.width, box.height);
-  drawPlacedStepBadge(ctx, `${prefix}: ${compactPartName(part.name)}`, box, fit, color, placedBadges);
   ctx.restore();
+}
+
+function drawStepPartLabel(ctx, fit, part, color, placedBadges) {
+  const box = partBox(part, fit);
+  drawPlacedStepBadge(ctx, shortPartLabel(part.name), box, fit, color, placedBadges);
 }
 
 function drawArrow(ctx, fromX, fromY, toX, toY, color) {
@@ -1510,32 +1925,42 @@ function anchorBox(centerX, centerY) {
   };
 }
 
+function cleanPinLabel(value) {
+  const text = String(value || "wire").trim();
+  const upper = text.toUpperCase();
+  if (/\bGND\b|GROUND/.test(upper)) return "GND";
+  if (/\b3V3\b|\b3\.3V\b|\bVCC\b|\bVIN\b|\b5V\b/.test(upper)) return upper.match(/3V3|3\.3V|VCC|VIN|5V/)?.[0] || "VCC";
+  const gpio = upper.match(/GPIO\s*([0-9]+)/) || upper.match(/\bD?([0-9]{1,2})\b/);
+  if (gpio) return `GPIO ${gpio[1]}`;
+  return text.replace(/\s+/g, " ").slice(0, 14);
+}
+
 function drawPlacedStepBadge(ctx, text, anchor, fit, color, placedBadges = []) {
-  const safeText = String(text || "").slice(0, 34);
+  const safeText = String(text || "").slice(0, 18);
   ctx.save();
   ctx.font = "800 13px Inter, system-ui, sans-serif";
-  const width = Math.min(ctx.measureText(safeText).width + 18, 220);
+  const width = Math.min(ctx.measureText(safeText).width + 18, 150);
   const height = 28;
   const rect = placeAnnotationLabel(anchor, width, height, fit, placedBadges);
   placedBadges.push(rect);
   drawLabelLeader(ctx, rect, anchor, color);
-  const paleBadge = color === "#ffffff" || color === "#e5e7eb" || color === "#f5f5f5";
+  const paleBadge = color === "#ffffff" || color === "#e5e7eb" || color === "#f5f5f5" || color === "#f8fafc";
   ctx.fillStyle = paleBadge ? "rgba(255,255,255,0.92)" : color;
   ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-  ctx.fillStyle = paleBadge ? "#050507" : "#fff";
+  ctx.fillStyle = paleBadge ? "#0f172a" : "#fff";
   ctx.fillText(safeText, rect.x + 9, rect.y + 18, rect.width - 18);
   ctx.restore();
   return rect;
 }
 
 function stepColor(value, index) {
-  const palette = ["#8b5cf6", "#ffffff", "#d4d4d8", "#a1a1aa", "#f5f5f5", "#71717a"];
+  const palette = ["#7c3aed", "#2563eb", "#0f172a", "#14b8a6", "#a855f7", "#475569"];
   const normalized = String(value || "").toLowerCase();
-  if (normalized.includes("red")) return "#ffffff";
-  if (normalized.includes("black")) return "#e5e7eb";
-  if (normalized.includes("yellow")) return "#f5f5f5";
-  if (normalized.includes("blue")) return "#c4b5fd";
-  if (normalized.includes("green")) return "#d4d4d8";
+  if (normalized.includes("red")) return "#ef4444";
+  if (normalized.includes("black")) return "#111827";
+  if (normalized.includes("yellow")) return "#ca8a04";
+  if (normalized.includes("blue")) return "#2563eb";
+  if (normalized.includes("green")) return "#16a34a";
   return palette[index % palette.length];
 }
 
@@ -1812,7 +2237,7 @@ async function verifyBehavior() {
   try {
     const payload = {
       model: settings.openaiReasoningModel,
-      reasoning: { effort: settings.openaiReasoningEffort || "high" },
+      reasoning: { effort: settings.openaiReasoningEffort || DEFAULT_REASONING_EFFORT },
       input: [
         {
           role: "system",
@@ -1846,9 +2271,10 @@ async function verifyBehavior() {
     };
     const data = await openAiResponse(payload, {
       label: "visual check",
-      onProgress: ({ elapsedLabel }) => {
+      onProgress: ({ elapsedLabel, message }) => {
         setStatus(
           els.behaviorEvaluation,
+          message ||
           `I’m comparing the photo and board messages (${elapsedLabel}). Keep the project in view.`,
           "warn",
         );
