@@ -8,7 +8,7 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23f8fafc'/%3E%3Ctext x='32' y='39' text-anchor='middle' font-family='Arial' font-size='20' font-weight='800' fill='%230f172a'%3EGC%3C/text%3E%3C/svg%3E"
     />
-    <link rel="stylesheet" href="./styles.css?v=readme-homepage-20260605" />
+    <link rel="stylesheet" href="./styles.css?v=landing-redesign-20260605" />
     <script src="./config.local.js"></script>
     <script
       type="module"
@@ -16,31 +16,76 @@
     ></script>
   </head>
   <body class="intro-active">
-    <section class="intro-page" id="introPage" aria-label="GeckCo AI introduction">
+    <section class="intro-page" id="introPage" aria-label="GeckCo AI landing page">
       <div class="intro-frame">
         <div class="intro-nav">
           <a class="intro-brand" href="#introPage" aria-label="GeckCo AI introduction">
-            <span>Codex For Hardware</span>
+            <span class="intro-brand-mark">GC</span>
+            <span>GeckCo AI</span>
           </a>
           <div class="intro-process" aria-label="Build flow">
             <span>Photo</span>
             <span>Wiring</span>
-            <span>Code</span>
+            <span>Done</span>
           </div>
         </div>
-        <div class="intro-copy">
-          <p class="intro-product-name">GeckCo AI</p>
-          <h1>Codex For Hardware</h1>
-          <p class="intro-statement">Start with a photo and an idea. GeckCo stays with you until the project works: what to pick up, where to plug it, and what to check next.</p>
-          <p class="intro-promise">No code. No debugging. No endless copy-pasting ChatGPT code and praying it works.</p>
-          <button class="intro-start" id="introStartButton" type="button">Enter the builder</button>
-          <figure class="intro-proof">
+        <div class="intro-hero">
+          <div class="intro-copy">
+            <p class="intro-product-name">Codex For Hardware</p>
+            <h1>Build hardware without the scary parts.</h1>
+            <p class="intro-statement">
+              Snap a parts photo, say the idea, and GeckCo walks you from loose components to a working ESP32 build.
+            </p>
+            <p class="intro-promise">
+              No code. No debugging. No endless copy-pasting ChatGPT code and praying it works.
+            </p>
+            <div class="intro-actions">
+              <button class="intro-start" id="introStartButton" type="button">Start building</button>
+              <a class="intro-secondary" href="#landingFeatures">See the 3 features</a>
+            </div>
+          </div>
+          <figure class="intro-proof intro-hero-artifact">
             <img
-              src="images/step%201%20-%20upload%20pic%20and%20speak%20your%20idea.jpg"
-              alt="GeckCo AI turning a parts photo and project idea into a guided hardware build"
+              src="images/landing/photo-to-guide.png"
+              alt="GeckCo AI transforming a parts photo into a clean guided build plan"
             />
           </figure>
         </div>
+        <section class="intro-features" id="landingFeatures" aria-label="Three main GeckCo AI features">
+          <article class="intro-feature">
+            <img
+              src="images/landing/photo-to-guide.png"
+              alt="Photo-to-guide AI feature artifact"
+            />
+            <div>
+              <p>Feature 01</p>
+              <h2>Photo-to-guide AI</h2>
+              <span>Upload one clear parts photo and GeckCo finds only what your build actually needs.</span>
+            </div>
+          </article>
+          <article class="intro-feature">
+            <img
+              src="images/landing/wire-by-wire.png"
+              alt="Wire-by-wire hardware guide feature artifact"
+            />
+            <div>
+              <p>Feature 02</p>
+              <h2>Wire-by-wire handholding</h2>
+              <span>Follow one calm step at a time on your own image, with clean labels and clear checks.</span>
+            </div>
+          </article>
+          <article class="intro-feature">
+            <img
+              src="images/landing/finish-without-code.png"
+              alt="Finish hardware build without code chaos feature artifact"
+            />
+            <div>
+              <p>Feature 03</p>
+              <h2>Finish without code chaos</h2>
+              <span>GeckCo prepares the firmware, helps upload it, checks the result, and packages the proof.</span>
+            </div>
+          </article>
+        </section>
       </div>
     </section>
 
@@ -342,6 +387,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="./app.js?v=readme-homepage-20260605"></script>
+    <script type="module" src="./app.js?v=landing-redesign-20260605"></script>
   </body>
 </html>

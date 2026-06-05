@@ -8,7 +8,7 @@ Building with ESP32s can feel scary when you are new: sensors, wires, pin diagra
 
 Upload a photo. Say what you want to build. Let GeckCo guide the rest. 🧩⚡
 
-![GeckCo AI upload photo and describe project idea](images/step%201%20-%20upload%20pic%20and%20speak%20your%20idea.jpg)
+![GeckCo AI landing page](images/landing%20page%20.jpg)
 
 ---
 

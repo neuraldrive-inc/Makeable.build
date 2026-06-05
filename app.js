@@ -293,7 +293,6 @@ window.addEventListener("resize", () => {
 });
 
 function bindEvents() {
-  els.introPage?.addEventListener("click", enterBuilder);
   els.introStartButton?.addEventListener("click", enterBuilder);
   els.homeButton?.addEventListener("click", showIntro);
   els.homeBrandLink?.addEventListener("click", showIntro);
