@@ -85,7 +85,7 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(port, () => {
-  console.log(`CircuitCodex running at http://localhost:${port}`);
+  console.log(`GeckCo AI running at http://localhost:${port}`);
 });
 
 function getEnv() {
@@ -261,8 +261,8 @@ async function compileFirmware(req, res, env) {
   if (!sketch) return sendJson(res, { error: "sketch is required" }, 400);
 
   const fqbn = String(body.fqbn || env.ARDUINO_FQBN || "esp32:esp32:esp32").trim();
-  const sketchName = "CircuitCodexSketch";
-  const buildRoot = path.join(__dirname, ".circuitcodex", "builds", randomUUID());
+  const sketchName = "GeckCoAISketch";
+  const buildRoot = path.join(__dirname, ".geckco-ai", "builds", randomUUID());
   const sketchDir = path.join(buildRoot, sketchName);
   const outputDir = path.join(buildRoot, "out");
 
@@ -400,7 +400,7 @@ async function createGitHubRepo(req, res, env) {
     headers: githubHeaders(env),
     body: JSON.stringify({
       name: body.name,
-      description: body.description || "Hardware project generated with CircuitCodex",
+      description: body.description || "Hardware project generated with GeckCo AI",
       private: Boolean(body.private),
       auto_init: false,
     }),

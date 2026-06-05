@@ -3,12 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CircuitCodex</title>
+    <title>GeckCo AI | Codex For Hardware</title>
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2317201d'/%3E%3Ctext x='32' y='39' text-anchor='middle' font-family='Arial' font-size='20' font-weight='700' fill='white'%3ECC%3C/text%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23f8fafc'/%3E%3Ctext x='32' y='39' text-anchor='middle' font-family='Arial' font-size='20' font-weight='800' fill='%230f172a'%3EGC%3C/text%3E%3C/svg%3E"
     />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=readme-homepage-20260605" />
     <script src="./config.local.js"></script>
     <script
       type="module"
@@ -16,11 +16,11 @@
     ></script>
   </head>
   <body class="intro-active">
-    <section class="intro-page" id="introPage" aria-label="CircuitCodex introduction">
+    <section class="intro-page" id="introPage" aria-label="GeckCo AI introduction">
       <div class="intro-frame">
         <div class="intro-nav">
-          <a class="intro-brand" href="#introPage" aria-label="CircuitCodex introduction">
-            <span>ELECTRONICS LAB</span>
+          <a class="intro-brand" href="#introPage" aria-label="GeckCo AI introduction">
+            <span>Codex For Hardware</span>
           </a>
           <div class="intro-process" aria-label="Build flow">
             <span>Photo</span>
@@ -29,20 +29,25 @@
           </div>
         </div>
         <div class="intro-copy">
-          <h1>Codex for Hardware</h1>
-          <p class="intro-statement">Upload one clear photo. I will mark only the parts your idea needs, map each connection, and prepare the board code.</p>
+          <p class="intro-product-name">GeckCo AI</p>
+          <h1>Codex For Hardware</h1>
+          <p class="intro-statement">Start with a photo and an idea. GeckCo stays with you until the project works: what to pick up, where to plug it, and what to check next.</p>
+          <p class="intro-promise">No code. No debugging. No endless copy-pasting ChatGPT code and praying it works.</p>
           <button class="intro-start" id="introStartButton" type="button">Enter the builder</button>
-        </div>
-        <div class="intro-visual" aria-hidden="true">
-          <canvas id="introCanvas"></canvas>
+          <figure class="intro-proof">
+            <img
+              src="images/step%201%20-%20upload%20pic%20and%20speak%20your%20idea.jpg"
+              alt="GeckCo AI turning a parts photo and project idea into a guided hardware build"
+            />
+          </figure>
         </div>
       </div>
     </section>
 
     <header class="topbar">
-      <a class="brand" id="homeBrandLink" href="#introPage" aria-label="CircuitCodex home">
-        <span class="brand-mark">CC</span>
-        <span>CircuitCodex</span>
+      <a class="brand" id="homeBrandLink" href="#introPage" aria-label="GeckCo AI home">
+        <span class="brand-mark">GC</span>
+        <span>GeckCo AI</span>
       </a>
       <nav class="workflow-timeline" id="workflowTimeline" aria-label="Product build stages">
         <button class="timeline-step is-active" data-workflow-stage="0" type="button">
@@ -83,7 +88,7 @@
           <p class="section-number">01</p>
           <div>
             <h1>Start with what you have.</h1>
-            <p>Lay out your parts, take one clear photo, and tell me what you want to make. I’ll guide the rest.</p>
+            <p>Lay out your parts, take a clear photo, and describe the build. GeckCo turns it into a guided hardware path.</p>
           </div>
         </div>
 
@@ -122,7 +127,7 @@
           <p class="section-number">02</p>
           <div>
             <h2>Build one step at a time.</h2>
-            <p>I’ll mark your own photo so you know exactly what to pick up and where it goes.</p>
+            <p>Your photo becomes the map: highlighted parts, clear connections, and one safe move at a time.</p>
           </div>
         </div>
 
@@ -276,7 +281,7 @@
             <button class="secondary-button" id="downloadReadmeButton" type="button">Download notes</button>
             <label>
               Project name
-              <input id="repoNameInput" type="text" value="circuitcodex-build" />
+              <input id="repoNameInput" type="text" value="geckco-ai-build" />
             </label>
             <label class="checkbox-row">
               <input id="privateRepoInput" type="checkbox" />
@@ -300,9 +305,9 @@
     </footer>
 
     <aside class="orientation-card" aria-label="Landscape mode needed">
-      <span class="brand-mark">CC</span>
+      <span class="brand-mark">GC</span>
       <h2>Turn sideways to build.</h2>
-      <p>CircuitCodex works like a workbench: wide photo, clear next move, and one step at a time.</p>
+      <p>GeckCo AI works like a workbench: wide photo, clear next move, and one step at a time.</p>
     </aside>
 
     <dialog class="settings-dialog" id="settingsDialog">
@@ -337,6 +342,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="./app.js?v=guide-hierarchy-20260605"></script>
+    <script type="module" src="./app.js?v=readme-homepage-20260605"></script>
   </body>
 </html>

@@ -1,6 +1,6 @@
-# GeckCo AI 🦎✨
+# GeckCo AI
 
-## Codex for Hardware
+## Codex For Hardware
 
 **GeckCo AI** is an AI hardware-building buddy that turns messy IoT prototyping into a fun, LEGO-like experience.
 
@@ -45,7 +45,7 @@ GeckCo AI is designed to feel like a calm friend beside you saying:
 
 > “No worries. Pick up this wire. Put it here. I’ll check the next part with you.”
 
-That is the heart of **Codex for Hardware**.
+That is the heart of **Codex For Hardware**.
 
 ---
 
@@ -103,7 +103,7 @@ When the build works, GeckCo AI packages the project into GitHub-friendly docume
 
 ---
 
-## What Makes It Different 🦎
+## What Makes It Different ✨
 
 | Old Hardware Workflow 😵 | GeckCo AI Workflow ✨ |
 | --- | --- |
@@ -208,7 +208,7 @@ For ESP32 builds, make sure Arduino CLI is installed and the ESP32 board core is
 - Disconnect power before changing messy wiring.
 - If something gets hot, stop immediately.
 
-Hardware should feel fun, not frightening. 🦎
+Hardware should feel fun, not frightening. ⚡
 
 ---
 
@@ -231,6 +231,6 @@ The dream is simple:
 ## Name
 
 **GeckCo AI**<br>
-**Tagline:** Codex for Hardware
+**Tagline:** Codex For Hardware
 
-Small lizard. Big hardware energy. 🦎⚡
+Small tool. Big hardware confidence. ⚡

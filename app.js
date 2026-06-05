@@ -11,6 +11,8 @@ const AI_POLL_BASE_INTERVAL_MS = 2200;
 const AI_TRANSIENT_RETRY_ATTEMPTS = 2;
 const ANNOTATION_LABEL_PADDING = 12;
 const ANNOTATION_LABEL_GAP = 10;
+const SETTINGS_STORAGE_KEY = "geckco.settings";
+const LEGACY_SETTINGS_STORAGE_KEY = "circuitcodex.settings";
 const WORKFLOW_STAGES = [
   {
     hash: "#capture",
@@ -77,7 +79,6 @@ const state = {
 const els = {
   introPage: $("#introPage"),
   introStartButton: $("#introStartButton"),
-  introCanvas: $("#introCanvas"),
   homeButton: $("#homeButton"),
   homeBrandLink: $("#homeBrandLink"),
   canvas: $("#partsCanvas"),
@@ -284,11 +285,9 @@ setActiveWorkflowStage(initialIntroActive ? 0 : Math.max(initialStageIndex, 0), 
   replace: true,
 });
 drawPartsCanvas();
-drawIntroCanvas();
 refreshServerConfig();
 refreshArduinoStatus();
 window.addEventListener("resize", () => {
-  drawIntroCanvas();
   drawPartsCanvas();
   renderVisualSteps();
 });
@@ -336,8 +335,6 @@ function bindEvents() {
 function initIntro() {
   const shouldShowIntro = !window.location.hash || window.location.hash === "#introPage";
   document.body.classList.toggle("intro-active", shouldShowIntro);
-  if (!shouldShowIntro) return;
-  requestAnimationFrame(drawIntroCanvas);
 }
 
 function enterBuilder(event) {
@@ -350,197 +347,6 @@ function showIntro(event) {
   event?.preventDefault();
   document.body.classList.add("intro-active");
   window.history.replaceState(null, "", `${window.location.pathname}#introPage`);
-  requestAnimationFrame(drawIntroCanvas);
-}
-
-function drawIntroCanvas() {
-  const canvas = els.introCanvas;
-  if (!canvas) return;
-
-  const rect = canvas.getBoundingClientRect();
-  const width = Math.max(480, rect.width || 900);
-  const height = Math.max(480, rect.height || 900);
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.round(width * dpr);
-  canvas.height = Math.round(height * dpr);
-
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, width, height);
-
-  const cx = width * 0.54;
-  const cy = height * 0.5;
-  const moduleWidth = Math.min(width * 0.94, height * 2.35);
-  const moduleHeight = Math.min(height * 0.48, moduleWidth * 0.25);
-  const chip = moduleHeight * 0.72;
-
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(-0.09);
-
-  ctx.save();
-  ctx.shadowColor = "rgba(79, 70, 229, 0.2)";
-  ctx.shadowBlur = 46;
-  ctx.shadowOffsetY = 24;
-  const boardGradient = ctx.createLinearGradient(-moduleWidth / 2, -moduleHeight / 2, moduleWidth / 2, moduleHeight / 2);
-  boardGradient.addColorStop(0, "#ffffff");
-  boardGradient.addColorStop(0.28, "#eef2ff");
-  boardGradient.addColorStop(0.68, "#e0e7ff");
-  boardGradient.addColorStop(1, "#f5f3ff");
-  roundRectPath(ctx, -moduleWidth / 2, -moduleHeight / 2, moduleWidth, moduleHeight, moduleHeight * 0.28);
-  ctx.fillStyle = boardGradient;
-  ctx.fill();
-  ctx.restore();
-
-  roundRectPath(ctx, -moduleWidth / 2, -moduleHeight / 2, moduleWidth, moduleHeight, moduleHeight * 0.28);
-  ctx.strokeStyle = "rgba(99, 102, 241, 0.34)";
-  ctx.lineWidth = 1.4;
-  ctx.stroke();
-
-  ctx.strokeStyle = "rgba(148, 163, 184, 0.38)";
-  ctx.lineWidth = 1;
-  for (let y = -moduleHeight * 0.35; y <= moduleHeight * 0.35; y += moduleHeight * 0.16) {
-    ctx.beginPath();
-    ctx.moveTo(-moduleWidth * 0.44, y);
-    ctx.lineTo(moduleWidth * 0.44, y);
-    ctx.stroke();
-  }
-  for (let x = -moduleWidth * 0.42; x <= moduleWidth * 0.42; x += moduleWidth * 0.08) {
-    ctx.beginPath();
-    ctx.moveTo(x, -moduleHeight * 0.38);
-    ctx.lineTo(x, moduleHeight * 0.38);
-    ctx.stroke();
-  }
-
-  const traceTargets = [
-    [-0.42, -0.2, -0.16, -0.14],
-    [-0.42, 0.16, -0.16, 0.12],
-    [0.43, -0.24, 0.18, -0.12],
-    [0.44, 0.2, 0.18, 0.1],
-    [-0.02, -0.37, -0.02, -0.14],
-    [0.08, 0.37, 0.08, 0.14],
-  ];
-
-  ctx.strokeStyle = "rgba(79, 70, 229, 0.72)";
-  ctx.lineWidth = 4.2;
-  ctx.lineCap = "round";
-  traceTargets.forEach(([sx, sy, ex, ey], index) => {
-    const startX = sx * moduleWidth;
-    const startY = sy * moduleHeight;
-    const endX = ex * moduleWidth;
-    const endY = ey * moduleHeight;
-    const bendX = (startX + endX) * 0.5;
-    ctx.beginPath();
-    ctx.moveTo(startX, startY);
-    ctx.lineTo(bendX, startY);
-    ctx.lineTo(bendX, endY);
-    ctx.lineTo(endX, endY);
-    ctx.stroke();
-    ctx.fillStyle = index % 2 ? "#7c3aed" : "#0f172a";
-    ctx.beginPath();
-    ctx.arc(startX, startY, Math.max(6, moduleHeight * 0.035), 0, Math.PI * 2);
-    ctx.fill();
-  });
-
-  const coreGradient = ctx.createLinearGradient(-chip / 2, -chip / 2, chip / 2, chip / 2);
-  coreGradient.addColorStop(0, "#d7c8ff");
-  coreGradient.addColorStop(0.5, "#8b5cf6");
-  coreGradient.addColorStop(1, "#2b3cff");
-  roundRectPath(ctx, -chip / 2, -chip / 2, chip, chip, 18);
-  ctx.fillStyle = coreGradient;
-  ctx.fill();
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
-  ctx.lineWidth = 3;
-  ctx.stroke();
-
-  ctx.strokeStyle = "rgba(79, 70, 229, 0.64)";
-  ctx.lineWidth = 2;
-  for (let pin = -5; pin <= 5; pin += 1) {
-    const pos = (pin / 6) * chip * 0.48;
-    ctx.beginPath();
-    ctx.moveTo(-chip * 0.66, pos);
-    ctx.lineTo(-chip * 0.52, pos);
-    ctx.moveTo(chip * 0.52, pos);
-    ctx.lineTo(chip * 0.66, pos);
-    ctx.moveTo(pos, -chip * 0.66);
-    ctx.lineTo(pos, -chip * 0.52);
-    ctx.moveTo(pos, chip * 0.52);
-    ctx.lineTo(pos, chip * 0.66);
-    ctx.stroke();
-  }
-
-  const sensorX = -moduleWidth * 0.33;
-  const sensorR = moduleHeight * 0.24;
-  const sensorGradient = ctx.createRadialGradient(sensorX - sensorR * 0.25, -sensorR * 0.25, sensorR * 0.1, sensorX, 0, sensorR);
-  sensorGradient.addColorStop(0, "#ffffff");
-  sensorGradient.addColorStop(0.36, "#a5b4fc");
-  sensorGradient.addColorStop(1, "#4f46e5");
-  ctx.fillStyle = sensorGradient;
-  ctx.beginPath();
-  ctx.arc(sensorX, 0, sensorR, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(79, 70, 229, 0.34)";
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  const connectorX = moduleWidth * 0.35;
-  ctx.fillStyle = "rgba(71, 85, 105, 0.22)";
-  for (let index = 0; index < 8; index += 1) {
-    const x = connectorX + index * moduleWidth * 0.025;
-    roundRectPath(ctx, x, -moduleHeight * 0.24, moduleWidth * 0.014, moduleHeight * 0.48, 3);
-    ctx.fill();
-  }
-
-  ctx.strokeStyle = "rgba(139, 92, 246, 0.86)";
-  ctx.lineWidth = 2;
-  for (let radius = chip * 0.82; radius <= moduleHeight * 0.86; radius += chip * 0.28) {
-    ctx.beginPath();
-    ctx.arc(0, 0, radius, -Math.PI * 0.2, Math.PI * 1.16);
-    ctx.stroke();
-  }
-
-  ctx.restore();
-
-  ctx.save();
-  ctx.strokeStyle = "rgba(99, 102, 241, 0.4)";
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([7, 10]);
-  ctx.beginPath();
-  ctx.moveTo(width * 0.18, height * 0.3);
-  ctx.bezierCurveTo(width * 0.32, height * 0.17, width * 0.58, height * 0.18, width * 0.77, height * 0.28);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(width * 0.24, height * 0.72);
-  ctx.bezierCurveTo(width * 0.42, height * 0.82, width * 0.64, height * 0.78, width * 0.84, height * 0.66);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.fillStyle = "rgba(79, 70, 229, 0.68)";
-  for (const [x, y, r] of [
-    [0.17, 0.47, 5],
-    [0.67, 0.24, 4],
-    [0.86, 0.55, 5],
-    [0.39, 0.73, 4],
-  ]) {
-    ctx.beginPath();
-    ctx.arc(width * x, height * y, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-function roundRectPath(ctx, x, y, width, height, radius) {
-  const r = Math.min(radius, width / 2, height / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + width - r, y);
-  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
-  ctx.lineTo(x + width, y + height - r);
-  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
-  ctx.lineTo(x + r, y + height);
-  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
 }
 
 function setActiveWorkflowStage(index, options = {}) {
@@ -581,7 +387,9 @@ function setActiveWorkflowStage(index, options = {}) {
 
 function readLocalOverrides() {
   try {
-    return JSON.parse(localStorage.getItem("circuitcodex.settings") || "{}");
+    return JSON.parse(
+      localStorage.getItem(SETTINGS_STORAGE_KEY) || localStorage.getItem(LEGACY_SETTINGS_STORAGE_KEY) || "{}",
+    );
   } catch {
     return {};
   }
@@ -638,14 +446,15 @@ function saveSettings(event) {
   settings.openaiModel = els.openaiModelInput.value.trim() || FRONTIER_MODEL;
   settings.openaiReasoningModel = els.openaiReasoningModelInput.value.trim() || FRONTIER_MODEL;
   settings.arduinoFqbn = els.boardFqbnInput.value.trim() || "esp32:esp32:esp32";
-  localStorage.setItem("circuitcodex.settings", JSON.stringify(settings));
+  localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
   localOverrides = { ...settings };
   renderSettings();
   els.settingsDialog.close();
 }
 
 function clearLocalOverrides() {
-  localStorage.removeItem("circuitcodex.settings");
+  localStorage.removeItem(SETTINGS_STORAGE_KEY);
+  localStorage.removeItem(LEGACY_SETTINGS_STORAGE_KEY);
   localOverrides = {};
   settings.deepgramApiKey = serverConfig.deepgramApiKey || "";
   settings.githubOwner = serverConfig.githubOwner || "";
@@ -1135,7 +944,7 @@ async function analyzeHardware() {
         {
           role: "system",
           content:
-            "You are CircuitCodex, an expert hardware build agent for beginners. Identify only the actual visible parts needed for the user's stated project, produce tight normalized bounding boxes for those required parts, make conservative ESP32 wiring choices, flag uncertainty, avoid unsafe pins, and output only schema-valid JSON. Ignore visible parts that are unrelated to the requested build. Never use canned/demo component names or boxes. Do not generate source code in this step.",
+            "You are GeckCo AI, an expert hardware build agent for beginners. Identify only the actual visible parts needed for the user's stated project, produce tight normalized bounding boxes for those required parts, make conservative ESP32 wiring choices, flag uncertainty, avoid unsafe pins, and output only schema-valid JSON. Ignore visible parts that are unrelated to the requested build. Never use canned/demo component names or boxes. Do not generate source code in this step.",
         },
         {
           role: "user",
@@ -1414,7 +1223,7 @@ async function generateFirmwareForPlan(idea) {
       {
         role: "system",
         content:
-          "You are CircuitCodex firmware engineer. Generate a compact, compile-ready Arduino .ino sketch for ESP32 from the provided hardware plan. Output only schema-valid JSON. Do not include markdown fences. Keep the sketch under 180 lines unless absolutely required.",
+          "You are GeckCo AI firmware engineer. Generate a compact, compile-ready Arduino .ino sketch for ESP32 from the provided hardware plan. Output only schema-valid JSON. Do not include markdown fences. Keep the sketch under 180 lines unless absolutely required.",
       },
       {
         role: "user",
@@ -1503,7 +1312,7 @@ function normalizePlan(plan) {
   const projectParts = filterProjectParts(rawParts, wiringSteps, firmwareSpec, plan.summary || "");
 
   return {
-    projectTitle: plan.projectTitle || "CircuitCodex Build",
+    projectTitle: plan.projectTitle || "GeckCo AI Build",
     summary: plan.summary || "",
     parts: projectParts.length ? projectParts : rawParts,
     warnings: Array.isArray(plan.warnings) ? plan.warnings : [],
@@ -2081,7 +1890,7 @@ async function connectSerial() {
     els.connectSerialButton.disabled = true;
     els.disconnectSerialButton.disabled = false;
     els.sendSerialButton.disabled = false;
-    appendSerial("CircuitCodex: I’m listening now. If the board speaks, you’ll see it here.\n");
+    appendSerial("GeckCo AI: I’m listening now. If the board speaks, you’ll see it here.\n");
     setStatus(els.logEvaluation, "Connected. Waiting for the board to say something.", "ok");
     readSerialLoop();
   } catch (error) {
@@ -2122,7 +1931,7 @@ async function disconnectSerial() {
   els.connectSerialButton.disabled = false;
   els.disconnectSerialButton.disabled = true;
   els.sendSerialButton.disabled = true;
-  appendSerial("CircuitCodex: I stopped listening to the board.\n");
+  appendSerial("GeckCo AI: I stopped listening to the board.\n");
 }
 
 async function sendSerialCommand() {
@@ -2387,15 +2196,15 @@ async function compileAndFlashFirmware() {
     settings.arduinoFqbn = fqbn;
     els.compileFlashButton.textContent = "Preparing code...";
     setStatus(els.arduinoStatus, "I’m preparing the code for your board.", "warn");
-    appendSerial("\nCircuitCodex: Preparing the code for your board.\n");
+    appendSerial("\nGeckCo AI: Preparing the code for your board.\n");
 
     const compiled = await apiJson("/api/firmware/compile", {
       method: "POST",
       body: JSON.stringify({ sketch, fqbn }),
     });
     state.compiledFirmware = compiled;
-    appendSerial("CircuitCodex: Code is ready. Now I’m sending it to the board.\n");
-    if (compiled.stderr) appendSerial(`CircuitCodex: Setup note from the compiler:\n${compiled.stderr}\n`);
+    appendSerial("GeckCo AI: Code is ready. Now I’m sending it to the board.\n");
+    if (compiled.stderr) appendSerial(`GeckCo AI: Setup note from the compiler:\n${compiled.stderr}\n`);
 
     els.compileFlashButton.textContent = "Loading board...";
     await flashFirmwareImages(port, compiled.images);
@@ -2403,7 +2212,7 @@ async function compileAndFlashFirmware() {
     setFlashProgress(100, "Done");
   } catch (error) {
     console.error(error);
-    appendSerial(`\nCircuitCodex: I couldn’t finish loading the board. ${error.message}\n`);
+    appendSerial(`\nGeckCo AI: I couldn’t finish loading the board. ${error.message}\n`);
     setStatus(els.arduinoStatus, `I couldn’t finish loading the board: ${error.message}`, "danger");
     setFlashProgress(0, "Needs retry");
   } finally {
@@ -2430,7 +2239,7 @@ async function flashFirmwareImages(port, images) {
   const transport = new esptool.Transport(port, true);
   const terminal = {
     clean() {
-      appendSerial("\nCircuitCodex: Starting a fresh board load.\n");
+      appendSerial("\nGeckCo AI: Starting a fresh board load.\n");
     },
     writeLine(data) {
       appendSerial(`Board loader: ${data}\n`);
@@ -2447,15 +2256,15 @@ async function flashFirmwareImages(port, images) {
       terminal,
       debugLogging: false,
     });
-    appendSerial("CircuitCodex: Looking for the ESP32. If it waits here, hold BOOT on the board for a moment.\n");
+    appendSerial("GeckCo AI: Looking for the ESP32. If it waits here, hold BOOT on the board for a moment.\n");
     const chip = await esploader.main("default_reset");
-    appendSerial(`CircuitCodex: Found the board (${chip}).\n`);
+    appendSerial(`GeckCo AI: Found the board (${chip}).\n`);
 
     const fileArray = images.map((image) => ({
       data: base64ToBinaryString(image.dataBase64),
       address: image.address,
     }));
-    appendSerial("CircuitCodex: Sending the code now.\n");
+    appendSerial("GeckCo AI: Sending the code now.\n");
     await esploader.writeFlash({
       fileArray,
       flashMode: "dio",
@@ -2470,7 +2279,7 @@ async function flashFirmwareImages(port, images) {
       },
     });
     await esploader.after("hard_reset");
-    appendSerial("CircuitCodex: Board restarted with the new code.\n");
+    appendSerial("GeckCo AI: Board restarted with the new code.\n");
   } finally {
     await transport.disconnect();
   }
@@ -2500,7 +2309,7 @@ function downloadFirmware() {
     setStatus(els.arduinoStatus, "There isn’t code to download yet. Create the guide first.", "warn");
     return;
   }
-  downloadText("circuitcodex-firmware.ino", sketch, "text/x-arduino");
+  downloadText("geckco-ai-firmware.ino", sketch, "text/x-arduino");
 }
 
 function buildReadme() {
@@ -2527,7 +2336,7 @@ function buildReadme() {
     plan.readmeMarkdown ||
     `# ${plan.projectTitle}
 
-Generated by CircuitCodex on ${generated}.
+Generated by GeckCo AI on ${generated}.
 
 ## Idea
 
@@ -2564,7 +2373,7 @@ function downloadReadme() {
 }
 
 async function publishToGitHub() {
-  const repoName = sanitizeRepoName(els.repoNameInput.value || "circuitcodex-build");
+  const repoName = sanitizeRepoName(els.repoNameInput.value || "geckco-ai-build");
   const isPrivate = els.privateRepoInput.checked;
   const firmware = state.plan?.firmware?.sketch || "";
   if (!state.plan || !firmware) {
@@ -2582,7 +2391,7 @@ async function publishToGitHub() {
         method: "POST",
         body: JSON.stringify({
           name: repoName,
-          description: "Hardware project generated with CircuitCodex",
+          description: "Hardware project generated with GeckCo AI",
           private: isPrivate,
         }),
       });
@@ -2601,7 +2410,7 @@ async function publishToGitHub() {
         repo: repoName,
         path: "README.md",
         content: state.readme,
-        message: "Add CircuitCodex README",
+        message: "Add GeckCo AI README",
       }),
     });
 
@@ -2610,7 +2419,7 @@ async function publishToGitHub() {
       body: JSON.stringify({
         owner,
         repo: repoName,
-        path: "firmware/circuitcodex-firmware.ino",
+        path: "firmware/geckco-ai-firmware.ino",
         content: firmware,
         message: "Add generated ESP32 firmware",
       }),
@@ -2695,7 +2504,7 @@ function sanitizeRepoName(value) {
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9_.-]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "circuitcodex-build"
+      .replace(/^-+|-+$/g, "") || "geckco-ai-build"
   );
 }
 
