@@ -1,3 +1,15 @@
+import {
+  buildExpectedBehaviorPrompt,
+  buildLearningJournalMarkdown,
+  getCorrectMoveAnswer,
+  getCorrectWhyAnswer,
+  isTypedMoveAnswerCorrect,
+  isTypedWhyAnswerCorrect,
+  normalizeLearningStep,
+  summarizeFirmwareConcept,
+  updateLearningJournalEntry,
+} from "./learning-flow.js";
+
 const $ = (selector) => document.querySelector(selector);
 
 let serverConfig = window.CIRCUIT_CODEX_CONFIG || {};
@@ -13,6 +25,7 @@ const ANNOTATION_LABEL_PADDING = 12;
 const ANNOTATION_LABEL_GAP = 10;
 const SETTINGS_STORAGE_KEY = "geckco.settings";
 const LEGACY_SETTINGS_STORAGE_KEY = "circuitcodex.settings";
+const EXAMPLE_PHOTO_SRC = "images/step%201%20-%20upload%20pic%20and%20speak%20your%20idea.jpg";
 const WORKFLOW_STAGES = [
   {
     hash: "#capture",
@@ -74,6 +87,10 @@ const state = {
   compiledFirmware: null,
   activeBuildStepIndex: 0,
   activeWorkflowStageIndex: 0,
+  learningJournal: {},
+  learningNudge: "",
+  behaviorPrediction: "",
+  exampleImageElement: null,
 };
 
 const els = {
@@ -105,6 +122,7 @@ const els = {
   prevBuildStepButton: $("#prevBuildStepButton"),
   nextBuildStepButton: $("#nextBuildStepButton"),
   firmwareOutput: $("#firmwareOutput"),
+  firmwareConcept: $("#firmwareConcept"),
   copyFirmwareButton: $("#copyFirmwareButton"),
   downloadFirmwareButton: $("#downloadFirmwareButton"),
   baudRateInput: $("#baudRateInput"),
@@ -115,6 +133,8 @@ const els = {
   evaluateLogsButton: $("#evaluateLogsButton"),
   serialLog: $("#serialLog"),
   logEvaluation: $("#logEvaluation"),
+  behaviorPredictionInput: $("#behaviorPredictionInput"),
+  expectedBehaviorPrompt: $("#expectedBehaviorPrompt"),
   cameraPreview: $("#cameraPreview"),
   startCameraButton: $("#startCameraButton"),
   captureEvidenceButton: $("#captureEvidenceButton"),
@@ -197,8 +217,29 @@ const hardwarePlanSchema = {
           pin: { type: "string" },
           wireColor: { type: "string" },
           check: { type: "string" },
+          challengePrompt: { type: "string" },
+          hints: { type: "array", items: { type: "string" } },
+          conceptExplanation: { type: "string" },
+          commonMistake: { type: "string" },
+          reflectionQuestion: { type: "string" },
         },
-        required: ["order", "title", "instruction", "from", "to", "fromPartId", "toPartId", "pin", "wireColor", "check"],
+        required: [
+          "order",
+          "title",
+          "instruction",
+          "from",
+          "to",
+          "fromPartId",
+          "toPartId",
+          "pin",
+          "wireColor",
+          "check",
+          "challengePrompt",
+          "hints",
+          "conceptExplanation",
+          "commonMistake",
+          "reflectionQuestion",
+        ],
       },
     },
     diagnosticTests: {
@@ -275,6 +316,7 @@ const behaviorSchema = {
 };
 
 bindEvents();
+loadExamplePhotoPlaceholder();
 initIntro();
 const initialIntroActive = document.body.classList.contains("intro-active");
 renderSettings();
@@ -307,13 +349,16 @@ function bindEvents() {
   els.stageBackButton.addEventListener("click", () => setActiveWorkflowStage(state.activeWorkflowStageIndex - 1));
   els.stageNextButton.addEventListener("click", () => setActiveWorkflowStage(state.activeWorkflowStageIndex + 1));
   els.prevBuildStepButton.addEventListener("click", () => setActiveBuildStep(state.activeBuildStepIndex - 1));
-  els.nextBuildStepButton.addEventListener("click", () => setActiveBuildStep(state.activeBuildStepIndex + 1));
+  els.nextBuildStepButton.addEventListener("click", goToNextBuildStep);
   els.copyFirmwareButton.addEventListener("click", copyFirmware);
   els.downloadFirmwareButton.addEventListener("click", downloadFirmware);
   els.connectSerialButton.addEventListener("click", connectSerial);
   els.disconnectSerialButton.addEventListener("click", disconnectSerial);
   els.sendSerialButton.addEventListener("click", sendSerialCommand);
   els.evaluateLogsButton.addEventListener("click", evaluateSerialLogs);
+  els.behaviorPredictionInput?.addEventListener("input", () => {
+    state.behaviorPrediction = els.behaviorPredictionInput.value.trim();
+  });
   els.startCameraButton.addEventListener("click", startCamera);
   els.captureEvidenceButton.addEventListener("click", captureEvidence);
   els.verifyBehaviorButton.addEventListener("click", verifyBehavior);
@@ -329,6 +374,15 @@ function bindEvents() {
   els.settingsButton.addEventListener("click", () => els.settingsDialog.showModal());
   els.saveSettingsButton.addEventListener("click", saveSettings);
   els.clearSettingsButton.addEventListener("click", clearLocalOverrides);
+}
+
+function loadExamplePhotoPlaceholder() {
+  const image = new Image();
+  image.onload = () => {
+    state.exampleImageElement = image;
+    if (!state.imageElement) drawPartsCanvas();
+  };
+  image.src = EXAMPLE_PHOTO_SRC;
 }
 
 function initIntro() {
@@ -490,6 +544,8 @@ function handlePhotoUpload(event) {
   state.plan = null;
   state.compiledFirmware = null;
   state.activeBuildStepIndex = 0;
+  state.learningJournal = {};
+  state.learningNudge = "";
   renderEmptyPlan();
   setStatus(els.transcriptBox, "Loading your photo...", "warn");
 
@@ -538,6 +594,8 @@ function clearPhoto() {
   state.plan = null;
   state.compiledFirmware = null;
   state.activeBuildStepIndex = 0;
+  state.learningJournal = {};
+  state.learningNudge = "";
   els.photoInput.value = "";
   renderEmptyPlan();
   drawPartsCanvas();
@@ -561,13 +619,7 @@ function drawPartsCanvas() {
   drawGrid(ctx, width, height);
 
   if (!state.imageElement) {
-    ctx.fillStyle = "#0f172a";
-    ctx.font = "800 20px Inter, system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("Choose one clear photo of your parts", width / 2, height / 2 - 8);
-    ctx.font = "600 14px Inter, system-ui, sans-serif";
-    ctx.fillStyle = "rgba(100, 116, 139, 0.82)";
-    ctx.fillText("Leave a little space between each piece", width / 2, height / 2 + 22);
+    drawExamplePhotoPlaceholder(ctx, width, height);
     return;
   }
 
@@ -585,6 +637,41 @@ function drawPartsCanvas() {
   if (state.plan?.parts?.length) {
     drawAnnotations(ctx, state.plan.parts);
   }
+}
+
+function drawExamplePhotoPlaceholder(ctx, width, height) {
+  const example = state.exampleImageElement;
+  if (example) {
+    const scale = Math.min(width / example.naturalWidth, height / example.naturalHeight);
+    const drawWidth = example.naturalWidth * scale;
+    const drawHeight = example.naturalHeight * scale;
+    const x = (width - drawWidth) / 2;
+    const y = (height - drawHeight) / 2;
+    ctx.save();
+    ctx.globalAlpha = 0.22;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(example, x, y, drawWidth, drawHeight);
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.fillStyle = "rgba(248, 250, 252, 0.82)";
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = "rgba(124, 58, 237, 0.34)";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([10, 10]);
+  ctx.strokeRect(26, 26, width - 52, height - 52);
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#0f172a";
+  ctx.font = "900 22px Inter, system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("Use this as your photo guide", width / 2, height / 2 - 44);
+  ctx.font = "700 15px Inter, system-ui, sans-serif";
+  ctx.fillStyle = "rgba(71, 85, 105, 0.92)";
+  ctx.fillText("Lay parts flat, separate pieces, keep pin labels visible.", width / 2, height / 2 - 10);
+  ctx.fillText("GeckCo will ask you to predict before it reveals each wire.", width / 2, height / 2 + 20);
+  ctx.restore();
 }
 
 function drawGrid(ctx, width, height) {
@@ -606,8 +693,7 @@ function drawGrid(ctx, width, height) {
   ctx.restore();
 }
 
-function drawAnnotations(ctx, parts) {
-  const fit = state.imageFit;
+function drawAnnotations(ctx, parts, fit = state.imageFit) {
   if (!fit) return;
   const colors = ["#7c3aed", "#2563eb", "#0f172a", "#14b8a6", "#a855f7", "#475569"];
   const placedLabels = [];
@@ -984,6 +1070,8 @@ async function analyzeHardware() {
     state.plan = normalizePlan(parseStructuredJson(data, "hardware plan"));
     state.plan.warnings = [...validatePlan(state.plan), ...state.plan.warnings];
     state.activeBuildStepIndex = 0;
+    state.learningJournal = {};
+    state.learningNudge = "";
     renderPlan();
     setStatus(
       els.transcriptBox,
@@ -1034,6 +1122,12 @@ function buildAnalysisPrompt(idea) {
     "If a part is ambiguous, name it as 'possible ...' and reduce confidence rather than guessing.",
     "Prefer ESP32 pins that are usually safe for beginner projects.",
     "For every wiring step, include fromPartId, toPartId, from, to, pin, and a beginner-friendly wireColor.",
+    "For every wiring step, add learning fields for a scaffolded challenge:",
+    "- challengePrompt: keep this generic, such as 'What is the next wiring move?', without naming the exact pins.",
+    "- hints: exactly three short hints. Hint 1 may name the source side, hint 2 may name the destination side, and hint 3 may directly say which pin connects to which pin.",
+    "- conceptExplanation: one beginner-friendly sentence explaining the hardware concept behind the move.",
+    "- commonMistake: one likely mistake students should avoid for this move.",
+    "- reflectionQuestion: one short why/how question the student can answer after revealing the step.",
     "Do not claim certainty for ambiguous modules; put uncertainty in warnings.",
     "Do not generate source code in this vision/planning step.",
     "Instead, return a compact firmwareSpec with chosen pins, libraries, serial protocol markers, and behavior.",
@@ -1367,8 +1461,8 @@ function filterProjectParts(parts, wiringSteps, firmwareSpec, summary) {
 }
 
 function normalizeWiringStep(step, index) {
-  return {
-    order: Number.isFinite(step.order) ? step.order : index + 1,
+  return normalizeLearningStep({
+    order: Number.isFinite(Number(step.order)) ? Number(step.order) : index + 1,
     title: step.title || `Connection ${index + 1}`,
     instruction: step.instruction || "",
     from: step.from || "",
@@ -1378,7 +1472,14 @@ function normalizeWiringStep(step, index) {
     pin: step.pin || "",
     wireColor: step.wireColor || "",
     check: step.check || "",
-  };
+    challengePrompt: step.challengePrompt || "",
+    hints: step.hints || [],
+    conceptExplanation: step.conceptExplanation || "",
+    commonMistake: step.commonMistake || "",
+    reflectionQuestion: step.reflectionQuestion || "",
+    moveChoices: step.moveChoices || [],
+    whyChoices: step.whyChoices || [],
+  }, index);
 }
 
 function validatePlan(plan) {
@@ -1401,12 +1502,14 @@ function renderEmptyPlan() {
   els.partsList.innerHTML = "";
   els.wiringList.innerHTML = "";
   els.diagnosticsList.innerHTML = "";
-  els.visualStepList.innerHTML = `<div class="visual-step-empty"><strong>Your guide will appear here</strong><span>Once I read the photo, I’ll show one clear move at a time.</span></div>`;
+  els.visualStepList.innerHTML = `<div class="visual-step-empty"><strong>Your learning guide will appear here</strong><span>After the photo is analyzed, you will predict each move before GeckCo reveals it.</span></div>`;
   restoreBuildStepControls(controls);
   if (els.buildStepCounter) els.buildStepCounter.textContent = "Move 0 of 0";
   if (els.buildStepDots) els.buildStepDots.innerHTML = "";
   if (els.prevBuildStepButton) els.prevBuildStepButton.disabled = true;
   if (els.nextBuildStepButton) els.nextBuildStepButton.disabled = true;
+  renderFirmwareConcept();
+  renderExpectedBehaviorPrompt();
 }
 
 function renderPlan() {
@@ -1447,6 +1550,8 @@ function renderPlan() {
   els.firmwareOutput.textContent =
     plan.firmware?.sketch ||
     "I’m still preparing the code for this build.";
+  renderFirmwareConcept();
+  renderExpectedBehaviorPrompt();
   renderVisualSteps();
   state.readme = buildReadme();
   els.readmePreview.textContent = state.readme;
@@ -1461,6 +1566,30 @@ function warningToDiagnostic(warning) {
   };
 }
 
+function renderFirmwareConcept() {
+  if (!els.firmwareConcept) return;
+  const text = state.plan
+    ? summarizeFirmwareConcept(state.plan)
+    : "Create a guide first. Before you load code, GeckCo will explain what the firmware controls and which pins matter.";
+  const lines = text.split("\n").filter(Boolean);
+  els.firmwareConcept.innerHTML = `<h3>What this code controls</h3>${lines
+    .map((line) => `<p>${escapeHtml(line)}</p>`)
+    .join("")}`;
+}
+
+function renderExpectedBehaviorPrompt() {
+  if (!els.expectedBehaviorPrompt) return;
+  els.expectedBehaviorPrompt.textContent = state.plan
+    ? buildExpectedBehaviorPrompt(state.plan)
+    : "Create a guide first. Before checking logs or camera evidence, write what you expect the board to do.";
+}
+
+function refreshReadmePreview() {
+  if (!state.plan || !els.readmePreview) return;
+  state.readme = buildReadme();
+  els.readmePreview.textContent = state.readme;
+}
+
 function renderVisualSteps() {
   if (!els.visualStepList) return;
   const plan = state.plan;
@@ -1473,49 +1602,432 @@ function renderVisualSteps() {
   const activeIndex = clamp(state.activeBuildStepIndex, 0, steps.length - 1);
   state.activeBuildStepIndex = activeIndex;
   const step = steps[activeIndex];
+  const entry = learningEntryForStep(step);
+  const revealed = Boolean(entry.revealed);
 
   const controls = getBuildStepControls();
   els.visualStepList.innerHTML = "";
   const card = document.createElement("div");
-  card.className = "visual-step-card is-active";
-  const canvas = document.createElement("canvas");
+  card.className = `visual-step-card is-active ${revealed ? "is-revealed" : "is-learning"}`;
+  let canvas = null;
+  let drawCanvas = null;
+  const media = revealed ? document.createElement("canvas") : buildLearningChallengeBoard(step, activeIndex, steps.length);
+  if (revealed) canvas = media;
+  else canvas = media.querySelector("canvas");
   const copy = document.createElement("div");
   copy.className = "visual-step-copy";
   const meta = document.createElement("p");
   const title = document.createElement("strong");
-  const body = document.createElement("span");
   meta.className = "step-copy-kicker";
   title.className = "step-copy-title";
-  body.className = "step-copy-instruction";
-  meta.textContent = `Move ${step.order || activeIndex + 1} of ${steps.length}`;
-  title.textContent = step.title || "Next connection";
-  body.textContent = step.instruction;
-  copy.append(meta, title, body);
-  if (step.check) {
-    const check = document.createElement("aside");
-    const checkLabel = document.createElement("span");
-    const checkText = document.createElement("p");
-    check.className = "step-copy-tip";
-    checkLabel.className = "step-copy-tip-label";
-    checkText.className = "step-copy-tip-text";
-    checkLabel.textContent = "Quick check";
-    checkText.textContent = step.check;
-    check.append(checkLabel, checkText);
-    copy.append(check);
+  meta.textContent = revealed
+    ? `Reveal ${step.order || activeIndex + 1} of ${steps.length}`
+    : `Predict ${step.order || activeIndex + 1} of ${steps.length}`;
+  title.textContent = revealed ? step.title || "Next connection" : "Try the wiring first.";
+  copy.append(meta, title);
+
+  if (!revealed) {
+    copy.append(buildPredictionEditor(step, entry));
+    copy.append(buildHintPanel(step, entry));
+    copy.append(buildLearningActions(step, entry));
+  } else {
+    const body = document.createElement("span");
+    body.className = "step-copy-instruction";
+    body.textContent = step.instruction;
+    if (entry.correctionShown && !entry.predictionCorrect) {
+      copy.append(buildCorrectionPanel("Correct move", getCorrectMoveAnswer(step)));
+    }
+    copy.append(body);
+    copy.append(buildReflectionEditor(step, entry));
+    if (isLearningStepComplete(step, entry)) {
+      copy.append(buildConceptPanel("Why this works", step.conceptExplanation));
+      copy.append(buildConceptPanel("Common mistake", step.commonMistake));
+      if (step.check) copy.append(buildConceptPanel("Quick check", step.check));
+    }
   }
-  if (controls) {
-    controls.classList.add("is-inline");
-    copy.append(controls);
-  }
-  card.append(canvas, copy);
+
+  copy.append(buildLearningStatus(step, entry));
+  card.append(media, copy);
   els.visualStepList.append(card);
+  restoreBuildStepControls(controls);
 
   if (els.buildStepCounter) els.buildStepCounter.textContent = `Move ${activeIndex + 1} of ${steps.length}`;
   renderBuildStepDots(steps.length, activeIndex);
-  if (els.prevBuildStepButton) els.prevBuildStepButton.disabled = activeIndex === 0;
-  if (els.nextBuildStepButton) els.nextBuildStepButton.disabled = activeIndex === steps.length - 1;
+  syncBuildStepControls(step, entry, steps.length);
 
-  requestAnimationFrame(() => drawVisualStep(canvas, step, activeIndex));
+  drawCanvas = revealed
+    ? () => drawVisualStep(canvas, step, activeIndex)
+    : () => drawLearningPreview(canvas);
+  if (canvas) requestAnimationFrame(drawCanvas);
+}
+
+function buildLearningChallengeBoard(step, activeIndex, totalSteps) {
+  const board = document.createElement("div");
+  board.className = "learning-preview-board";
+  const header = document.createElement("div");
+  const kicker = document.createElement("p");
+  const heading = document.createElement("strong");
+  const prompt = document.createElement("span");
+  const canvas = document.createElement("canvas");
+  header.className = "learning-preview-header";
+  kicker.className = "learning-board-kicker";
+  heading.className = "learning-board-title";
+  prompt.className = "learning-board-prompt";
+  kicker.textContent = `Move ${activeIndex + 1} of ${totalSteps}`;
+  heading.textContent = "Try the wiring";
+  prompt.textContent = "Look at the photo, labels, and parts list. Pick the move you would try before GeckCo shows the answer.";
+  header.append(kicker, heading, prompt);
+  board.append(header, canvas);
+  return board;
+}
+
+function buildPredictionEditor(step, entry) {
+  const wrap = document.createElement("div");
+  const label = document.createElement("span");
+  const help = document.createElement("p");
+  const choices = document.createElement("div");
+  const typed = document.createElement("label");
+  const typedLabel = document.createElement("span");
+  const textarea = document.createElement("textarea");
+  const checkButton = document.createElement("button");
+  wrap.className = "learning-choice-block";
+  label.className = "learning-choice-label";
+  help.className = "learning-choice-help";
+  choices.className = "learning-choice-list";
+  typed.className = "learning-field";
+  label.textContent = step.predictionQuestion || "What connection would you try next?";
+  help.textContent = "Choose one answer first. If you are stuck, use a direct hint or choose that you do not know yet.";
+  step.moveChoices.forEach((choice) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = choiceButtonClass(choice, entry, "prediction");
+    button.textContent = choice.label;
+    button.addEventListener("click", () => handleMoveChoice(step, choice));
+    choices.append(button);
+  });
+  typedLabel.textContent = "Or type your answer";
+  textarea.rows = 2;
+  textarea.placeholder = "Example: Connect GND to GND between the ESP32 and PIR.";
+  textarea.value = entry.prediction || "";
+  textarea.addEventListener("input", () => {
+    recordLearningStep(step, {
+      prediction: textarea.value,
+      predictionChoiceId: "",
+      predictionChecked: false,
+      predictionCorrect: false,
+      correctionShown: false,
+    });
+    state.learningNudge = "";
+    updateInlineLearningStatus(step);
+  });
+  checkButton.className = "secondary-button compact-check-button";
+  checkButton.type = "button";
+  checkButton.textContent = "Check typed answer";
+  checkButton.addEventListener("click", () => checkTypedMoveAnswer(step));
+  typed.append(typedLabel, textarea, checkButton);
+  wrap.append(label, help, choices, typed);
+  return wrap;
+}
+
+function handleMoveChoice(step, choice) {
+  const isCorrect = Boolean(choice.isCorrect);
+  state.learningNudge = "";
+  recordLearningStep(
+    step,
+    {
+      prediction: choice.label,
+      predictionChoiceId: choice.id,
+      predictionChecked: true,
+      predictionCorrect: isCorrect,
+      correctionShown: !isCorrect,
+      revealed: true,
+    },
+    true,
+  );
+}
+
+function checkTypedMoveAnswer(step) {
+  const latest = learningEntryForStep(step);
+  const prediction = latest.prediction?.trim() || "";
+  if (!prediction) {
+    state.learningNudge = "Choose a move or type your best wiring guess first.";
+    renderVisualSteps();
+    return;
+  }
+  const isCorrect = isTypedMoveAnswerCorrect(step, prediction);
+  state.learningNudge = "";
+  recordLearningStep(
+    step,
+    {
+      prediction,
+      predictionChoiceId: "",
+      predictionChecked: true,
+      predictionCorrect: isCorrect,
+      correctionShown: !isCorrect,
+      revealed: true,
+    },
+    true,
+  );
+}
+
+function buildHintPanel(step, entry) {
+  const wrap = document.createElement("div");
+  const visibleHints = step.hints.slice(0, entry.hintsUsed || 0);
+  wrap.className = "learning-hints";
+  if (!visibleHints.length) {
+    wrap.textContent = "Direct hints will appear here one at a time.";
+    return wrap;
+  }
+  visibleHints.forEach((hint, index) => {
+    const item = document.createElement("p");
+    item.textContent = `Hint ${index + 1}: ${hint}`;
+    wrap.append(item);
+  });
+  return wrap;
+}
+
+function buildLearningActions(step, entry) {
+  const actions = document.createElement("div");
+  const hintButton = document.createElement("button");
+  actions.className = "learning-actions is-hint-only";
+  hintButton.className = "secondary-button";
+  hintButton.type = "button";
+  hintButton.textContent = entry.hintsUsed >= step.hints.length ? "All hints shown" : "Get direct hint";
+  hintButton.disabled = entry.hintsUsed >= step.hints.length;
+  hintButton.addEventListener("click", () => {
+    recordLearningStep(step, { hintsUsed: Math.min(step.hints.length, (entry.hintsUsed || 0) + 1) }, true);
+  });
+  actions.append(hintButton);
+  return actions;
+}
+
+function buildCorrectionPanel(label, text) {
+  const panel = document.createElement("aside");
+  const panelLabel = document.createElement("span");
+  const panelText = document.createElement("p");
+  panel.className = "answer-correction";
+  panelLabel.textContent = label;
+  panelText.textContent = text;
+  panel.append(panelLabel, panelText);
+  return panel;
+}
+
+function choiceButtonClass(choice, entry, phase) {
+  const selectedId = phase === "why" ? entry.whyChoiceId : entry.predictionChoiceId;
+  const checked = phase === "why" ? entry.reflectionChecked : entry.predictionChecked;
+  const classes = ["learning-choice-button"];
+  if (selectedId === choice.id) {
+    classes.push("is-selected");
+    if (checked) classes.push(choice.isCorrect ? "is-correct" : "is-wrong");
+  }
+  return classes.join(" ");
+}
+
+function buildConceptPanel(label, text) {
+  const panel = document.createElement("aside");
+  const panelLabel = document.createElement("span");
+  const panelText = document.createElement("p");
+  panel.className = "step-copy-tip";
+  panelLabel.className = "step-copy-tip-label";
+  panelText.className = "step-copy-tip-text";
+  panelLabel.textContent = label;
+  panelText.textContent = text || "Review this idea before moving on.";
+  panel.append(panelLabel, panelText);
+  return panel;
+}
+
+function buildReflectionEditor(step, entry) {
+  const wrap = document.createElement("div");
+  const label = document.createElement("span");
+  const choices = document.createElement("div");
+  const typed = document.createElement("label");
+  const typedLabel = document.createElement("span");
+  const textarea = document.createElement("textarea");
+  const checkButton = document.createElement("button");
+  wrap.className = "learning-choice-block";
+  label.className = "learning-choice-label";
+  choices.className = "learning-choice-list";
+  typed.className = "learning-field";
+  label.textContent = step.reflectionQuestion || "Why does this move matter?";
+  step.whyChoices.forEach((choice) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = choiceButtonClass(choice, entry, "why");
+    button.textContent = choice.label;
+    button.addEventListener("click", () => handleWhyChoice(step, choice));
+    choices.append(button);
+  });
+  typedLabel.textContent = "Or type why";
+  textarea.rows = 2;
+  textarea.placeholder = "Example: A shared ground lets the signal be read correctly.";
+  textarea.value = entry.reflection || "";
+  textarea.addEventListener("input", () => {
+    const typedCorrect = isTypedWhyAnswerCorrect(step, textarea.value);
+    recordLearningStep(step, {
+      reflection: textarea.value,
+      whyChoiceId: "",
+      whyCorrect: typedCorrect,
+      whyCorrected: typedCorrect ? false : entry.whyCorrected,
+      reflectionChecked: typedCorrect,
+    });
+    state.learningNudge = "";
+    syncBuildStepControls(step, learningEntryForStep(step), state.plan.wiringSteps.length);
+    updateInlineLearningStatus(step);
+    refreshReadmePreview();
+  });
+  checkButton.className = "secondary-button compact-check-button";
+  checkButton.type = "button";
+  checkButton.textContent = "Check typed why";
+  checkButton.addEventListener("click", () => checkTypedWhyAnswer(step));
+  typed.append(typedLabel, textarea, checkButton);
+  wrap.append(label, choices, typed);
+  if (entry.whyCorrected && !entry.whyCorrect) {
+    wrap.append(buildCorrectionPanel("Correct why", getCorrectWhyAnswer(step)));
+  }
+  return wrap;
+}
+
+function handleWhyChoice(step, choice) {
+  const isCorrect = Boolean(choice.isCorrect);
+  state.learningNudge = "";
+  recordLearningStep(
+    step,
+    {
+      reflection: choice.label,
+      whyChoiceId: choice.id,
+      whyCorrect: isCorrect,
+      whyCorrected: !isCorrect,
+      reflectionChecked: true,
+    },
+    true,
+  );
+}
+
+function checkTypedWhyAnswer(step) {
+  const latest = learningEntryForStep(step);
+  const reflection = latest.reflection?.trim() || "";
+  if (!reflection) {
+    state.learningNudge = "Choose why this matters or type your own reason.";
+    renderVisualSteps();
+    return;
+  }
+  const isCorrect = isTypedWhyAnswerCorrect(step, reflection);
+  state.learningNudge = "";
+  recordLearningStep(
+    step,
+    {
+      reflection,
+      whyChoiceId: "",
+      whyCorrect: isCorrect,
+      whyCorrected: !isCorrect,
+      reflectionChecked: true,
+    },
+    true,
+  );
+}
+
+function buildLearningStatus(step, entry) {
+  const status = document.createElement("div");
+  status.className = "learning-status";
+  status.dataset.learningStatus = "true";
+  status.textContent = learningStatusText(step, entry);
+  if (state.learningNudge) status.classList.add("warn");
+  return status;
+}
+
+function updateInlineLearningStatus(step) {
+  const status = document.querySelector("[data-learning-status='true']");
+  if (!status) return;
+  const entry = learningEntryForStep(step);
+  status.textContent = learningStatusText(step, entry);
+  status.classList.toggle("warn", Boolean(state.learningNudge));
+}
+
+function learningStatusText(step, entry) {
+  if (state.learningNudge) return state.learningNudge;
+  if (!entry.revealed) {
+    const hintText = entry.hintsUsed ? `${entry.hintsUsed} hint(s) used. ` : "";
+    return `${hintText}Choose the move you would try. A direct hint is available if you are stuck.`;
+  }
+  if (!isLearningStepComplete(step, entry)) {
+    if (entry.correctionShown && !entry.predictionCorrect) {
+      return "Correct move shown. Choose why it matters, or type a correct reason, to unlock the next move.";
+    }
+    return "Correct move. Now answer why it matters to unlock the next move.";
+  }
+  if (entry.whyCorrected && !entry.whyCorrect) return "Correct why answer shown. You can continue to the next challenge.";
+  return "Correct. Next challenge unlocked.";
+}
+
+function learningEntryForStep(step) {
+  const key = String(Number.isFinite(Number(step.order)) ? Number(step.order) : 1);
+  return state.learningJournal[key] || {
+    stepOrder: Number(key),
+    stepTitle: step.title || `Move ${key}`,
+    prediction: "",
+    predictionChoiceId: "",
+    predictionChecked: false,
+    predictionCorrect: false,
+    correctionShown: false,
+    hintsUsed: 0,
+    revealed: false,
+    reflection: "",
+    whyChoiceId: "",
+    whyCorrect: false,
+    whyCorrected: false,
+    reflectionChecked: false,
+  };
+}
+
+function recordLearningStep(step, patch, shouldRender = false) {
+  state.learningJournal = updateLearningJournalEntry(state.learningJournal, step, patch);
+  if (shouldRender) {
+    state.readme = buildReadme();
+    if (els.readmePreview) els.readmePreview.textContent = state.readme;
+    renderVisualSteps();
+  }
+}
+
+function syncBuildStepControls(step, entry, count) {
+  if (els.prevBuildStepButton) els.prevBuildStepButton.disabled = state.activeBuildStepIndex === 0;
+  if (!els.nextBuildStepButton) return;
+  const complete = isLearningStepComplete(step, entry);
+  const isLastStep = state.activeBuildStepIndex === count - 1;
+  els.nextBuildStepButton.disabled = !complete;
+  els.nextBuildStepButton.textContent = isLastStep ? "Guide complete" : "Next challenge";
+}
+
+function isLearningStepComplete(step, entry = learningEntryForStep(step)) {
+  return Boolean(
+    entry.revealed &&
+    (entry.whyCorrect || entry.whyCorrected || isTypedWhyAnswerCorrect(step, entry.reflection || "")),
+  );
+}
+
+function goToNextBuildStep() {
+  const step = state.plan?.wiringSteps?.[state.activeBuildStepIndex];
+  if (!step) return;
+  if (!isLearningStepComplete(step)) {
+    state.learningNudge = "Answer the why check before moving on.";
+    renderVisualSteps();
+    return;
+  }
+  state.learningNudge = "";
+  if (state.activeBuildStepIndex === (state.plan?.wiringSteps?.length || 1) - 1) {
+    setActiveWorkflowStage(2);
+    return;
+  }
+  setActiveBuildStep(state.activeBuildStepIndex + 1);
+}
+
+function highestAvailableBuildStep() {
+  const steps = state.plan?.wiringSteps || [];
+  let highest = 0;
+  for (let index = 0; index < steps.length; index += 1) {
+    if (index === 0 || isLearningStepComplete(steps[index - 1])) highest = index;
+    else break;
+  }
+  return highest;
 }
 
 function getBuildStepControls() {
@@ -1532,11 +2044,13 @@ function restoreBuildStepControls(controls = getBuildStepControls()) {
 function renderBuildStepDots(count, activeIndex) {
   if (!els.buildStepDots) return;
   els.buildStepDots.innerHTML = "";
+  const highestAvailable = highestAvailableBuildStep();
   for (let index = 0; index < count; index += 1) {
     const dot = document.createElement("button");
     dot.type = "button";
     dot.className = index === activeIndex ? "is-active" : "";
     dot.setAttribute("aria-label", `Go to build step ${index + 1}`);
+    dot.disabled = index > highestAvailable;
     dot.addEventListener("click", () => setActiveBuildStep(index));
     els.buildStepDots.append(dot);
   }
@@ -1545,8 +2059,25 @@ function renderBuildStepDots(count, activeIndex) {
 function setActiveBuildStep(index) {
   const count = state.plan?.wiringSteps?.length || 0;
   if (!count) return;
-  state.activeBuildStepIndex = clamp(index, 0, count - 1);
+  const targetIndex = clamp(index, 0, count - 1);
+  const highestAvailable = highestAvailableBuildStep();
+  if (targetIndex > highestAvailable) {
+    state.learningNudge = "Finish the current challenge before jumping ahead.";
+    state.activeBuildStepIndex = highestAvailable;
+  } else {
+    state.learningNudge = "";
+    state.activeBuildStepIndex = targetIndex;
+  }
   renderVisualSteps();
+}
+
+function drawLearningPreview(canvas) {
+  if (!canvas) return;
+  const prepared = prepareCanvas(canvas);
+  const { ctx, width, height } = prepared;
+  const fit = drawImageCanvasBase(ctx, width, height);
+  if (!fit || !state.plan?.parts?.length) return;
+  drawAnnotations(ctx, state.plan.parts, fit);
 }
 
 function drawVisualStep(canvas, step, index) {
@@ -1958,6 +2489,13 @@ function appendSerial(text) {
 }
 
 function evaluateSerialLogs() {
+  state.behaviorPrediction = els.behaviorPredictionInput?.value.trim() || state.behaviorPrediction;
+  if (!state.behaviorPrediction) {
+    setStatus(els.logEvaluation, "First, write what you expect the board to print or do. Then we can compare it with the logs.", "warn");
+    els.behaviorPredictionInput?.focus();
+    return;
+  }
+
   const log = state.serialLog.trim();
   if (!log) {
     setStatus(els.logEvaluation, "Nothing from the board yet. Try pressing reset on the ESP32.", "warn");
@@ -2028,6 +2566,12 @@ function renderEvidence() {
 }
 
 async function verifyBehavior() {
+  state.behaviorPrediction = els.behaviorPredictionInput?.value.trim() || state.behaviorPrediction;
+  if (!state.behaviorPrediction) {
+    setStatus(els.behaviorEvaluation, "Write a quick prediction first, then I can compare the camera evidence against it.", "warn");
+    els.behaviorPredictionInput?.focus();
+    return;
+  }
   await refreshServerConfig();
   let latest = state.evidencePhotos[0]?.dataUrl || "";
   if (!latest && state.cameraStream) latest = captureEvidence();
@@ -2060,6 +2604,7 @@ async function verifyBehavior() {
               text: [
                 `Project: ${state.plan?.projectTitle || "Unknown"}`,
                 `Goal: ${els.ideaText.value.trim()}`,
+                `Student prediction before checking:\n${state.behaviorPrediction}`,
                 `Recent serial logs:\n${state.serialLog.slice(-3000) || "No logs captured."}`,
                 "Judge whether the visible behavior matches the requested project.",
               ].join("\n\n"),
@@ -2330,8 +2875,12 @@ function buildReadme() {
   const evidence = state.evidencePhotos.length
     ? `\n## Evidence\n\nCaptured ${state.evidencePhotos.length} camera frame(s) during verification.\n`
     : "";
+  const behaviorPrediction = state.behaviorPrediction
+    ? `\n## Behavior Prediction\n\n${state.behaviorPrediction}\n`
+    : "";
+  const learningJournal = buildLearningJournalMarkdown(state.learningJournal, plan.wiringSteps);
 
-  return (
+  const baseReadme = (
     plan.readmeMarkdown ||
     `# ${plan.projectTitle}
 
@@ -2353,6 +2902,8 @@ ${wiring || "Wiring pending."}
 
 ${checks || "- Diagnostics pending."}
 ${warnings}
+${learningJournal}
+${behaviorPrediction}
 ## Firmware
 
 \`\`\`cpp
@@ -2364,6 +2915,10 @@ ${evidence}
 ${firmwareNotes}
 `
   );
+  if (plan.readmeMarkdown) {
+    return `${baseReadme.trim()}\n\n${learningJournal}\n${behaviorPrediction}`.trim();
+  }
+  return baseReadme;
 }
 
 function downloadReadme() {

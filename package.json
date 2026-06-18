@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "build": "node --check app.js && node --check server.mjs && node --check netlify/functions/api.mjs"
+    "build": "node --check app.js && node --check server.mjs && node --check netlify/functions/api.mjs",
+    "test": "node --test test/*.test.mjs"
   }
 }
 

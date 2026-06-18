@@ -8,7 +8,7 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23f8fafc'/%3E%3Ctext x='32' y='39' text-anchor='middle' font-family='Arial' font-size='20' font-weight='800' fill='%230f172a'%3EGC%3C/text%3E%3C/svg%3E"
     />
-    <link rel="stylesheet" href="./styles.css?v=landing-redesign-20260605" />
+    <link rel="stylesheet" href="./styles.css?v=learning-flow-20260617" />
     <script src="./config.local.js"></script>
     <script
       type="module"
@@ -32,12 +32,12 @@
         <div class="intro-hero">
           <div class="intro-copy">
             <p class="intro-product-name">Codex For Hardware</p>
-            <h1>Build hardware without the scary parts.</h1>
+            <h1>Learn hardware by trying first.</h1>
             <p class="intro-statement">
-              Snap a parts photo, say the idea, and GeckCo walks you from loose components to a working ESP32 build.
+              Snap a parts photo, say the idea, then predict each wiring move before GeckCo reveals the answer.
             </p>
             <p class="intro-promise">
-              No code. No debugging. No endless copy-pasting ChatGPT code and praying it works.
+              Hints come first, answers come after effort, and your final notes show what you learned.
             </p>
             <div class="intro-actions">
               <button class="intro-start" id="introStartButton" type="button">Start building</button>
@@ -60,7 +60,7 @@
             <div>
               <p>Feature 01</p>
               <h2>Photo-to-guide AI</h2>
-              <span>Upload one clear parts photo and GeckCo finds only what your build actually needs.</span>
+              <span>Use a clear parts photo as the map, then learn how each required component fits the build.</span>
             </div>
           </article>
           <article class="intro-feature">
@@ -71,7 +71,7 @@
             <div>
               <p>Feature 02</p>
               <h2>Wire-by-wire handholding</h2>
-              <span>Follow one calm step at a time on your own image, with clean labels and clear checks.</span>
+              <span>Predict, ask for hints, reveal the move, and explain why it matters before continuing.</span>
             </div>
           </article>
           <article class="intro-feature">
@@ -81,8 +81,8 @@
             />
             <div>
               <p>Feature 03</p>
-              <h2>Finish without code chaos</h2>
-              <span>GeckCo prepares the firmware, helps upload it, checks the result, and packages the proof.</span>
+              <h2>Finish with proof of learning</h2>
+              <span>GeckCo explains the firmware, checks the result, and packages both the build and your learning journal.</span>
             </div>
           </article>
         </section>
@@ -103,17 +103,17 @@
         <button class="timeline-step" data-workflow-stage="1" type="button">
           <span>02</span>
           <strong>Guide</strong>
-          <em>One step at a time</em>
+          <em>Choose + explain</em>
         </button>
         <button class="timeline-step" data-workflow-stage="2" type="button">
           <span>03</span>
           <strong>Load</strong>
-          <em>Send to board</em>
+          <em>Understand code</em>
         </button>
         <button class="timeline-step" data-workflow-stage="3" type="button">
           <span>04</span>
           <strong>Watch</strong>
-          <em>See it working</em>
+          <em>Predict behavior</em>
         </button>
         <button class="timeline-step" data-workflow-stage="4" type="button">
           <span>05</span>
@@ -133,7 +133,7 @@
           <p class="section-number">01</p>
           <div>
             <h1>Start with what you have.</h1>
-            <p>Lay out your parts, take a clear photo, and describe the build. GeckCo turns it into a guided hardware path.</p>
+            <p>Lay out your parts like the example, take a clear photo, and describe the build. GeckCo will coach you through the reasoning.</p>
           </div>
         </div>
 
@@ -162,7 +162,7 @@
               <span class="status-pill" id="voiceStatus">Ready</span>
             </div>
             <div class="transcript-box" id="transcriptBox">I’ll write down what I hear here.</div>
-            <button class="wide-button" id="analyzeButton" type="button">Create my guide</button>
+            <button class="wide-button" id="analyzeButton" type="button">Start learning guide</button>
           </div>
         </div>
       </section>
@@ -171,8 +171,8 @@
         <div class="section-heading">
           <p class="section-number">02</p>
           <div>
-            <h2>Build one step at a time.</h2>
-            <p>Your photo becomes the map: highlighted parts, clear connections, and one safe move at a time.</p>
+            <h2>Predict the next move.</h2>
+            <p>Your photo becomes the map. Choose the move you would try, use a direct hint if needed, then explain why it works.</p>
           </div>
         </div>
 
@@ -184,7 +184,7 @@
 
         <div class="visual-guide-panel">
           <div class="carousel-header">
-            <h3>Your next move</h3>
+            <h3>Your learning challenge</h3>
             <span id="buildStepCounter">Step 0 of 0</span>
           </div>
           <div class="visual-step-list" id="visualStepList"></div>
@@ -201,7 +201,7 @@
           <p class="section-number">03</p>
           <div>
             <h2>Put the code on your board.</h2>
-            <p>Plug in the ESP32. I’ll prepare the code and send it over when you press one button.</p>
+            <p>Read what the firmware controls, then load it onto the ESP32 when the behavior makes sense.</p>
           </div>
         </div>
 
@@ -251,6 +251,10 @@
                 <button class="secondary-button" id="downloadFirmwareButton" type="button">Download</button>
               </div>
             </div>
+            <div class="firmware-concept" id="firmwareConcept">
+              <h3>What this code controls</h3>
+              <p>Create a guide first. Before you load code, GeckCo will explain the behavior and pin map.</p>
+            </div>
             <pre id="firmwareOutput"><code>Your code will appear here after I make the guide.</code></pre>
           </div>
         </div>
@@ -261,7 +265,7 @@
           <p class="section-number">04</p>
           <div>
             <h2>Let’s make sure it works.</h2>
-            <p>I’ll listen to the board and look at the project with the camera so we can catch issues together.</p>
+            <p>First predict what should happen, then compare your expectation with board logs and camera evidence.</p>
           </div>
         </div>
 
@@ -273,6 +277,15 @@
                 <h3>Board messages</h3>
                 <p>This is where your board tells us what it is doing.</p>
               </div>
+            </div>
+            <label class="field-label" for="behaviorPredictionInput">What should happen?</label>
+            <textarea
+              id="behaviorPredictionInput"
+              rows="3"
+              placeholder="Example: When I wave at the PIR sensor, the serial log should say motion detected and the LED should turn on."
+            ></textarea>
+            <div class="status-strip expected-behavior" id="expectedBehaviorPrompt">
+              Create a guide first. Before checking logs or camera evidence, write what you expect the board to do.
             </div>
             <div class="inline-form">
               <label>
@@ -316,7 +329,7 @@
           <p class="section-number">05</p>
           <div>
             <h2>Save your project.</h2>
-            <p>I’ll turn the build into clean project notes and package the code so you can share it.</p>
+            <p>I’ll turn the build, your predictions, hints, reflections, and code into clean project notes.</p>
           </div>
         </div>
 
@@ -387,6 +400,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="./app.js?v=landing-redesign-20260605"></script>
+    <script type="module" src="./app.js?v=learning-flow-20260617"></script>
   </body>
 </html>
