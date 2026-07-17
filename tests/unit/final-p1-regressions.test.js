@@ -4,7 +4,10 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { hasFirmwareDiagnosticContract } from "../../src/makeable/actions.js";
+import {
+  hasFirmwareDiagnosticContract,
+  requestHardwarePlan,
+} from "../../src/makeable/actions.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -13,18 +16,14 @@ const int PUMP_PIN = 8;
 bool pumpActive = false;
 unsigned long pumpOffDeadline = 0;
 
-void stopPump() {
-  digitalWrite(PUMP_PIN, LOW);
-  pumpActive = false;
-}
-
 void reportReset() { Serial.println("MAKEABLE|RESET|POWER_ON"); }
 void reportReady() { Serial.println("MAKEABLE|READY|ESP32"); }
 void reportCheck() { Serial.println("MAKEABLE|CHECK|pump|PASS|pulse complete"); }
 
 void handleCommand(String line) {
   if (line.startsWith("MAKEABLE|STOP|")) {
-    stopPump();
+    digitalWrite(PUMP_PIN, LOW);
+    pumpActive = false;
     return;
   }
   if (line.startsWith("MAKEABLE|RUN|")) {
@@ -39,11 +38,69 @@ void handleCommand(String line) {
 void setup() { Serial.begin(115200); reportReset(); reportReady(); }
 void loop() {
   if (pumpActive && (long)(millis() - pumpOffDeadline) >= 0) {
-    stopPump();
+    digitalWrite(PUMP_PIN, LOW);
+    pumpActive = false;
   }
   if (Serial.available()) handleCommand(Serial.readStringUntil('\\n'));
 }
 `;
+
+const ADVERSARIAL_FIRMWARE = `
+const int PUMP_PIN = 8;
+bool pumpActive = false;
+unsigned long pumpOffDeadline = 0;
+
+void reportReset() { Serial.println("MAKEABLE|RESET|POWER_ON"); }
+void reportReady() { Serial.println("MAKEABLE|READY|ESP32"); }
+void reportCheck() { Serial.println("MAKEABLE|CHECK|pump|PASS|pulse complete"); }
+
+void handleCommand(String line) {
+  if (line.startsWith("MAKEABLE|RUN|")) {
+    digitalWrite(PUMP_PIN, HIGH);
+    pumpOffDeadline = millis() + 500;
+    reportCheck();
+  }
+  if (line.startsWith("MAKEABLE|STOP|")) {
+    return;
+  }
+}
+
+void stopPump() {
+  digitalWrite(PUMP_PIN, LOW);
+}
+
+void setup() { Serial.begin(115200); reportReset(); reportReady(); }
+void loop() {
+  pumpOffDeadline = millis() + 500;
+  if (pumpActive && (long)(millis() - pumpOffDeadline) >= 0) {
+    pumpActive = false;
+  }
+  if (Serial.available()) handleCommand(Serial.readStringUntil('\\n'));
+}
+`;
+
+test("firmware diagnostics reject physical-off actions outside the actual STOP and deadline blocks", () => {
+  assert.equal(hasFirmwareDiagnosticContract(ADVERSARIAL_FIRMWARE), false);
+});
+
+test("firmware diagnostics reject helper calls in place of direct physical shutoff", () => {
+  const helperOnly = COMPLIANT_FIRMWARE
+    .replace(
+      "void reportReset()",
+      "void stopPump() { digitalWrite(PUMP_PIN, LOW); }\n\nvoid reportReset()",
+    )
+    .replaceAll("digitalWrite(PUMP_PIN, LOW);", "stopPump();");
+
+  assert.equal(hasFirmwareDiagnosticContract(helperOnly), false);
+});
+
+test("firmware diagnostics require STOP and deadline blocks to shut off the energized target", () => {
+  const wrongTarget = COMPLIANT_FIRMWARE
+    .replace("const int PUMP_PIN = 8;", "const int PUMP_PIN = 8;\nconst int LED_PIN = 2;")
+    .replaceAll("digitalWrite(PUMP_PIN, LOW);", "digitalWrite(LED_PIN, LOW);");
+
+  assert.equal(hasFirmwareDiagnosticContract(wrongTarget), false);
+});
 
 test("firmware diagnostics require executable STOP handling", () => {
   const missingStop = COMPLIANT_FIRMWARE.replace(
@@ -67,6 +124,53 @@ test("firmware diagnostics require a millis-based actuator-off deadline", () => 
 
 test("generated firmware with STOP and an internal safety deadline is accepted", () => {
   assert.equal(hasFirmwareDiagnosticContract(COMPLIANT_FIRMWARE), true);
+});
+
+test("hardware planning asks for direct physical safety writes that match validation", async () => {
+  let requestPayload;
+  await requestHardwarePlan({
+    idea: "Pulse a pump",
+    imageDataUrl: "data:image/jpeg;base64,AA==",
+    fetchImpl: async (_url, init) => {
+      requestPayload = JSON.parse(init.body);
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify({
+            id: "plan_direct_safety",
+            output_text: JSON.stringify({
+              projectTitle: "Safe pump",
+              summary: "",
+              parts: [],
+              feasibility: { status: "ready", reasons: [] },
+              missingParts: [],
+              alternatives: [],
+              wiringSteps: [],
+              firmwareSpec: {
+                board: "ESP32",
+                behavior: "",
+                libraries: [],
+                pinAssignments: [],
+                serialProtocol: [],
+              },
+              diagnostics: {
+                warnings: [],
+                tests: [],
+                manualAction: "Observe it.",
+                manualQuestion: "Did it work?",
+                manualSuccessLabel: "Yes",
+              },
+            }),
+          });
+        },
+      };
+    },
+  });
+
+  assert.match(
+    JSON.stringify(requestPayload),
+    /direct physical (?:pin|PWM) writes.*do not delegate.*helper/i,
+  );
 });
 
 test("parts photos use route aspect ratios instead of fixed HTML height attributes", async () => {

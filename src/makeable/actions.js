@@ -1482,18 +1482,11 @@ export function hasFirmwareDiagnosticContract(sketch) {
       `Serial\\s*\\.\\s*(?:print|println|printf)\\s*\\(\\s*["']MAKEABLE\\|${marker}\\|`,
       "i",
     ).test(source);
-  const handlesRun =
-    /(?:startsWith|indexOf)\s*\(\s*["']MAKEABLE\|RUN\|/i.test(source) ||
-    /strncmp\s*\([^,\n]+,\s*["']MAKEABLE\|RUN\|/i.test(source);
-  const handlesStop = commandBranchHasSafetyAction(source, "STOP");
-  const enforcesActuatorDeadline = hasActuatorOffDeadline(source);
   return (
     emits("READY") &&
     emits("CHECK") &&
     emits("RESET") &&
-    handlesRun &&
-    handlesStop &&
-    enforcesActuatorDeadline
+    hasBranchBoundActuatorSafety(source)
   );
 }
 
@@ -1657,6 +1650,7 @@ function firmwareDiagnosticRequirements() {
     'Emit `MAKEABLE|CHECK|<id>|PASS|<detail>` or `MAKEABLE|CHECK|<id>|FAIL|<detail>` for every diagnostic.',
     'Read newline-delimited serial input, handle only `MAKEABLE|RUN|<id>|<pulseMs>` and `MAKEABLE|STOP|<id>`, reject unknown IDs, and clamp actuator pulses to at most 1000 ms.',
     "Before energizing an actuator, set an internal monotonic millis() off deadline; the main loop must de-energize it when that deadline arrives even if no more serial input is received, and STOP must de-energize it immediately.",
+    "Inside the balanced RUN, STOP, and deadline if-blocks, use direct physical pin writes or explicit PWM writes for the actuator; do not delegate energizing or de-energizing to helper calls, and assign the off deadline only inside RUN.",
     "Do not place these markers only in comments; print them through Serial and parse the RUN prefix in executable code.",
   ].join(" ");
 }
@@ -1668,52 +1662,204 @@ function stripCppComments(source) {
   );
 }
 
-function commandBranchHasSafetyAction(source, command) {
-  const commandPattern = new RegExp(
+function hasBranchBoundActuatorSafety(source) {
+  const ifBlocks = extractBalancedIfBlocks(source);
+  const runBlock = findCommandBlock(ifBlocks, "RUN");
+  const stopBlock = findCommandBlock(ifBlocks, "STOP");
+  if (!runBlock || !stopBlock) return false;
+
+  const energizedTargets = directActuatorTargets(runBlock.body, "on");
+  if (!energizedTargets.size) return false;
+  if (!setContainsAll(directActuatorTargets(stopBlock.body, "off"), energizedTargets)) {
+    return false;
+  }
+
+  const deadlineAssignments = findMillisDeadlineAssignments(source);
+  if (
+    !deadlineAssignments.length ||
+    deadlineAssignments.some(({ index }) => !rangeContains(runBlock, index))
+  ) {
+    return false;
+  }
+
+  const deadlineNames = new Set(deadlineAssignments.map(({ name }) => name));
+  for (const deadline of deadlineNames) {
+    if (hasDeadlineResetOutsideRun(source, deadline, runBlock)) return false;
+    const safetyBlock = ifBlocks.find(
+      (block) =>
+        !rangeContains(runBlock, block.start) &&
+        !rangeContains(stopBlock, block.start) &&
+        conditionEnforcesDeadline(block.condition, deadline) &&
+        setContainsAll(
+          directActuatorTargets(block.body, "off"),
+          energizedTargets,
+        ),
+    );
+    if (!safetyBlock) return false;
+  }
+  return true;
+}
+
+function extractBalancedIfBlocks(source) {
+  const blocks = [];
+  const pattern = /\bif\s*\(/g;
+  for (const match of source.matchAll(pattern)) {
+    const conditionOpen = source.indexOf("(", match.index);
+    const conditionClose = matchingDelimiter(source, conditionOpen, "(", ")");
+    if (conditionClose < 0) continue;
+    const bodyOpen = skipWhitespace(source, conditionClose + 1);
+    if (source[bodyOpen] !== "{") continue;
+    const bodyClose = matchingDelimiter(source, bodyOpen, "{", "}");
+    if (bodyClose < 0) continue;
+    blocks.push({
+      start: match.index,
+      end: bodyClose + 1,
+      condition: source.slice(conditionOpen + 1, conditionClose),
+      body: source.slice(bodyOpen + 1, bodyClose),
+    });
+  }
+  return blocks;
+}
+
+function findCommandBlock(blocks, command) {
+  const pattern = new RegExp(
     `(?:startsWith|indexOf)\\s*\\(\\s*["']MAKEABLE\\|${command}\\||` +
       `strncmp\\s*\\([^,\\n]+,\\s*["']MAKEABLE\\|${command}\\|`,
     "i",
   );
-  const match = commandPattern.exec(source);
-  if (!match) return false;
-  const tail = source.slice(match.index + match[0].length);
-  const nextCommand = tail.search(
-    /(?:startsWith|indexOf)\s*\(\s*["']MAKEABLE\|(?:RUN|STOP)\||strncmp\s*\([^,\n]+,\s*["']MAKEABLE\|(?:RUN|STOP)\|/i,
-  );
-  const branch = tail.slice(0, nextCommand < 0 ? 500 : nextCommand);
-  return hasActuatorOffAction(branch);
+  return blocks.find(({ condition }) => pattern.test(condition)) || null;
 }
 
-function hasActuatorOffDeadline(source) {
-  const assignments = [
+function directActuatorTargets(block, state) {
+  const targets = new Set();
+  const digitalLevel = state === "on" ? "HIGH" : "LOW";
+  const digitalPattern = new RegExp(
+    `\\bdigitalWrite\\s*\\(\\s*([A-Za-z_]\\w*|\\d+)\\s*,\\s*${digitalLevel}\\s*\\)\\s*;`,
+    "g",
+  );
+  for (const match of block.matchAll(digitalPattern)) targets.add(match[1]);
+
+  const pwmPattern =
+    /\b(?:analogWrite|ledcWrite)\s*\(\s*([A-Za-z_]\w*|\d+)\s*,\s*(\d+)\s*\)\s*;/g;
+  for (const [, target, rawValue] of block.matchAll(pwmPattern)) {
+    const value = Number(rawValue);
+    if ((state === "on" && value > 0) || (state === "off" && value === 0)) {
+      targets.add(target);
+    }
+  }
+  return targets;
+}
+
+function findMillisDeadlineAssignments(source) {
+  return [
     ...source.matchAll(
       /\b([A-Za-z_]\w*)\s*=\s*millis\s*\(\s*\)\s*\+\s*[^;]+;/g,
     ),
-  ];
-  return assignments.some(([, deadline]) => {
-    const escapedDeadline = deadline.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const deadlineCheck = new RegExp(
-      `\\bif\\b[\\s\\S]{0,240}(?:` +
-        `millis\\s*\\(\\s*\\)[\\s\\S]{0,100}${escapedDeadline}|` +
-        `${escapedDeadline}[\\s\\S]{0,100}millis\\s*\\(\\s*\\)` +
-        `)`,
-      "i",
-    ).exec(source);
-    if (!deadlineCheck) return false;
-    return hasActuatorOffAction(
-      source.slice(deadlineCheck.index, deadlineCheck.index + 600),
-    );
-  });
+  ].map((match) => ({ name: match[1], index: match.index }));
 }
 
-function hasActuatorOffAction(source) {
-  return (
-    /digitalWrite\s*\([^;]+,\s*LOW\s*\)/i.test(source) ||
-    /\b(?:stop|off|disable|deenergize|de_energize)[A-Za-z0-9_]*\s*\(/i.test(
-      source,
-    ) ||
-    /\b[A-Za-z_]\w*(?:active|enabled|running)\w*\s*=\s*false\b/i.test(source)
+function hasDeadlineResetOutsideRun(source, deadline, runBlock) {
+  const escaped = escapeRegExp(deadline);
+  const assignments = source.matchAll(
+    new RegExp(`\\b${escaped}\\s*=(?!=)`, "g"),
   );
+  for (const assignment of assignments) {
+    if (rangeContains(runBlock, assignment.index)) continue;
+    if (isGlobalDeclarationInitializer(source, assignment.index, deadline)) continue;
+    return true;
+  }
+  return false;
+}
+
+function isGlobalDeclarationInitializer(source, assignmentIndex, variable) {
+  if (braceDepthAt(source, assignmentIndex) !== 0) return false;
+  const statementStart =
+    Math.max(
+      source.lastIndexOf(";", assignmentIndex - 1),
+      source.lastIndexOf("}", assignmentIndex - 1),
+      source.lastIndexOf("{", assignmentIndex - 1),
+      source.lastIndexOf("\n", assignmentIndex - 1),
+    ) + 1;
+  const declaration = source.slice(
+    statementStart,
+    assignmentIndex + variable.length,
+  );
+  return new RegExp(
+    `^\\s*(?:(?:static|const|volatile)\\s+)*(?:unsigned\\s+long|long\\s+unsigned|unsigned|long|uint(?:8|16|32|64)_t|int|size_t|auto)\\s+${escapeRegExp(variable)}\\s*$`,
+  ).test(declaration);
+}
+
+function conditionEnforcesDeadline(condition, deadline) {
+  const escaped = escapeRegExp(deadline);
+  return (
+    /millis\s*\(\s*\)/.test(condition) &&
+    new RegExp(`\\b${escaped}\\b`).test(condition) &&
+    /(?:>=|<=|>|<|-)/.test(condition)
+  );
+}
+
+function matchingDelimiter(source, openIndex, openCharacter, closeCharacter) {
+  let depth = 0;
+  let quote = "";
+  for (let index = openIndex; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (character === "\\") {
+        index += 1;
+      } else if (character === quote) {
+        quote = "";
+      }
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === openCharacter) depth += 1;
+    if (character !== closeCharacter) continue;
+    depth -= 1;
+    if (depth === 0) return index;
+  }
+  return -1;
+}
+
+function skipWhitespace(source, start) {
+  let index = start;
+  while (/\s/.test(source[index] || "")) index += 1;
+  return index;
+}
+
+function braceDepthAt(source, end) {
+  let depth = 0;
+  let quote = "";
+  for (let index = 0; index < end; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (character === "\\") index += 1;
+      else if (character === quote) quote = "";
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+    }
+  }
+  return depth;
+}
+
+function rangeContains(range, index) {
+  return index >= range.start && index < range.end;
+}
+
+function setContainsAll(container, required) {
+  return [...required].every((value) => container.has(value));
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function parseSerialMarker(line) {

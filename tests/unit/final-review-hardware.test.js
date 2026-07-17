@@ -13,12 +13,15 @@ const CONTRACT_SKETCH = `
 const int PUMP_PIN = 8;
 bool pumpActive = false;
 unsigned long pumpOffDeadline = 0;
-void stopPump() { digitalWrite(PUMP_PIN, LOW); pumpActive = false; }
 void reportReset() { Serial.println("MAKEABLE|RESET|POWER_ON"); }
 void reportReady() { Serial.println("MAKEABLE|READY|ESP32"); }
 void reportCheck() { Serial.println("MAKEABLE|CHECK|pump|PASS|pulse complete"); }
 void handleCommand(String line) {
-  if (line.startsWith("MAKEABLE|STOP|")) { stopPump(); return; }
+  if (line.startsWith("MAKEABLE|STOP|")) {
+    digitalWrite(PUMP_PIN, LOW);
+    pumpActive = false;
+    return;
+  }
   if (line.startsWith("MAKEABLE|RUN|")) {
     unsigned long pulseMs = 500;
     digitalWrite(PUMP_PIN, HIGH);
@@ -29,7 +32,10 @@ void handleCommand(String line) {
 }
 void setup() { Serial.begin(115200); reportReset(); reportReady(); }
 void loop() {
-  if (pumpActive && (long)(millis() - pumpOffDeadline) >= 0) stopPump();
+  if (pumpActive && (long)(millis() - pumpOffDeadline) >= 0) {
+    digitalWrite(PUMP_PIN, LOW);
+    pumpActive = false;
+  }
   if (Serial.available()) handleCommand(Serial.readStringUntil('\\n'));
 }
 `;
