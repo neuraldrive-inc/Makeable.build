@@ -55,7 +55,7 @@ export async function grantDeepgramToken(apiKey, fetchImpl = globalThis.fetch) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        time_to_live_in_seconds: DEEPGRAM_TOKEN_TTL_SECONDS,
+        ttl_seconds: DEEPGRAM_TOKEN_TTL_SECONDS,
       }),
     });
     if (!upstream.ok) return safeGrantError();

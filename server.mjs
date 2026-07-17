@@ -23,6 +23,15 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
 const fileEnv = readEnv(path.join(__dirname, ".env"));
+const localConfigKeys = new Set([
+  "OPENAI_API_KEY",
+  "OPENAI_MODEL",
+  "OPENAI_REASONING_MODEL",
+  "OPENAI_REASONING_EFFORT",
+  "DEEPGRAM_API_KEY",
+  "GITHUB_TOKEN",
+  "GITHUB_OWNER",
+]);
 const initialEnv = getEnv();
 const port = Number(initialEnv.PORT || 8787);
 
@@ -138,7 +147,14 @@ process.once("SIGTERM", shutdown);
 process.once("SIGINT", shutdown);
 
 function getEnv() {
-  return { ...fileEnv, ...process.env };
+  const env = { ...process.env };
+  for (const [key, value] of Object.entries(fileEnv)) {
+    // The local .env file is the explicit Makeable provider configuration. It
+    // must win over stale credentials inherited from the desktop process, while
+    // keeping runtime port and hardware test overrides available to child runs.
+    if (localConfigKeys.has(key) || env[key] === undefined) env[key] = value;
+  }
+  return env;
 }
 
 function shutdown() {

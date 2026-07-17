@@ -109,8 +109,8 @@ test("the Netlify token endpoint grants a short-lived token and returns only saf
   assert.equal(calls[0].options.method, "POST");
   assert.equal(calls[0].options.headers.Authorization, "Token server-only-secret");
   const body = JSON.parse(calls[0].options.body);
-  assert.ok(body.time_to_live_in_seconds > 0);
-  assert.ok(body.time_to_live_in_seconds <= 60);
+  assert.ok(body.ttl_seconds > 0);
+  assert.ok(body.ttl_seconds <= 60);
 });
 
 test("Deepgram failures return a safe error without leaking secrets or upstream bodies", async () => {
@@ -175,14 +175,15 @@ test("local and Netlify entrypoints wire the secure token endpoint and /build SP
   assert.match(html, /src="\.\/config\.local\.js"/);
 });
 
-test("the local server reads file-backed environment values once instead of per request", async () => {
+test("the local server reads file-backed provider values once and lets them override inherited values", async () => {
   const serverSource = await readFile(path.join(root, "server.mjs"), "utf8");
 
   assert.match(serverSource, /const fileEnv\s*=\s*readEnv\(/);
   assert.match(
     serverSource,
-    /function getEnv\(\)\s*{\s*return\s*{\s*\.\.\.fileEnv,\s*\.\.\.process\.env\s*};\s*}/,
+    /const localConfigKeys\s*=\s*new Set\([\s\S]*?"OPENAI_API_KEY"/,
   );
+  assert.match(serverSource, /if \(localConfigKeys\.has\(key\) \|\| env\[key\] === undefined\) env\[key\] = value;/);
   const getEnvSource = serverSource.match(/function getEnv\(\)\s*{[\s\S]*?\n}/)?.[0] || "";
   assert.doesNotMatch(getEnvSource, /readEnv\(/);
 });
