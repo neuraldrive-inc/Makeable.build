@@ -6,6 +6,11 @@ import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
+import {
+  createPublicConfig,
+  createPublicConfigScript,
+  grantDeepgramToken,
+} from "./src/makeable/server-contract.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -41,6 +46,10 @@ const server = createServer(async (req, res) => {
       return sendJson(res, publicConfig(env));
     }
 
+    if (url.pathname === "/api/deepgram/token" && req.method === "POST") {
+      return createDeepgramToken(res, env);
+    }
+
     if (url.pathname === "/api/openai/responses" && req.method === "POST") {
       return proxyOpenAI(req, res, env);
     }
@@ -74,6 +83,7 @@ const server = createServer(async (req, res) => {
       return sendJson(res, {
         ok: true,
         hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
+        hasDeepgramKey: Boolean(env.DEEPGRAM_API_KEY),
         hasGithubToken: Boolean(env.GITHUB_TOKEN),
         hasArduinoCli: Boolean(findArduinoCli(env)),
       });
@@ -117,27 +127,25 @@ function readEnv(filePath) {
 }
 
 function publicConfig(env) {
-  const config = {
-    deepgramApiKey: env.DEEPGRAM_API_KEY || "",
-    githubOwner: env.GITHUB_OWNER || "",
-    openaiModel: env.OPENAI_MODEL || "gpt-5.5",
-    openaiReasoningModel: env.OPENAI_REASONING_MODEL || "gpt-5.5",
-    openaiReasoningEffort: env.OPENAI_REASONING_EFFORT || "high",
-    arduinoFqbn: env.ARDUINO_FQBN || "esp32:esp32:esp32",
-    hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
-    hasGithubToken: Boolean(env.GITHUB_TOKEN),
+  return createPublicConfig(env, {
     hasArduinoCli: Boolean(findArduinoCli(env)),
-  };
-  return config;
+  });
 }
 
 function publicConfigScript(env) {
-  const config = publicConfig(env);
-  return `window.CIRCUIT_CODEX_CONFIG = ${JSON.stringify(config)};`;
+  return createPublicConfigScript(publicConfig(env));
+}
+
+async function createDeepgramToken(res, env) {
+  const result = await grantDeepgramToken(env.DEEPGRAM_API_KEY);
+  return sendJson(res, result.body, result.status, { "Cache-Control": "no-store" });
 }
 
 async function serveStatic(pathname, res) {
-  const safePath = pathname === "/" ? "/index.html" : decodeURIComponent(pathname);
+  const safePath =
+    pathname === "/" || pathname.startsWith("/build/")
+      ? "/index.html"
+      : decodeURIComponent(pathname);
   const filePath = path.normalize(path.join(__dirname, safePath));
   const relativePath = path.relative(__dirname, filePath);
 
@@ -478,11 +486,11 @@ async function readJsonBody(req) {
   return raw ? JSON.parse(raw) : {};
 }
 
-function sendJson(res, data, status = 200) {
-  sendText(res, JSON.stringify(data), "application/json; charset=utf-8", status);
+function sendJson(res, data, status = 200, headers = {}) {
+  sendText(res, JSON.stringify(data), "application/json; charset=utf-8", status, headers);
 }
 
-function sendText(res, text, contentType, status = 200) {
-  res.writeHead(status, { "Content-Type": contentType });
+function sendText(res, text, contentType, status = 200, headers = {}) {
+  res.writeHead(status, { "Content-Type": contentType, ...headers });
   res.end(text);
 }

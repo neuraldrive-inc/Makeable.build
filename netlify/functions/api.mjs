@@ -1,3 +1,9 @@
+import {
+  createPublicConfig,
+  createPublicConfigScript,
+  grantDeepgramToken,
+} from "../../src/makeable/server-contract.js";
+
 export default async function handler(req) {
   try {
     const url = new URL(req.url);
@@ -9,6 +15,10 @@ export default async function handler(req) {
 
     if (url.pathname === "/api/config") {
       return jsonResponse(publicConfig(env));
+    }
+
+    if (url.pathname === "/api/deepgram/token" && req.method === "POST") {
+      return createDeepgramToken(env);
     }
 
     if (url.pathname === "/api/openai/responses" && req.method === "POST") {
@@ -58,6 +68,7 @@ export default async function handler(req) {
         ok: true,
         hostedMode: true,
         hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
+        hasDeepgramKey: Boolean(env.DEEPGRAM_API_KEY),
         hasGithubToken: Boolean(env.GITHUB_TOKEN),
         firmwareCompileSupported: false,
       });
@@ -80,9 +91,7 @@ function getEnv() {
     "OPENAI_MODEL",
     "OPENAI_REASONING_MODEL",
     "OPENAI_REASONING_EFFORT",
-    "DEEPGRAM_BROWSER_KEY",
     "DEEPGRAM_API_KEY",
-    "ALLOW_BROWSER_DEEPGRAM_KEY",
     "GITHUB_TOKEN",
     "GITHUB_OWNER",
     "ARDUINO_FQBN",
@@ -95,25 +104,20 @@ function envValue(key) {
 }
 
 function publicConfig(env) {
-  const allowDeepgramSecret =
-    String(env.ALLOW_BROWSER_DEEPGRAM_KEY || "").toLowerCase() === "true";
-  return {
-    deepgramApiKey: env.DEEPGRAM_BROWSER_KEY || (allowDeepgramSecret ? env.DEEPGRAM_API_KEY : ""),
-    githubOwner: env.GITHUB_OWNER || "",
-    openaiModel: env.OPENAI_MODEL || "gpt-5.5",
-    openaiReasoningModel: env.OPENAI_REASONING_MODEL || "gpt-5.5",
-    openaiReasoningEffort: env.OPENAI_REASONING_EFFORT || "high",
-    arduinoFqbn: env.ARDUINO_FQBN || "esp32:esp32:esp32",
-    hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
-    hasGithubToken: Boolean(env.GITHUB_TOKEN),
+  return createPublicConfig(env, {
     hasArduinoCli: false,
     hostedMode: true,
     firmwareCompileSupported: false,
-  };
+  });
 }
 
 function publicConfigScript(env) {
-  return `window.CIRCUIT_CODEX_CONFIG = ${JSON.stringify(publicConfig(env))};`;
+  return createPublicConfigScript(publicConfig(env));
+}
+
+async function createDeepgramToken(env) {
+  const result = await grantDeepgramToken(env.DEEPGRAM_API_KEY);
+  return jsonResponse(result.body, result.status, { "Cache-Control": "no-store" });
 }
 
 async function proxyOpenAI(req, env) {
@@ -305,15 +309,21 @@ async function pipeJson(upstream) {
   });
 }
 
-function jsonResponse(data, status = 200) {
-  return textResponse(JSON.stringify(data), "application/json; charset=utf-8", status);
+function jsonResponse(data, status = 200, headers = {}) {
+  return textResponse(
+    JSON.stringify(data),
+    "application/json; charset=utf-8",
+    status,
+    headers,
+  );
 }
 
-function textResponse(text, contentType, status = 200) {
+function textResponse(text, contentType, status = 200, headers = {}) {
   return new Response(text, {
     status,
     headers: {
       "Content-Type": contentType,
+      ...headers,
     },
   });
 }

@@ -17,6 +17,39 @@ test("the Makeable shell loads with meaningful semantic content", async ({ page 
   await expect(page.locator("img.brand-spark")).toBeVisible();
 });
 
+test("build routes load the SPA directly and guard unavailable progress", async ({ page }) => {
+  const directResponse = await page.goto("/build/new");
+
+  expect(directResponse.ok()).toBe(true);
+  await expect(page.getByRole("status")).toHaveText("Makeable is ready.");
+  await page.goto("/build/code");
+  await expect(page).toHaveURL(/\/build\/new$/);
+});
+
+test("legacy settings migrate on startup without retaining the Deepgram secret", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "geckco.settings",
+      JSON.stringify({
+        deepgramApiKey: "legacy-browser-secret",
+        githubOwner: "maker",
+      }),
+    );
+  });
+
+  await page.goto("/");
+
+  const settings = await page.evaluate(() => ({
+    current: localStorage.getItem("makeable.settings"),
+    legacy: localStorage.getItem("geckco.settings"),
+  }));
+  expect(settings.legacy).toBeNull();
+  expect(JSON.parse(settings.current)).toEqual({ githubOwner: "maker" });
+  expect(settings.current).not.toContain("legacy-browser-secret");
+});
+
 test("skip navigation moves keyboard focus to the application content", async ({ page }) => {
   await page.goto("/");
 
