@@ -44,6 +44,11 @@ export async function initializeShell(root = document, options = {}) {
       screenRenderer?.render(route);
     },
   });
+  root.querySelector(".progress-rail")?.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-progress-action]");
+    if (!action || action.disabled || !action.dataset.route) return;
+    navigation.navigate(action.dataset.route);
+  });
   const app = Object.freeze({
     navigation,
     getProject: () => project.current,
@@ -78,6 +83,34 @@ function updateProgressRail(root, activeRail, project = {}) {
   for (const step of root.querySelectorAll("[data-progress-step]")) {
     if (step.dataset.progressStep === activeRail) step.setAttribute("aria-current", "step");
     else step.removeAttribute("aria-current");
-    step.classList.toggle("is-complete", completedRails.has(step.dataset.progressStep));
+    const complete = completedRails.has(step.dataset.progressStep);
+    const action = step.querySelector("[data-progress-action]");
+    const target = latestRailRoute(step.dataset.progressStep, completedRoutes);
+    step.classList.toggle("is-complete", complete);
+    if (action) {
+      action.disabled = !complete || !target;
+      action.dataset.route = target || "";
+      action.setAttribute(
+        "aria-label",
+        complete
+          ? `${action.querySelector(".progress-label")?.textContent || "Build step"} — revisit`
+          : action.querySelector(".progress-label")?.textContent || "Build step",
+      );
+    }
   }
+}
+
+function latestRailRoute(rail, completedRoutes) {
+  const candidates = {
+    describe: ["/build/new"],
+    scan: [
+      "/build/feasibility/ready",
+      "/build/parts/review",
+      "/build/parts/upload",
+    ],
+    build: ["/build/code", "/build/assemble"],
+    test: ["/build/test/manual", "/build/test/automatic"],
+    publish: ["/build/publish/success", "/build/publish/connect"],
+  };
+  return (candidates[rail] || []).find((path) => completedRoutes.has(path)) || "";
 }

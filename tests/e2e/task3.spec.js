@@ -215,7 +215,9 @@ test("upload, persistent annotation review, confirmation, and missing-part actio
     });
   }
   await expectFileControlFocus(page, "Upload my parts");
-  await expectFileControlFocus(page, "Use camera instead");
+  const cameraButton = page.getByRole("button", { name: "Use camera instead" });
+  await cameraButton.focus();
+  await expect(cameraButton).toBeFocused();
 
   await page.getByLabel("Upload my parts").setInputFiles(photoPath);
   await expect(page).toHaveURL(/\/build\/parts\/review$/);
@@ -287,7 +289,7 @@ test("upload, persistent annotation review, confirmation, and missing-part actio
     missingParts: [],
   });
   expect(persisted.wiring.steps).toHaveLength(1);
-  expect(persisted.firmware.sketch).toBe("void setup() {}");
+  expect(persisted.firmware.sketch.trim()).toBe(contractSketch.trim());
 });
 
 test("annotations follow the contained image content for wide and tall photos", async ({

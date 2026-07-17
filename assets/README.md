@@ -7,4 +7,8 @@ The fonts are the Latin variable-weight WOFF2 builds from Fontsource and retain 
 - Shantell Sans `@fontsource-variable/shantell-sans@5.2.7`
 - Roboto Mono `@fontsource-variable/roboto-mono@5.2.9`
 
-The 16-icon Lucide SVG subset under `icons/lucide/` is vendored from `lucide-static@0.468.0` and retains the package license in the same directory. SVGs are referenced as files so their source and license remain auditable.
+The Lucide SVG subset under `icons/lucide/` combines the original 16 files from
+`lucide-static@0.468.0` with the eight Makeable v1 instruction/navigation icons
+from the official `lucide-static@1.25.0` package. The package license is retained
+in the same directory. SVGs are referenced as files so their source and license
+remain auditable.

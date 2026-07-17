@@ -149,9 +149,9 @@ function renderDescribe(context, route) {
 
       <section class="example-row" aria-labelledby="examples-heading">
         <p class="annotation-note" id="examples-heading">Messy ideas welcome.</p>
-        <button class="example-note example-note--pink" type="button" data-example="Make a pet feeder">A pet feeder</button>
-        <button class="example-note example-note--purple" type="button" data-example="Make a mini fan">A mini fan</button>
-        <button class="example-note example-note--mint" type="button" data-example="Make a plant helper">A plant helper</button>
+        <button class="example-note example-note--pink" type="button" data-example="Make a pet feeder">${icon("shopping-bag")}<span>A pet feeder</span></button>
+        <button class="example-note example-note--purple" type="button" data-example="Make a mini fan">${icon("fan")}<span>A mini fan</span></button>
+        <button class="example-note example-note--mint" type="button" data-example="Make a plant helper">${icon("sprout")}<span>A plant helper</span></button>
       </section>
     </article>
   `);
@@ -227,22 +227,14 @@ function renderUpload(context, route) {
       </header>
 
       <div class="camera-row">
-        <label class="camera-link" for="camera-file">
+        <button class="camera-link" type="button" data-open-upload-camera>
           ${icon("camera")}
           <span>Use camera instead</span>
-        </label>
-        <input
-          class="file-input"
-          id="camera-file"
-          type="file"
-          accept="image/*"
-          capture="environment"
-          aria-label="Use camera instead"
-        />
+        </button>
       </div>
 
       <section class="paper-panel upload-zone" data-upload-zone aria-labelledby="upload-title">
-        ${icon("upload", "upload-hero-icon")}
+        ${icon("camera", "upload-hero-icon")}
         <h2 id="upload-title">Drop a photo here</h2>
         <p>or choose from your computer</p>
         <label class="primary-button upload-button" for="parts-file">Upload my parts</label>
@@ -256,9 +248,38 @@ function renderUpload(context, route) {
         <p class="upload-progress" data-upload-progress role="status" aria-live="polite"></p>
       </section>
 
+      <dialog class="camera-dialog" data-upload-camera-dialog aria-labelledby="camera-dialog-title">
+        <div class="camera-dialog-heading">
+          <div>
+            <h2 id="camera-dialog-title">Photograph your parts</h2>
+            <p>Keep every part in frame and shoot from above.</p>
+          </div>
+          <button class="icon-button" type="button" data-close-upload-camera aria-label="Close camera">${icon("x")}</button>
+        </div>
+        <div class="upload-camera-preview">
+          ${icon("camera-off", "camera-placeholder-icon")}
+          <video data-upload-camera-preview playsinline muted hidden aria-label="Live parts camera preview"></video>
+        </div>
+        <p data-upload-camera-status role="status" aria-live="polite">Requesting camera access…</p>
+        <div class="camera-dialog-actions">
+          <label class="secondary-button" for="camera-file">Choose a photo instead</label>
+          <input
+            class="file-input"
+            id="camera-file"
+            type="file"
+            accept="image/*"
+            capture="environment"
+            aria-label="Choose a camera photo"
+          />
+          <button class="primary-button" type="button" data-capture-upload-photo disabled>
+            Take photo
+          </button>
+        </div>
+      </dialog>
+
       <ul class="photo-tips" aria-label="Photo tips">
         <li>${icon("sparkles")}<span>Use good light</span></li>
-        <li>${icon("paperclip")}<span>Spread parts out</span></li>
+        <li>${icon("focus")}<span>Spread parts out</span></li>
         <li>${icon("camera")}<span>Shoot from above</span></li>
       </ul>
     </article>
@@ -269,8 +290,18 @@ function renderUpload(context, route) {
   const zone = outlet.querySelector("[data-upload-zone]");
   const receive = ([file]) => file && handlePartsPhoto(context, route, file);
   input.addEventListener("change", (event) => receive(event.currentTarget.files || []));
-  cameraInput.addEventListener("change", (event) =>
-    receive(event.currentTarget.files || []),
+  cameraInput.addEventListener("change", (event) => {
+    closeUploadCamera(context);
+    receive(event.currentTarget.files || []);
+  });
+  outlet.querySelector("[data-open-upload-camera]").addEventListener("click", () =>
+    openUploadCamera(context, receive),
+  );
+  outlet.querySelector("[data-close-upload-camera]").addEventListener("click", () =>
+    closeUploadCamera(context),
+  );
+  outlet.querySelector("[data-capture-upload-photo]").addEventListener("click", () =>
+    captureUploadPhoto(context, receive),
   );
   zone.addEventListener("dragover", (event) => {
     event.preventDefault();
@@ -282,6 +313,98 @@ function renderUpload(context, route) {
     zone.classList.remove("is-dragging");
     receive(event.dataTransfer?.files || []);
   });
+}
+
+async function openUploadCamera(context, receive) {
+  const dialog = context.outlet.querySelector("[data-upload-camera-dialog]");
+  const fallback = context.outlet.querySelector("#camera-file");
+  const status = context.outlet.querySelector("[data-upload-camera-status]");
+  const video = context.outlet.querySelector("[data-upload-camera-preview]");
+  const capture = context.outlet.querySelector("[data-capture-upload-photo]");
+  if (!context.window.navigator.mediaDevices?.getUserMedia) {
+    fallback.click();
+    return;
+  }
+  if (!dialog.open) dialog.showModal();
+  status.textContent = "Requesting camera access…";
+  capture.disabled = true;
+  const request = {
+    cancelled: false,
+    generation: context.runtime.routeGeneration,
+    receive,
+  };
+  if (context.runtime.cameraRequest) context.runtime.cameraRequest.cancelled = true;
+  context.runtime.cameraRequest = request;
+  try {
+    const stream = await context.window.navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
+      audio: false,
+    });
+    if (
+      request.cancelled ||
+      request.generation !== context.runtime.routeGeneration ||
+      context.runtime.currentRoute?.path !== "/build/parts/upload"
+    ) {
+      stream.getTracks?.().forEach((track) => track.stop());
+      return;
+    }
+    context.runtime.cameraStream?.getTracks?.().forEach((track) => track.stop());
+    context.runtime.cameraStream = stream;
+    video.srcObject = stream;
+    video.hidden = false;
+    capture.disabled = false;
+    status.textContent = "Camera ready. Keep all parts inside the frame.";
+    await video.play().catch(() => {});
+  } catch (error) {
+    if (request.cancelled) return;
+    status.textContent = `I couldn’t open the camera: ${error.message}. Choose a photo instead.`;
+  } finally {
+    if (context.runtime.cameraRequest === request) {
+      context.runtime.cameraRequest = null;
+    }
+  }
+}
+
+async function captureUploadPhoto(context, receive) {
+  const video = context.outlet.querySelector("[data-upload-camera-preview]");
+  const status = context.outlet.querySelector("[data-upload-camera-status]");
+  if (!context.runtime.cameraStream || !video) return;
+  status.textContent = "Preparing your camera photo…";
+  const canvas = context.root.createElement("canvas");
+  canvas.width = video.videoWidth || 1280;
+  canvas.height = video.videoHeight || 720;
+  canvas.getContext("2d", { alpha: false }).drawImage(
+    video,
+    0,
+    0,
+    canvas.width,
+    canvas.height,
+  );
+  const blob = await new Promise((resolve, reject) =>
+    canvas.toBlob(
+      (value) =>
+        value ? resolve(value) : reject(new Error("Camera capture failed.")),
+      "image/jpeg",
+      0.9,
+    ),
+  );
+  const file = new context.window.File(
+    [blob],
+    `makeable-parts-${Date.now()}.jpg`,
+    { type: "image/jpeg" },
+  );
+  closeUploadCamera(context);
+  receive([file]);
+}
+
+function closeUploadCamera(context) {
+  context.runtime.cameraRequest &&
+    (context.runtime.cameraRequest.cancelled = true);
+  context.runtime.cameraRequest = null;
+  context.runtime.cameraStream?.getTracks?.().forEach((track) => track.stop());
+  context.runtime.cameraStream = null;
+  const dialog = context.outlet.querySelector("[data-upload-camera-dialog]");
+  if (dialog?.open) dialog.close();
 }
 
 async function handlePartsPhoto(context, route, file) {
@@ -343,6 +466,7 @@ function renderReview(context, route) {
             .map((part, index) => annotationButton(part, index, selected?.id))
             .join("")}
         </div>
+        ${annotationLegend(parts, true)}
       </section>
 
       <section class="review-controls paper-panel" aria-labelledby="recognized-title">
@@ -435,6 +559,7 @@ function renderReady(context) {
         <div class="annotation-layer">
           ${parts.map((part, index) => readyAnnotation(part, index)).join("")}
         </div>
+        ${annotationLegend(parts)}
       </section>
 
       <ul class="ready-inventory" aria-label="Confirmed parts">
@@ -534,6 +659,14 @@ function renderMissing(context) {
           `
           : ""
       }
+
+      <div class="missing-primary-action">
+        <p class="missing-shopping-status" data-shopping-status role="status" aria-live="polite"></p>
+        <button class="primary-button" type="button" data-shop-missing>
+          ${icon("shopping-bag")}
+          Shop missing parts
+        </button>
+      </div>
     </article>
   `);
   hydrateStoredImage(context, "source", outlet.querySelector("[data-source-photo]"));
@@ -548,6 +681,86 @@ function renderMissing(context) {
         renderMissing(context);
       }
     });
+  }
+  outlet.querySelector("[data-shop-missing]").addEventListener("click", () => {
+    const firstSearch = outlet.querySelector(".missing-list a");
+    const status = outlet.querySelector("[data-shopping-status]");
+    status.textContent =
+      "Your local shopping list is ready. Use Search for current options, then mark each part obtained.";
+    firstSearch?.scrollIntoView({ behavior: "smooth", block: "center" });
+    firstSearch?.focus({ preventScroll: true });
+  });
+  for (const button of outlet.querySelectorAll("[data-start-alternative]")) {
+    button.addEventListener("click", () =>
+      startAlternativeProject(context, button.dataset.startAlternative),
+    );
+  }
+}
+
+async function startAlternativeProject(context, alternativeId) {
+  const { outlet, app } = context;
+  const project = app.getProject();
+  const alternative = (project.feasibility?.alternatives || []).find(
+    ({ id }) => id === alternativeId,
+  );
+  if (!alternative) return;
+  const status = outlet.querySelector("[data-shopping-status]");
+  const buttons = outlet.querySelectorAll("[data-start-alternative]");
+  buttons.forEach((button) => (button.disabled = true));
+  status.textContent = `Preparing ${alternative.title} with the parts you already confirmed…`;
+  const previousIdea =
+    typeof project.idea === "object" && project.idea
+      ? project.idea
+      : { text: ideaText(project.idea) };
+  const nextIdea = {
+    ...previousIdea,
+    text: alternative.title,
+    selectedAlternative: {
+      id: alternative.id,
+      title: alternative.title,
+      summary: alternative.summary,
+    },
+    history: [
+      ...(Array.isArray(previousIdea.history) ? previousIdea.history : []),
+      {
+        text: ideaText(previousIdea),
+        selectedAlternative: previousIdea.selectedAlternative || null,
+        changedAt: new Date().toISOString(),
+      },
+    ],
+  };
+  try {
+    const plan = await requestHardwarePlan({
+      idea: alternative.title,
+      confirmedParts: project.confirmedParts || [],
+    });
+    await app.replaceProject({
+      ...project,
+      idea: nextIdea,
+      feasibility: feasibilityRecord(plan),
+      wiring: { steps: plan.wiringSteps },
+      firmware: plan.firmware,
+      tests: null,
+      publish: null,
+      progress: {
+        completedRoutes: (project.progress?.completedRoutes || []).filter((path) =>
+          [
+            "/build/new",
+            "/build/parts/upload",
+            "/build/parts/review",
+          ].includes(path),
+        ),
+      },
+      updatedAt: new Date().toISOString(),
+    });
+    app.navigation.navigate(
+      plan.feasibility.status === "missing"
+        ? "/build/feasibility/missing"
+        : "/build/feasibility/ready",
+    );
+  } catch (error) {
+    status.textContent = `I couldn’t start that alternative yet: ${error.message}`;
+    buttons.forEach((button) => (button.disabled = false));
   }
 }
 
@@ -584,6 +797,7 @@ function renderAssemble(context, route) {
     ({ id }) => id === step.fromPartId,
   );
   const toPart = project.confirmedParts?.find(({ id }) => id === step.toPartId);
+  const [fromPin, toPin] = connectionPins(step);
   outlet.innerHTML = screenFrame(`
     <article class="route-screen assembly-screen">
       <header class="screen-heading assembly-heading">
@@ -621,10 +835,27 @@ function renderAssemble(context, route) {
             data-source-photo
             alt="Your uploaded parts with this connection highlighted"
           />
-          <div class="annotation-layer">
-            ${connectionAnnotation(fromPart, step.from || "From", "from")}
-            ${connectionAnnotation(toPart, step.to || "To", "to")}
+          <div class="annotation-layer" data-connection-layer>
+            ${connectionCanvas(fromPart, toPart, step.wireColor)}
+            ${connectionAnnotation(
+              fromPart,
+              step.from || "From",
+              "from",
+              fromPin,
+              1,
+            )}
+            ${connectionAnnotation(
+              toPart,
+              step.to || "To",
+              "to",
+              toPin,
+              2,
+            )}
           </div>
+          <ol class="connection-legend" aria-label="Connection endpoints">
+            <li><span>1</span><strong>${escapeHtml(step.from || "From")}</strong> — From pin: ${escapeHtml(fromPin)}</li>
+            <li><span>2</span><strong>${escapeHtml(step.to || "To")}</strong> — To pin: ${escapeHtml(toPin)}</li>
+          </ol>
           <div class="connection-caption">
             <strong>${escapeHtml(step.pin || `${step.from} to ${step.to}`)}</strong>
             <span>${escapeHtml(step.wireColor || "matching")} wire</span>
@@ -682,6 +913,7 @@ function renderAssemble(context, route) {
     panel.classList.remove("is-animating");
     void panel.offsetWidth;
     panel.classList.add("is-animating");
+    animateConnectionPath(context, outlet.querySelector("[data-connection-layer]"));
     event.currentTarget.setAttribute("aria-pressed", "true");
     context.window.setTimeout(() => {
       panel.classList.remove("is-animating");
@@ -900,6 +1132,9 @@ function renderAutomaticTest(context, route) {
               .map((part, index) => readyAnnotation(part, index))
               .join("")}
           </div>
+          ${annotationLegend(
+            (project.confirmedParts || []).filter(({ bounds }) => bounds),
+          )}
           <p class="detected-test-board">Board found: ${escapeHtml(
             project.firmware?.flash?.boardName || "connected ESP32",
           )}</p>
@@ -992,15 +1227,30 @@ function renderManualTest(context, route) {
                   <span>${index + 1}</span>
                   <p>${escapeHtml(instruction)}</p>
                   ${
-                    index === actionSteps.length - 1
+                    index === 0
                       ? `
-                        <video data-camera-preview playsinline muted aria-label="Live camera preview"></video>
-                        <div class="camera-actions">
-                          <button class="secondary-button" type="button" data-start-camera>${icon("camera")} Start camera</button>
-                          <button class="secondary-button" type="button" data-capture-evidence disabled>Capture evidence</button>
-                        </div>
+                        <figure class="manual-instruction-media">
+                          <img data-manual-lift-photo alt="Your project photo for the lift-sensor step" />
+                        </figure>
                       `
-                      : ""
+                      : index === 1
+                        ? `
+                          <figure class="manual-instruction-media manual-timer-media">
+                            ${icon("timer")}
+                            <strong>2</strong>
+                            <span>seconds</span>
+                          </figure>
+                        `
+                        : `
+                          <figure class="manual-instruction-media camera-evidence-frame" data-camera-frame>
+                            <img data-manual-watch-photo alt="Your project photo for watching the result" />
+                            <video data-camera-preview playsinline muted hidden aria-label="Live camera preview"></video>
+                          </figure>
+                          <div class="camera-actions">
+                            <button class="secondary-button" type="button" data-start-camera>${icon("camera")} Start camera</button>
+                            <button class="secondary-button" type="button" data-capture-evidence disabled hidden>Capture evidence</button>
+                          </div>
+                        `
                   }
                 </li>
               `,
@@ -1024,6 +1274,16 @@ function renderManualTest(context, route) {
       </section>
     </article>
   `);
+  hydrateStoredImage(
+    context,
+    project.photo?.imageId || "source",
+    outlet.querySelector("[data-manual-lift-photo]"),
+  );
+  hydrateStoredImage(
+    context,
+    project.photo?.imageId || "source",
+    outlet.querySelector("[data-manual-watch-photo]"),
+  );
   outlet.querySelector("[data-start-camera]").addEventListener("click", () =>
     startManualCamera(context),
   );
@@ -1367,7 +1627,7 @@ function firstIncompleteAssemblyStep(wiring) {
   return index === -1 ? Math.max(0, (wiring.steps || []).length - 1) : index;
 }
 
-function connectionAnnotation(part, label, role) {
+function connectionAnnotation(part, label, role, pin, marker) {
   if (!part?.bounds) return "";
   const { x, y, width, height } = part.bounds;
   return `
@@ -1375,9 +1635,49 @@ function connectionAnnotation(part, label, role) {
       class="connection-annotation connection-annotation--${role}"
       style="left:${x}%;top:${y}%;width:${width}%;height:${height}%"
     >
+      <span class="connection-marker">${marker}</span>
       <strong>${escapeHtml(label)}</strong>
+      <em>${role === "from" ? "From" : "To"} pin: ${escapeHtml(
+        pin || "connection",
+      )}</em>
     </div>
   `;
+}
+
+function connectionCanvas(fromPart, toPart, wireColor) {
+  if (!fromPart?.bounds || !toPart?.bounds) return "";
+  const from = boundsCenter(fromPart.bounds);
+  const to = boundsCenter(toPart.bounds);
+  return `
+    <canvas
+      class="connection-path"
+      data-wire-path
+      data-from-x="${from.x}"
+      data-from-y="${from.y}"
+      data-to-x="${to.x}"
+      data-to-y="${to.y}"
+      data-wire-color="${escapeAttribute(wireColor || "blue")}"
+      aria-hidden="true"
+    ></canvas>
+  `;
+}
+
+function boundsCenter(bounds) {
+  return {
+    x: Number(bounds.x || 0) + Number(bounds.width || 0) / 2,
+    y: Number(bounds.y || 0) + Number(bounds.height || 0) / 2,
+  };
+}
+
+function connectionPins(step) {
+  const [fromPin, toPin] = String(step.pin || "")
+    .split(/\s*(?:→|->| to )\s*/i)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return [
+    fromPin || step.from || "source",
+    toPin || step.to || fromPin || "destination",
+  ];
 }
 
 async function refreshArduinoSetup(context) {
@@ -1595,6 +1895,7 @@ async function startAutomaticTest(context, route, diagnostics) {
   const controller = new AbortController();
   context.runtime.operationAbort = controller;
   startButton.disabled = true;
+  startButton.hidden = true;
   stopButton.hidden = false;
   message.textContent = "Choose the flashed board so I can listen for real markers.";
   try {
@@ -1656,6 +1957,7 @@ async function startAutomaticTest(context, route, diagnostics) {
       context.runtime.operationAbort = null;
     }
     stopButton.hidden = true;
+    startButton.hidden = false;
   }
 }
 
@@ -1665,7 +1967,16 @@ function manualActionSteps(action) {
     .map((value) => value.trim().replace(/[.!]+$/, ""))
     .filter(Boolean)
     .slice(0, 3);
-  return chunks.length ? chunks : ["Perform the requested real-world action"];
+  const steps = chunks.length
+    ? chunks
+    : ["Perform the requested real-world action"];
+  const fallbacks = [
+    "Perform the requested real-world action",
+    "Wait for the board to respond",
+    "Watch the project for the expected result",
+  ];
+  while (steps.length < 3) steps.push(fallbacks[steps.length]);
+  return steps;
 }
 
 async function startManualCamera(context) {
@@ -1704,6 +2015,10 @@ async function startManualCamera(context) {
     }
     context.runtime.cameraStream = stream;
     video.srcObject = stream;
+    video.hidden = false;
+    capture.hidden = false;
+    context.outlet.querySelector("[data-manual-watch-photo]")?.setAttribute("hidden", "");
+    context.outlet.querySelector("[data-camera-frame]")?.classList.add("is-live");
     await video.play();
     capture.disabled = false;
     status.textContent =
@@ -1918,6 +2233,73 @@ function alignAnnotationLayer(context, image, annotationLayer) {
   annotationLayer.style.top = `${image.offsetTop + frame.top}px`;
   annotationLayer.style.width = `${frame.width}px`;
   annotationLayer.style.height = `${frame.height}px`;
+  drawConnectionPath(context, annotationLayer, 1);
+}
+
+function animateConnectionPath(context, annotationLayer) {
+  if (!annotationLayer?.querySelector("[data-wire-path]")) return;
+  const started = context.window.performance.now();
+  const duration = context.window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? 1
+    : 420;
+  const frame = (now) => {
+    const progress = Math.min(1, (now - started) / duration);
+    drawConnectionPath(context, annotationLayer, progress);
+    if (progress < 1 && annotationLayer.isConnected) {
+      context.window.requestAnimationFrame(frame);
+    }
+  };
+  context.window.requestAnimationFrame(frame);
+}
+
+function drawConnectionPath(context, annotationLayer, progress = 1) {
+  const canvas = annotationLayer?.querySelector("[data-wire-path]");
+  if (!canvas || !annotationLayer.clientWidth || !annotationLayer.clientHeight) return;
+  const width = annotationLayer.clientWidth;
+  const height = annotationLayer.clientHeight;
+  const ratio = Math.min(2, context.window.devicePixelRatio || 1);
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  const drawing = canvas.getContext("2d");
+  drawing.setTransform(ratio, 0, 0, ratio, 0, 0);
+  drawing.clearRect(0, 0, width, height);
+  const x1 = (Number(canvas.dataset.fromX) / 100) * width;
+  const y1 = (Number(canvas.dataset.fromY) / 100) * height;
+  const x2 = (Number(canvas.dataset.toX) / 100) * width;
+  const y2 = (Number(canvas.dataset.toY) / 100) * height;
+  const bend = Math.max(42, Math.abs(x2 - x1) * 0.36);
+  const controlX = x1 < x2 ? x1 + bend : x1 - bend;
+  const secondControlX = x1 < x2 ? x2 - bend : x2 + bend;
+  const length = Math.hypot(x2 - x1, y2 - y1) * 1.45;
+  drawing.lineCap = "round";
+  drawing.lineJoin = "round";
+  drawing.setLineDash([length, length]);
+  drawing.lineDashOffset = length * (1 - progress);
+  for (const [strokeStyle, lineWidth] of [
+    ["rgba(255,253,248,0.96)", 10],
+    [wirePathColor(canvas.dataset.wireColor), 5],
+  ]) {
+    drawing.beginPath();
+    drawing.moveTo(x1, y1);
+    drawing.bezierCurveTo(controlX, y1, secondControlX, y2, x2, y2);
+    drawing.strokeStyle = strokeStyle;
+    drawing.lineWidth = lineWidth;
+    drawing.stroke();
+  }
+}
+
+function wirePathColor(value) {
+  const colors = {
+    black: "#191919",
+    blue: "#285fdb",
+    green: "#16835f",
+    red: "#e4453a",
+    white: "#777",
+    yellow: "#d99a00",
+  };
+  return colors[String(value || "").toLowerCase()] || "#285fdb";
 }
 
 async function toggleVoice(context, textarea) {
@@ -2066,6 +2448,36 @@ function annotationButton(part, index, selectedId) {
   `;
 }
 
+function annotationLegend(parts, interactive = false) {
+  return `
+    <ol class="annotation-legend" aria-label="Photo annotation legend">
+      ${parts
+        .map(
+          (part, index) => `
+            <li>
+              ${
+                interactive
+                  ? `
+                    <button type="button" data-select-part="${escapeAttribute(
+                      part.id,
+                    )}" aria-label="Edit ${escapeAttribute(part.name)}">
+                      <span class="color-${(index % 5) + 1}">${index + 1}</span>
+                      <strong>${escapeHtml(part.name)}</strong>
+                    </button>
+                  `
+                  : `
+                    <span class="color-${(index % 5) + 1}">${index + 1}</span>
+                    <strong>${escapeHtml(part.name)}</strong>
+                  `
+              }
+            </li>
+          `,
+        )
+        .join("")}
+    </ol>
+  `;
+}
+
 function readyAnnotation(part, index) {
   if (!part.bounds) return "";
   const { x, y, width, height } = part.bounds;
@@ -2154,6 +2566,7 @@ function boundInput(label, field, value) {
 function missingPartRow(part, inventory) {
   return `
     <li class="${part.obtained ? "is-obtained" : ""}">
+      <span class="missing-part-icon">${icon(missingPartIcon(part))}</span>
       <div>
         <h3>${escapeHtml(part.name)}</h3>
         <p>${escapeHtml(part.reason)}</p>
@@ -2183,15 +2596,29 @@ function missingPartRow(part, inventory) {
   `;
 }
 
+function missingPartIcon(part) {
+  const description = `${part.name || ""} ${part.reason || ""}`.toLowerCase();
+  if (description.includes("fan")) return "fan";
+  if (description.includes("soil") || description.includes("plant")) return "sprout";
+  if (description.includes("pump") || description.includes("motor")) return "zap";
+  return "shopping-bag";
+}
+
 function alternativeCard(alternative, index) {
   return `
-    <article class="alternative-note color-${(index % 5) + 1}">
-      ${icon(index % 2 ? "play" : "sparkles")}
+    <button
+      class="alternative-note color-${(index % 5) + 1}"
+      type="button"
+      data-start-alternative="${escapeAttribute(alternative.id)}"
+      aria-label="Start ${escapeAttribute(alternative.title)}"
+    >
+      ${icon(index % 2 ? "fan" : "sprout")}
       <div>
         <h3>${escapeHtml(alternative.title)}</h3>
         <p>${escapeHtml(alternative.summary)}</p>
+        <span>See project ${icon("arrow-right")}</span>
       </div>
-    </article>
+    </button>
   `;
 }
 
