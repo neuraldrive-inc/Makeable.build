@@ -1650,7 +1650,7 @@ function firmwareDiagnosticRequirements() {
     'Emit `MAKEABLE|CHECK|<id>|PASS|<detail>` or `MAKEABLE|CHECK|<id>|FAIL|<detail>` for every diagnostic.',
     'Read newline-delimited serial input, handle only `MAKEABLE|RUN|<id>|<pulseMs>` and `MAKEABLE|STOP|<id>`, reject unknown IDs, and clamp actuator pulses to at most 1000 ms.',
     "Before energizing an actuator, set an internal monotonic millis() off deadline; the main loop must de-energize it when that deadline arrives even if no more serial input is received, and STOP must de-energize it immediately.",
-    "Inside the balanced RUN, STOP, and deadline if-blocks, use direct physical pin writes or explicit PWM writes for the actuator; do not delegate energizing or de-energizing to helper calls, and assign the off deadline only inside RUN.",
+    "Use this exact canonical safety shape with braced blocks, top-level statements, and direct physical pin writes or explicit PWM writes: in RUN assign `deadline = millis() + pulseMs` before HIGH or nonzero PWM; in STOP perform the matching LOW or zero PWM before any return; outside RUN and STOP use an unconditional canonical rollover-safe `if ((long)(millis() - deadline) >= 0) { digitalWrite(pin, LOW); }` block. Do not add extra && or || guards or nested control blocks; do not delegate energizing or de-energizing to helper calls.",
     "Do not place these markers only in comments; print them through Serial and parse the RUN prefix in executable code.",
   ].join(" ");
 }
@@ -1668,16 +1668,34 @@ function hasBranchBoundActuatorSafety(source) {
   const stopBlock = findCommandBlock(ifBlocks, "STOP");
   if (!runBlock || !stopBlock) return false;
 
-  const energizedTargets = directActuatorTargets(runBlock.body, "on");
+  const runPrefix = canonicalTopLevelPrefix(runBlock.body);
+  const stopPrefix = canonicalTopLevelPrefix(stopBlock.body);
+  const energizedWrites = directActuatorWrites(runPrefix, "on");
+  const energizedTargets = new Set(energizedWrites.map(({ target }) => target));
   if (!energizedTargets.size) return false;
-  if (!setContainsAll(directActuatorTargets(stopBlock.body, "off"), energizedTargets)) {
+  if (
+    !setContainsAll(
+      directActuatorTargets(stopPrefix, "off"),
+      energizedTargets,
+    )
+  ) {
     return false;
   }
 
   const deadlineAssignments = findMillisDeadlineAssignments(source);
+  const runDeadlineAssignments = findMillisDeadlineAssignments(runPrefix);
+  const firstEnergizeIndex = Math.min(
+    ...energizedWrites.map(({ index }) => index),
+  );
   if (
     !deadlineAssignments.length ||
-    deadlineAssignments.some(({ index }) => !rangeContains(runBlock, index))
+    !runDeadlineAssignments.length ||
+    runDeadlineAssignments.some(({ index }) => index >= firstEnergizeIndex) ||
+    deadlineAssignments.some(
+      ({ index }) =>
+        index < runBlock.bodyStart ||
+        index >= runBlock.bodyStart + runPrefix.length,
+    )
   ) {
     return false;
   }
@@ -1691,7 +1709,10 @@ function hasBranchBoundActuatorSafety(source) {
         !rangeContains(stopBlock, block.start) &&
         conditionEnforcesDeadline(block.condition, deadline) &&
         setContainsAll(
-          directActuatorTargets(block.body, "off"),
+          directActuatorTargets(
+            canonicalTopLevelPrefix(block.body),
+            "off",
+          ),
           energizedTargets,
         ),
     );
@@ -1714,6 +1735,7 @@ function extractBalancedIfBlocks(source) {
     blocks.push({
       start: match.index,
       end: bodyClose + 1,
+      bodyStart: bodyOpen + 1,
       condition: source.slice(conditionOpen + 1, conditionClose),
       body: source.slice(bodyOpen + 1, bodyClose),
     });
@@ -1731,23 +1753,32 @@ function findCommandBlock(blocks, command) {
 }
 
 function directActuatorTargets(block, state) {
-  const targets = new Set();
+  return new Set(
+    directActuatorWrites(block, state).map(({ target }) => target),
+  );
+}
+
+function directActuatorWrites(block, state) {
+  const writes = [];
   const digitalLevel = state === "on" ? "HIGH" : "LOW";
   const digitalPattern = new RegExp(
     `\\bdigitalWrite\\s*\\(\\s*([A-Za-z_]\\w*|\\d+)\\s*,\\s*${digitalLevel}\\s*\\)\\s*;`,
     "g",
   );
-  for (const match of block.matchAll(digitalPattern)) targets.add(match[1]);
+  for (const match of block.matchAll(digitalPattern)) {
+    writes.push({ target: match[1], index: match.index });
+  }
 
   const pwmPattern =
     /\b(?:analogWrite|ledcWrite)\s*\(\s*([A-Za-z_]\w*|\d+)\s*,\s*(\d+)\s*\)\s*;/g;
-  for (const [, target, rawValue] of block.matchAll(pwmPattern)) {
+  for (const match of block.matchAll(pwmPattern)) {
+    const [, target, rawValue] = match;
     const value = Number(rawValue);
     if ((state === "on" && value > 0) || (state === "off" && value === 0)) {
-      targets.add(target);
+      writes.push({ target, index: match.index });
     }
   }
-  return targets;
+  return writes;
 }
 
 function findMillisDeadlineAssignments(source) {
@@ -1790,12 +1821,52 @@ function isGlobalDeclarationInitializer(source, assignmentIndex, variable) {
 }
 
 function conditionEnforcesDeadline(condition, deadline) {
-  const escaped = escapeRegExp(deadline);
-  return (
-    /millis\s*\(\s*\)/.test(condition) &&
-    new RegExp(`\\b${escaped}\\b`).test(condition) &&
-    /(?:>=|<=|>|<|-)/.test(condition)
-  );
+  const compact = stripOuterParentheses(condition.trim()).replace(/\s+/g, "");
+  const cast =
+    "(?:\\((?:signed)?long\\)|\\(int32_t\\)|static_cast<(?:long|int32_t)>)";
+  return new RegExp(
+    `^${cast}\\(millis\\(\\)-${escapeRegExp(deadline)}\\)>=0$`,
+  ).test(compact);
+}
+
+function stripOuterParentheses(value) {
+  let result = value;
+  while (
+    result[0] === "(" &&
+    matchingDelimiter(result, 0, "(", ")") === result.length - 1
+  ) {
+    result = result.slice(1, -1).trim();
+  }
+  return result;
+}
+
+function canonicalTopLevelPrefix(block) {
+  let quote = "";
+  for (let index = 0; index < block.length; index += 1) {
+    const character = block[index];
+    if (quote) {
+      if (character === "\\") index += 1;
+      else if (character === quote) quote = "";
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === "{") return block.slice(0, index);
+    if (!/[A-Za-z_]/.test(character)) continue;
+    const tokenMatch = /^[A-Za-z_]\w*/.exec(block.slice(index));
+    const token = tokenMatch?.[0] || "";
+    if (
+      /^(?:return|break|continue|goto|throw|if|for|while|switch|do|try|catch)$/.test(
+        token,
+      )
+    ) {
+      return block.slice(0, index);
+    }
+    index += Math.max(0, token.length - 1);
+  }
+  return block;
 }
 
 function matchingDelimiter(source, openIndex, openCharacter, closeCharacter) {

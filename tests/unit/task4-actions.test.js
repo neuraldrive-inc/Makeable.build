@@ -5,7 +5,6 @@ import * as actions from "../../src/makeable/actions.js";
 
 const CONTRACT_SKETCH = `
 const int PUMP_PIN = 8;
-bool pumpActive = false;
 unsigned long pumpOffDeadline = 0;
 void reportReset() { Serial.println("MAKEABLE|RESET|POWER_ON"); }
 void reportReady() { Serial.println("MAKEABLE|READY|ESP32"); }
@@ -13,22 +12,19 @@ void reportCheck() { Serial.println("MAKEABLE|CHECK|sensor|PASS|value=1"); }
 void handleCommand(String line) {
   if (line.startsWith("MAKEABLE|STOP|")) {
     digitalWrite(PUMP_PIN, LOW);
-    pumpActive = false;
     return;
   }
   if (line.startsWith("MAKEABLE|RUN|")) {
     unsigned long pulseMs = 500;
-    digitalWrite(PUMP_PIN, HIGH);
-    pumpActive = true;
     pumpOffDeadline = millis() + pulseMs;
+    digitalWrite(PUMP_PIN, HIGH);
     reportCheck();
   }
 }
 void setup() { Serial.begin(115200); reportReset(); reportReady(); }
 void loop() {
-  if (pumpActive && (long)(millis() - pumpOffDeadline) >= 0) {
+  if ((long)(millis() - pumpOffDeadline) >= 0) {
     digitalWrite(PUMP_PIN, LOW);
-    pumpActive = false;
   }
   if (Serial.available()) handleCommand(Serial.readStringUntil('\\n'));
 }

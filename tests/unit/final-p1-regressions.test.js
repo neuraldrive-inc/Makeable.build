@@ -23,23 +23,20 @@ void reportCheck() { Serial.println("MAKEABLE|CHECK|pump|PASS|pulse complete"); 
 void handleCommand(String line) {
   if (line.startsWith("MAKEABLE|STOP|")) {
     digitalWrite(PUMP_PIN, LOW);
-    pumpActive = false;
     return;
   }
   if (line.startsWith("MAKEABLE|RUN|")) {
     unsigned long pulseMs = 500;
-    digitalWrite(PUMP_PIN, HIGH);
-    pumpActive = true;
     pumpOffDeadline = millis() + pulseMs;
+    digitalWrite(PUMP_PIN, HIGH);
     reportCheck();
   }
 }
 
 void setup() { Serial.begin(115200); reportReset(); reportReady(); }
 void loop() {
-  if (pumpActive && (long)(millis() - pumpOffDeadline) >= 0) {
+  if ((long)(millis() - pumpOffDeadline) >= 0) {
     digitalWrite(PUMP_PIN, LOW);
-    pumpActive = false;
   }
   if (Serial.available()) handleCommand(Serial.readStringUntil('\\n'));
 }
@@ -81,6 +78,29 @@ void loop() {
 
 test("firmware diagnostics reject physical-off actions outside the actual STOP and deadline blocks", () => {
   assert.equal(hasFirmwareDiagnosticContract(ADVERSARIAL_FIRMWARE), false);
+});
+
+test("firmware diagnostics reject actuator writes and deadlines after control transfer", () => {
+  const unreachableStop = COMPLIANT_FIRMWARE.replace(
+    "digitalWrite(PUMP_PIN, LOW);\n    return;",
+    "return;\n    digitalWrite(PUMP_PIN, LOW);",
+  );
+  const unreachableRun = COMPLIANT_FIRMWARE.replace(
+    "pumpOffDeadline = millis() + pulseMs;\n    digitalWrite(PUMP_PIN, HIGH);",
+    "return;\n    pumpOffDeadline = millis() + pulseMs;\n    digitalWrite(PUMP_PIN, HIGH);",
+  );
+
+  assert.equal(hasFirmwareDiagnosticContract(unreachableStop), false);
+  assert.equal(hasFirmwareDiagnosticContract(unreachableRun), false);
+});
+
+test("firmware diagnostics reject actuator writes hidden in nested control blocks", () => {
+  const nestedOff = COMPLIANT_FIRMWARE.replaceAll(
+    "digitalWrite(PUMP_PIN, LOW);",
+    "if (false) { digitalWrite(PUMP_PIN, LOW); }",
+  );
+
+  assert.equal(hasFirmwareDiagnosticContract(nestedOff), false);
 });
 
 test("firmware diagnostics reject helper calls in place of direct physical shutoff", () => {
@@ -170,6 +190,10 @@ test("hardware planning asks for direct physical safety writes that match valida
   assert.match(
     JSON.stringify(requestPayload),
     /direct physical (?:pin|PWM) writes.*do not delegate.*helper/i,
+  );
+  assert.match(
+    JSON.stringify(requestPayload),
+    /canonical rollover-safe.*\(long\).*millis\(\).*deadline.*>=.*0/i,
   );
 });
 
