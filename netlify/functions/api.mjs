@@ -100,8 +100,8 @@ function publicConfig(env) {
   return {
     deepgramApiKey: env.DEEPGRAM_BROWSER_KEY || (allowDeepgramSecret ? env.DEEPGRAM_API_KEY : ""),
     githubOwner: env.GITHUB_OWNER || "",
-    openaiModel: env.OPENAI_MODEL || "gpt-5.5",
-    openaiReasoningModel: env.OPENAI_REASONING_MODEL || "gpt-5.5",
+    openaiModel: env.OPENAI_MODEL || "gpt-5.6-sol",
+    openaiReasoningModel: env.OPENAI_REASONING_MODEL || "gpt-5.6-sol",
     openaiReasoningEffort: env.OPENAI_REASONING_EFFORT || "high",
     arduinoFqbn: env.ARDUINO_FQBN || "esp32:esp32:esp32",
     hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
@@ -113,7 +113,7 @@ function publicConfig(env) {
 }
 
 function publicConfigScript(env) {
-  return `window.CIRCUIT_CODEX_CONFIG = ${JSON.stringify(publicConfig(env))};`;
+  return `window.MAKEABLE_CONFIG = ${JSON.stringify(publicConfig(env))};`;
 }
 
 async function proxyOpenAI(req, env) {
@@ -121,7 +121,7 @@ async function proxyOpenAI(req, env) {
   if (missing) return missing;
 
   const body = await req.json();
-  if (!body.model) body.model = env.OPENAI_MODEL || "gpt-5.5";
+  if (!body.model) body.model = env.OPENAI_MODEL || "gpt-5.6-sol";
 
   return streamJsonUpstream(
     fetch("https://api.openai.com/v1/responses", {
@@ -139,7 +139,7 @@ async function createOpenAIBackgroundResponse(req, env) {
   const body = await req.json();
   const payload = {
     ...body,
-    model: body.model || env.OPENAI_MODEL || "gpt-5.5",
+    model: body.model || env.OPENAI_MODEL || "gpt-5.6-sol",
     background: true,
     store: body.store ?? true,
   };
@@ -235,7 +235,7 @@ async function createGitHubRepo(req, env) {
     headers: githubHeaders(env),
     body: JSON.stringify({
       name: body.name,
-      description: body.description || "Hardware project generated with GeckCo AI",
+      description: body.description || "Hardware project generated with Makeable",
       private: Boolean(body.private),
       auto_init: false,
     }),

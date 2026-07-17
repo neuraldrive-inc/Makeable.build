@@ -1,20 +1,20 @@
-# GeckCo AI
+# Makeable
 
 ## Codex For Hardware
 
-**GeckCo AI** is an AI hardware-building buddy that turns messy IoT prototyping into a fun, LEGO-like experience.
+**Makeable** is an AI hardware-building buddy that turns messy IoT prototyping into a fun, LEGO-like experience.
 
-Building with ESP32s can feel scary when you are new: sensors, wires, pin diagrams, Arduino setup, firmware, flashing, terminal logs, and debugging all show up at once. GeckCo AI turns that chaos into a friendly step-by-step build guide using your own parts photo.
+Building with ESP32s can feel scary when you are new: sensors, wires, pin diagrams, Arduino setup, firmware, flashing, terminal logs, and debugging all show up at once. Makeable turns that chaos into a friendly step-by-step build guide using your own parts photo.
 
-Upload a photo. Say what you want to build. Let GeckCo guide the rest. 🧩⚡
+Upload a photo. Say what you want to build. Let Makeable guide the rest. 🧩⚡
 
-![GeckCo AI landing page](images/landing%20page%20.jpg)
+![Makeable workbench concept](design/makeable-ui-concept.png)
 
 ---
 
 ## The Big Idea 💡
 
-Instead of making beginners jump between wiring diagrams, Arduino IDE, random tutorials, and serial monitors, GeckCo AI keeps the whole hardware journey in one place.
+Instead of making beginners jump between wiring diagrams, Arduino IDE, random tutorials, and serial monitors, Makeable keeps the whole hardware journey in one place.
 
 It can:
 
@@ -41,7 +41,7 @@ Bad code upload? More confusion.
 
 Serial log error? Time to panic-scroll forums.
 
-GeckCo AI is designed to feel like a calm friend beside you saying:
+Makeable is designed to feel like a calm friend beside you saying:
 
 > “No worries. Pick up this wire. Put it here. I’ll check the next part with you.”
 
@@ -61,7 +61,7 @@ In this demo, the user wants a motion-triggered light build.
 
 ### 2. AI Finds the Useful Parts 🧠
 
-GeckCo AI reads the photo and focuses on the parts needed for the project. Extra parts are ignored so the screen does not become label soup.
+Makeable reads the photo and focuses on the parts needed for the project. Extra parts are ignored so the screen does not become label soup.
 
 ![AI labels the needed hardware parts](images/step%202%20-%20image%201.jpg)
 
@@ -69,7 +69,7 @@ GeckCo AI reads the photo and focuses on the parts needed for the project. Extra
 
 The guide does not dump every wire on you at once. It highlights the current move, shows the exact parts on your own photo, and keeps the instruction simple.
 
-![GeckCo AI shows one wiring move at a time](images/step%202%20-%20image%202.jpg)
+![Makeable shows one wiring move at a time](images/step%202%20-%20image%202.jpg)
 
 ### 4. A Clean Final Guide ✅
 
@@ -79,7 +79,7 @@ Each step is built around the photo, the selected parts, and a clear action. It 
 
 ### 5. Pick the Board Settings ⚙️
 
-GeckCo AI keeps the board setup visible so users can confirm the ESP32 target before flashing.
+Makeable keeps the board setup visible so users can confirm the ESP32 target before flashing.
 
 ![Selected ESP32 board settings](images/flashing%20selected%20board.jpg)
 
@@ -91,13 +91,13 @@ The app generates firmware and loads it directly into the ESP32. No Arduino IDE 
 
 ### 7. Closed-Loop Debugging 👀⚡
 
-After flashing, GeckCo AI can check terminal logs and webcam footage to confirm the physical project is actually doing what it should.
+After flashing, Makeable can check terminal logs and webcam footage to confirm the physical project is actually doing what it should.
 
 ![Closed loop debugging with terminal logs and webcam](images/closed%20loop%20debugging%20system%20with%20terminal%20logs%20and%20webcam.jpg)
 
 ### 8. One-Click GitHub Documentation 📚
 
-When the build works, GeckCo AI packages the project into GitHub-friendly documentation so it is easy to save, share, and show off.
+When the build works, Makeable packages the project into GitHub-friendly documentation so it is easy to save, share, and show off.
 
 ![One button upload project to GitHub](images/one%20button%20click%20upload%20project%20to%20github.jpg)
 
@@ -105,7 +105,7 @@ When the build works, GeckCo AI packages the project into GitHub-friendly docume
 
 ## What Makes It Different ✨
 
-| Old Hardware Workflow 😵 | GeckCo AI Workflow ✨ |
+| Old Hardware Workflow 😵 | Makeable Workflow ✨ |
 | --- | --- |
 | Search for wiring diagrams | Upload your own parts photo |
 | Guess which parts matter | AI marks only the needed parts |
@@ -121,7 +121,7 @@ When the build works, GeckCo AI packages the project into GitHub-friendly docume
 
 ### 📷 Photo-Based Part Detection
 
-GeckCo AI uses the user’s real photo as the source of truth. The guide is not generic. It points to the actual objects on the table.
+Makeable uses the user’s real photo as the source of truth. The guide is not generic. It points to the actual objects on the table.
 
 ### 🪜 Step-by-Step Wiring
 
@@ -133,7 +133,7 @@ The app generates ESP32-ready code based on the project goal and detected compon
 
 ### 🔌 Direct Flashing
 
-With Arduino CLI and Web Serial support, GeckCo AI can compile and flash firmware without forcing the user into Arduino IDE.
+With Arduino CLI and Web Serial support, Makeable can compile and flash firmware without forcing the user into Arduino IDE.
 
 ### 👀 Closed-Loop Debugging
 
@@ -181,8 +181,8 @@ Create a `.env` file:
 
 ```bash
 OPENAI_API_KEY=
-OPENAI_MODEL=gpt-5.5
-OPENAI_REASONING_MODEL=gpt-5.5
+OPENAI_MODEL=gpt-5.6-sol
+OPENAI_REASONING_MODEL=gpt-5.6-sol
 OPENAI_REASONING_EFFORT=high
 
 DEEPGRAM_API_KEY=
@@ -214,7 +214,7 @@ Hardware should feel fun, not frightening. ⚡
 
 ## Project Vision 🌈
 
-GeckCo AI is not just a code generator.
+Makeable is not just a code generator.
 
 It is a hardware companion that watches the whole loop:
 
@@ -230,7 +230,7 @@ The dream is simple:
 
 ## Name
 
-**GeckCo AI**<br>
+**Makeable**<br>
 **Tagline:** Codex For Hardware
 
 Small tool. Big hardware confidence. ⚡

@@ -85,7 +85,7 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(port, () => {
-  console.log(`GeckCo AI running at http://localhost:${port}`);
+  console.log(`Makeable running at http://localhost:${port}`);
 });
 
 function getEnv() {
@@ -118,8 +118,8 @@ function publicConfig(env) {
   const config = {
     deepgramApiKey: env.DEEPGRAM_API_KEY || "",
     githubOwner: env.GITHUB_OWNER || "",
-    openaiModel: env.OPENAI_MODEL || "gpt-5.5",
-    openaiReasoningModel: env.OPENAI_REASONING_MODEL || "gpt-5.5",
+    openaiModel: env.OPENAI_MODEL || "gpt-5.6-sol",
+    openaiReasoningModel: env.OPENAI_REASONING_MODEL || "gpt-5.6-sol",
     openaiReasoningEffort: env.OPENAI_REASONING_EFFORT || "high",
     arduinoFqbn: env.ARDUINO_FQBN || "esp32:esp32:esp32",
     hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
@@ -131,7 +131,7 @@ function publicConfig(env) {
 
 function publicConfigScript(env) {
   const config = publicConfig(env);
-  return `window.CIRCUIT_CODEX_CONFIG = ${JSON.stringify(config)};`;
+  return `window.MAKEABLE_CONFIG = ${JSON.stringify(config)};`;
 }
 
 async function serveStatic(pathname, res) {
@@ -161,7 +161,7 @@ async function proxyOpenAI(req, res, env) {
   if (!env.OPENAI_API_KEY) return sendJson(res, { error: "OPENAI_API_KEY is missing in .env" }, 401);
 
   const body = await readJsonBody(req);
-  if (!body.model) body.model = env.OPENAI_MODEL || "gpt-5.5";
+  if (!body.model) body.model = env.OPENAI_MODEL || "gpt-5.6-sol";
 
   const upstream = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -182,7 +182,7 @@ async function createOpenAIBackgroundResponse(req, res, env) {
   const body = await readJsonBody(req);
   const payload = {
     ...body,
-    model: body.model || env.OPENAI_MODEL || "gpt-5.5",
+    model: body.model || env.OPENAI_MODEL || "gpt-5.6-sol",
     background: true,
     store: body.store ?? true,
   };
@@ -261,8 +261,8 @@ async function compileFirmware(req, res, env) {
   if (!sketch) return sendJson(res, { error: "sketch is required" }, 400);
 
   const fqbn = String(body.fqbn || env.ARDUINO_FQBN || "esp32:esp32:esp32").trim();
-  const sketchName = "GeckCoAISketch";
-  const buildRoot = path.join(__dirname, ".geckco-ai", "builds", randomUUID());
+  const sketchName = "MakeableSketch";
+  const buildRoot = path.join(__dirname, ".makeable", "builds", randomUUID());
   const sketchDir = path.join(buildRoot, sketchName);
   const outputDir = path.join(buildRoot, "out");
 
@@ -400,7 +400,7 @@ async function createGitHubRepo(req, res, env) {
     headers: githubHeaders(env),
     body: JSON.stringify({
       name: body.name,
-      description: body.description || "Hardware project generated with GeckCo AI",
+      description: body.description || "Hardware project generated with Makeable",
       private: Boolean(body.private),
       auto_init: false,
     }),

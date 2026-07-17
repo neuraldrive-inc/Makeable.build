@@ -9,7 +9,7 @@ These are the implementation assumptions used before coding the prototype.
 - Structured output uses `text.format` with `type: "json_schema"`, `strict: true`, and a full JSON schema.
 - The prototype calls OpenAI through `POST /api/openai/responses`, a tiny local proxy backed by `OPENAI_API_KEY`.
 - Hosted long-running guide/code/check calls use `POST /api/openai/background` with `background: true`, then poll `GET /api/openai/responses/{id}` until the response completes. This avoids Netlify inactivity timeouts while preserving the expensive vision/reasoning model path.
-- Default model choices are set in `.env`: `OPENAI_MODEL=gpt-5.5` for part planning and `OPENAI_REASONING_MODEL=gpt-5.5` for behavior verification.
+- Default model choices are set in `.env`: `OPENAI_MODEL=gpt-5.6-sol` for part planning and `OPENAI_REASONING_MODEL=gpt-5.6-sol` for behavior verification.
 - `OPENAI_REASONING_EFFORT=high` is the default. Use `xhigh` only when you are comfortable with slower, higher-cost calls.
 
 Docs:

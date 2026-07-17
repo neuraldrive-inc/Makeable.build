@@ -1,8 +1,6 @@
 const $ = (selector) => document.querySelector(selector);
 
-let serverConfig = window.CIRCUIT_CODEX_CONFIG || {};
-let localOverrides = readLocalOverrides();
-const FRONTIER_MODEL = "gpt-5.5";
+const FRONTIER_MODEL = "gpt-5.6-sol";
 const LEGACY_MODEL_DEFAULTS = new Set(["gpt-5.4-mini"]);
 const DEFAULT_REASONING_EFFORT = "high";
 const LEGACY_REASONING_EFFORT_DEFAULTS = new Set(["low"]);
@@ -11,33 +9,35 @@ const AI_POLL_BASE_INTERVAL_MS = 2200;
 const AI_TRANSIENT_RETRY_ATTEMPTS = 2;
 const ANNOTATION_LABEL_PADDING = 12;
 const ANNOTATION_LABEL_GAP = 10;
-const SETTINGS_STORAGE_KEY = "geckco.settings";
-const LEGACY_SETTINGS_STORAGE_KEY = "circuitcodex.settings";
+const SETTINGS_STORAGE_KEY = "makeable.settings";
+const LEGACY_SETTINGS_STORAGE_KEYS = ["geckco.settings", "circuitcodex.settings"];
+let serverConfig = window.MAKEABLE_CONFIG || window.CIRCUIT_CODEX_CONFIG || {};
+let localOverrides = readLocalOverrides();
 const WORKFLOW_STAGES = [
   {
     hash: "#capture",
-    label: "Step 1: Start",
-    hint: "Choose a photo and tell me what you want to make.",
+    label: "Step 1: Describe",
+    hint: "Tell Makeable what you want to build.",
   },
   {
     hash: "#plan",
-    label: "Step 2: Guide",
-    hint: "Build from your own photo, one connection at a time.",
+    label: "Step 2: Scan Parts",
+    hint: "Show Makeable the real parts on your desk.",
   },
   {
     hash: "#flash",
-    label: "Step 3: Load",
-    hint: "I’ll prepare the code and place it on your board.",
+    label: "Step 3: Build + Code",
+    hint: "Connect one wire at a time, then load the code.",
   },
   {
     hash: "#verify",
-    label: "Step 4: Watch",
-    hint: "We’ll listen to the board and check what it is doing.",
+    label: "Step 4: Test",
+    hint: "Listen to the board and check the real behavior.",
   },
   {
     hash: "#document",
-    label: "Step 5: Share",
-    hint: "Turn the finished build into notes and code you can keep.",
+    label: "Step 5: Publish",
+    hint: "Package the guide, code, parts, and test results.",
   },
 ];
 
@@ -77,8 +77,9 @@ const state = {
 };
 
 const els = {
-  introPage: $("#introPage"),
-  introStartButton: $("#introStartButton"),
+  ideaNextButton: $("#ideaNextButton"),
+  ideaPrompts: document.querySelectorAll("[data-idea]"),
+  voiceTranscriptBox: $("#voiceTranscriptBox"),
   homeButton: $("#homeButton"),
   homeBrandLink: $("#homeBrandLink"),
   canvas: $("#partsCanvas"),
@@ -97,6 +98,7 @@ const els = {
   stageControlTitle: $("#stageControlTitle"),
   stageControlHint: $("#stageControlHint"),
   partsList: $("#partsList"),
+  partsCountLabel: $("#partsCountLabel"),
   wiringList: $("#wiringList"),
   diagnosticsList: $("#diagnosticsList"),
   visualStepList: $("#visualStepList"),
@@ -104,6 +106,10 @@ const els = {
   buildStepDots: $("#buildStepDots"),
   prevBuildStepButton: $("#prevBuildStepButton"),
   nextBuildStepButton: $("#nextBuildStepButton"),
+  showWiringButton: $("#showWiringButton"),
+  showCodeButton: $("#showCodeButton"),
+  wiringWorkspace: $("#wiringWorkspace"),
+  codeWorkspace: $("#codeWorkspace"),
   firmwareOutput: $("#firmwareOutput"),
   copyFirmwareButton: $("#copyFirmwareButton"),
   downloadFirmwareButton: $("#downloadFirmwareButton"),
@@ -275,13 +281,11 @@ const behaviorSchema = {
 };
 
 bindEvents();
-initIntro();
-const initialIntroActive = document.body.classList.contains("intro-active");
 renderSettings();
 renderEmptyPlan();
 const initialStageIndex = WORKFLOW_STAGES.findIndex((stage) => stage.hash === window.location.hash);
-setActiveWorkflowStage(initialIntroActive ? 0 : Math.max(initialStageIndex, 0), {
-  updateHash: !initialIntroActive,
+setActiveWorkflowStage(Math.max(initialStageIndex, 0), {
+  updateHash: true,
   replace: true,
 });
 drawPartsCanvas();
@@ -291,11 +295,23 @@ window.addEventListener("resize", () => {
   drawPartsCanvas();
   renderVisualSteps();
 });
+window.addEventListener("hashchange", () => {
+  const hashIndex = WORKFLOW_STAGES.findIndex((stage) => stage.hash === window.location.hash);
+  if (hashIndex >= 0 && hashIndex !== state.activeWorkflowStageIndex) {
+    setActiveWorkflowStage(hashIndex, { updateHash: false });
+  }
+});
 
 function bindEvents() {
-  els.introStartButton?.addEventListener("click", enterBuilder);
   els.homeButton?.addEventListener("click", showIntro);
   els.homeBrandLink?.addEventListener("click", showIntro);
+  els.ideaNextButton?.addEventListener("click", advanceFromIdea);
+  els.ideaPrompts.forEach((button) => {
+    button.addEventListener("click", () => {
+      els.ideaText.value = button.dataset.idea || "";
+      els.ideaText.focus();
+    });
+  });
   els.photoInput.addEventListener("change", handlePhotoUpload);
   els.clearPhotoButton.addEventListener("click", clearPhoto);
   els.startVoiceButton.addEventListener("click", startVoiceCapture);
@@ -307,7 +323,9 @@ function bindEvents() {
   els.stageBackButton.addEventListener("click", () => setActiveWorkflowStage(state.activeWorkflowStageIndex - 1));
   els.stageNextButton.addEventListener("click", () => setActiveWorkflowStage(state.activeWorkflowStageIndex + 1));
   els.prevBuildStepButton.addEventListener("click", () => setActiveBuildStep(state.activeBuildStepIndex - 1));
-  els.nextBuildStepButton.addEventListener("click", () => setActiveBuildStep(state.activeBuildStepIndex + 1));
+  els.nextBuildStepButton.addEventListener("click", advanceBuildStep);
+  els.showWiringButton?.addEventListener("click", () => setBuildMode("wiring"));
+  els.showCodeButton?.addEventListener("click", () => setBuildMode("code"));
   els.copyFirmwareButton.addEventListener("click", copyFirmware);
   els.downloadFirmwareButton.addEventListener("click", downloadFirmware);
   els.connectSerialButton.addEventListener("click", connectSerial);
@@ -331,21 +349,22 @@ function bindEvents() {
   els.clearSettingsButton.addEventListener("click", clearLocalOverrides);
 }
 
-function initIntro() {
-  const shouldShowIntro = !window.location.hash || window.location.hash === "#introPage";
-  document.body.classList.toggle("intro-active", shouldShowIntro);
-}
-
-function enterBuilder(event) {
+function showIntro(event) {
   event?.preventDefault();
   document.body.classList.remove("intro-active");
   setActiveWorkflowStage(0, { updateHash: true, replace: true });
 }
 
-function showIntro(event) {
-  event?.preventDefault();
-  document.body.classList.add("intro-active");
-  window.history.replaceState(null, "", `${window.location.pathname}#introPage`);
+function advanceFromIdea() {
+  const idea = els.ideaText.value.trim();
+  if (!idea) {
+    els.ideaText.focus();
+    els.ideaText.setAttribute("aria-invalid", "true");
+    if (els.voiceTranscriptBox) els.voiceTranscriptBox.textContent = "Tell me the idea in one sentence first.";
+    return;
+  }
+  els.ideaText.removeAttribute("aria-invalid");
+  setActiveWorkflowStage(1);
 }
 
 function setActiveWorkflowStage(index, options = {}) {
@@ -371,7 +390,9 @@ function setActiveWorkflowStage(index, options = {}) {
   els.stageControlHint.textContent = stage.hint;
   els.stageBackButton.disabled = activeIndex === 0;
   els.stageNextButton.disabled = activeIndex === WORKFLOW_STAGES.length - 1;
-  els.stageNextButton.textContent = activeIndex === WORKFLOW_STAGES.length - 1 ? "All set" : "Continue";
+  els.stageNextButton.textContent = ["Scan my parts", "Build it", "Test my hardware", "Publish my build", "All set"][activeIndex];
+
+  if (activeIndex === 2 && els.codeWorkspace?.hidden !== false) setBuildMode("wiring");
 
   if (options.updateHash !== false) {
     const url = `${window.location.pathname}${stage.hash}`;
@@ -386,9 +407,11 @@ function setActiveWorkflowStage(index, options = {}) {
 
 function readLocalOverrides() {
   try {
-    return JSON.parse(
-      localStorage.getItem(SETTINGS_STORAGE_KEY) || localStorage.getItem(LEGACY_SETTINGS_STORAGE_KEY) || "{}",
-    );
+    const storedSettings =
+      localStorage.getItem(SETTINGS_STORAGE_KEY) ||
+      LEGACY_SETTINGS_STORAGE_KEYS.map((key) => localStorage.getItem(key)).find(Boolean) ||
+      "{}";
+    return JSON.parse(storedSettings);
   } catch {
     return {};
   }
@@ -453,7 +476,7 @@ function saveSettings(event) {
 
 function clearLocalOverrides() {
   localStorage.removeItem(SETTINGS_STORAGE_KEY);
-  localStorage.removeItem(LEGACY_SETTINGS_STORAGE_KEY);
+  LEGACY_SETTINGS_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
   localOverrides = {};
   settings.deepgramApiKey = serverConfig.deepgramApiKey || "";
   settings.githubOwner = serverConfig.githubOwner || "";
@@ -501,8 +524,9 @@ function handlePhotoUpload(event) {
       const displayImg = new Image();
       displayImg.onload = () => {
         state.imageElement = displayImg;
+        document.body.classList.add("has-parts-photo");
         drawPartsCanvas();
-        setStatus(els.transcriptBox, `Photo ready. Now tell me what you want this project to do.`, "ok");
+        setStatus(els.transcriptBox, "Photo ready. I can name these parts whenever you are ready.", "ok");
       };
       displayImg.onerror = () => setStatus(els.transcriptBox, "I couldn’t prepare that image. Try another photo.", "danger");
       displayImg.src = state.imageDataUrl;
@@ -539,6 +563,7 @@ function clearPhoto() {
   state.compiledFirmware = null;
   state.activeBuildStepIndex = 0;
   els.photoInput.value = "";
+  document.body.classList.remove("has-parts-photo");
   renderEmptyPlan();
   drawPartsCanvas();
 }
@@ -561,13 +586,6 @@ function drawPartsCanvas() {
   drawGrid(ctx, width, height);
 
   if (!state.imageElement) {
-    ctx.fillStyle = "#0f172a";
-    ctx.font = "800 20px Inter, system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("Choose one clear photo of your parts", width / 2, height / 2 - 8);
-    ctx.font = "600 14px Inter, system-ui, sans-serif";
-    ctx.fillStyle = "rgba(100, 116, 139, 0.82)";
-    ctx.fillText("Leave a little space between each piece", width / 2, height / 2 + 22);
     return;
   }
 
@@ -589,7 +607,7 @@ function drawPartsCanvas() {
 
 function drawGrid(ctx, width, height) {
   ctx.save();
-  ctx.strokeStyle = "rgba(148, 163, 184, 0.34)";
+  ctx.strokeStyle = "rgba(136, 112, 84, 0.13)";
   ctx.lineWidth = 1;
   for (let x = 0; x <= width; x += 28) {
     ctx.beginPath();
@@ -609,7 +627,7 @@ function drawGrid(ctx, width, height) {
 function drawAnnotations(ctx, parts) {
   const fit = state.imageFit;
   if (!fit) return;
-  const colors = ["#7c3aed", "#2563eb", "#0f172a", "#14b8a6", "#a855f7", "#475569"];
+  const colors = ["#ef2d83", "#5169df", "#27a88a", "#f5b91f", "#8c76dc", "#f04e3e"];
   const placedLabels = [];
 
   const annotations = parts.map((part, index) => {
@@ -943,7 +961,7 @@ async function analyzeHardware() {
         {
           role: "system",
           content:
-            "You are GeckCo AI, an expert hardware build agent for beginners. Identify only the actual visible parts needed for the user's stated project, produce tight normalized bounding boxes for those required parts, make conservative ESP32 wiring choices, flag uncertainty, avoid unsafe pins, and output only schema-valid JSON. Ignore visible parts that are unrelated to the requested build. Never use canned/demo component names or boxes. Do not generate source code in this step.",
+            "You are Makeable, an expert hardware build agent for beginners. Identify only the actual visible parts needed for the user's stated project, produce tight normalized bounding boxes for those required parts, make conservative ESP32 wiring choices, flag uncertainty, avoid unsafe pins, and output only schema-valid JSON. Ignore visible parts that are unrelated to the requested build. Never use canned/demo component names or boxes. Do not generate source code in this step.",
         },
         {
           role: "user",
@@ -1007,13 +1025,13 @@ async function analyzeHardware() {
         "warn",
       );
     }
-    setActiveWorkflowStage(1);
+    setActiveWorkflowStage(2);
   } catch (error) {
     console.error(error);
     setStatus(els.transcriptBox, `I got stuck while making the guide: ${error.message}`, "danger");
   } finally {
     els.analyzeButton.disabled = false;
-    els.analyzeButton.textContent = "Create my guide";
+    els.analyzeButton.textContent = "Name my parts";
   }
 }
 
@@ -1222,7 +1240,7 @@ async function generateFirmwareForPlan(idea) {
       {
         role: "system",
         content:
-          "You are GeckCo AI firmware engineer. Generate a compact, compile-ready Arduino .ino sketch for ESP32 from the provided hardware plan. Output only schema-valid JSON. Do not include markdown fences. Keep the sketch under 180 lines unless absolutely required.",
+          "You are Makeable's firmware engineer. Generate a compact, compile-ready Arduino .ino sketch for ESP32 from the provided hardware plan. Output only schema-valid JSON. Do not include markdown fences. Keep the sketch under 180 lines unless absolutely required.",
       },
       {
         role: "user",
@@ -1311,7 +1329,7 @@ function normalizePlan(plan) {
   const projectParts = filterProjectParts(rawParts, wiringSteps, firmwareSpec, plan.summary || "");
 
   return {
-    projectTitle: plan.projectTitle || "GeckCo AI Build",
+    projectTitle: plan.projectTitle || "Makeable Build",
     summary: plan.summary || "",
     parts: projectParts.length ? projectParts : rawParts,
     warnings: Array.isArray(plan.warnings) ? plan.warnings : [],
@@ -1399,6 +1417,7 @@ function validatePlan(plan) {
 function renderEmptyPlan() {
   const controls = getBuildStepControls();
   els.partsList.innerHTML = "";
+  if (els.partsCountLabel) els.partsCountLabel.textContent = "Waiting for a photo";
   els.wiringList.innerHTML = "";
   els.diagnosticsList.innerHTML = "";
   els.visualStepList.innerHTML = `<div class="visual-step-empty"><strong>Your guide will appear here</strong><span>Once I read the photo, I’ll show one clear move at a time.</span></div>`;
@@ -1415,6 +1434,9 @@ function renderPlan() {
 
   drawPartsCanvas();
   els.partsList.innerHTML = "";
+  if (els.partsCountLabel) {
+    els.partsCountLabel.textContent = `${plan.parts.length} ${plan.parts.length === 1 ? "part" : "parts"} found`;
+  }
   plan.parts.forEach((part) => {
     const row = document.createElement("div");
     row.className = "item-row";
@@ -1513,7 +1535,10 @@ function renderVisualSteps() {
   if (els.buildStepCounter) els.buildStepCounter.textContent = `Move ${activeIndex + 1} of ${steps.length}`;
   renderBuildStepDots(steps.length, activeIndex);
   if (els.prevBuildStepButton) els.prevBuildStepButton.disabled = activeIndex === 0;
-  if (els.nextBuildStepButton) els.nextBuildStepButton.disabled = activeIndex === steps.length - 1;
+  if (els.nextBuildStepButton) {
+    els.nextBuildStepButton.disabled = false;
+    els.nextBuildStepButton.textContent = activeIndex === steps.length - 1 ? "See the code" : "I connected it";
+  }
 
   requestAnimationFrame(() => drawVisualStep(canvas, step, activeIndex));
 }
@@ -1547,6 +1572,27 @@ function setActiveBuildStep(index) {
   if (!count) return;
   state.activeBuildStepIndex = clamp(index, 0, count - 1);
   renderVisualSteps();
+}
+
+function advanceBuildStep() {
+  const count = state.plan?.wiringSteps?.length || 0;
+  if (!count) return;
+  if (state.activeBuildStepIndex >= count - 1) {
+    setBuildMode("code");
+    return;
+  }
+  setActiveBuildStep(state.activeBuildStepIndex + 1);
+}
+
+function setBuildMode(mode) {
+  const showCode = mode === "code";
+  if (els.wiringWorkspace) els.wiringWorkspace.hidden = showCode;
+  if (els.codeWorkspace) els.codeWorkspace.hidden = !showCode;
+  els.showWiringButton?.classList.toggle("is-active", !showCode);
+  els.showCodeButton?.classList.toggle("is-active", showCode);
+  els.showWiringButton?.setAttribute("aria-selected", String(!showCode));
+  els.showCodeButton?.setAttribute("aria-selected", String(showCode));
+  if (!showCode) requestAnimationFrame(renderVisualSteps);
 }
 
 function drawVisualStep(canvas, step, index) {
@@ -1762,7 +1808,7 @@ function drawPlacedStepBadge(ctx, text, anchor, fit, color, placedBadges = []) {
 }
 
 function stepColor(value, index) {
-  const palette = ["#7c3aed", "#2563eb", "#0f172a", "#14b8a6", "#a855f7", "#475569"];
+  const palette = ["#ef2d83", "#5169df", "#11100f", "#27a88a", "#8c76dc", "#f04e3e"];
   const normalized = String(value || "").toLowerCase();
   if (normalized.includes("red")) return "#ef4444";
   if (normalized.includes("black")) return "#111827";
@@ -1843,6 +1889,11 @@ function handleDeepgramMessage(raw) {
   els.transcriptBox.textContent = [state.finalTranscript, state.interimTranscript]
     .filter(Boolean)
     .join(" ");
+  if (els.voiceTranscriptBox) {
+    els.voiceTranscriptBox.textContent = [state.finalTranscript, state.interimTranscript]
+      .filter(Boolean)
+      .join(" ");
+  }
 }
 
 function stopVoiceCapture() {
@@ -1889,7 +1940,7 @@ async function connectSerial() {
     els.connectSerialButton.disabled = true;
     els.disconnectSerialButton.disabled = false;
     els.sendSerialButton.disabled = false;
-    appendSerial("GeckCo AI: I’m listening now. If the board speaks, you’ll see it here.\n");
+    appendSerial("Makeable: I’m listening now. If the board speaks, you’ll see it here.\n");
     setStatus(els.logEvaluation, "Connected. Waiting for the board to say something.", "ok");
     readSerialLoop();
   } catch (error) {
@@ -1930,7 +1981,7 @@ async function disconnectSerial() {
   els.connectSerialButton.disabled = false;
   els.disconnectSerialButton.disabled = true;
   els.sendSerialButton.disabled = true;
-  appendSerial("GeckCo AI: I stopped listening to the board.\n");
+  appendSerial("Makeable: I stopped listening to the board.\n");
 }
 
 async function sendSerialCommand() {
@@ -2195,15 +2246,15 @@ async function compileAndFlashFirmware() {
     settings.arduinoFqbn = fqbn;
     els.compileFlashButton.textContent = "Preparing code...";
     setStatus(els.arduinoStatus, "I’m preparing the code for your board.", "warn");
-    appendSerial("\nGeckCo AI: Preparing the code for your board.\n");
+    appendSerial("\nMakeable: Preparing the code for your board.\n");
 
     const compiled = await apiJson("/api/firmware/compile", {
       method: "POST",
       body: JSON.stringify({ sketch, fqbn }),
     });
     state.compiledFirmware = compiled;
-    appendSerial("GeckCo AI: Code is ready. Now I’m sending it to the board.\n");
-    if (compiled.stderr) appendSerial(`GeckCo AI: Setup note from the compiler:\n${compiled.stderr}\n`);
+    appendSerial("Makeable: Code is ready. Now I’m sending it to the board.\n");
+    if (compiled.stderr) appendSerial(`Makeable: Setup note from the compiler:\n${compiled.stderr}\n`);
 
     els.compileFlashButton.textContent = "Loading board...";
     await flashFirmwareImages(port, compiled.images);
@@ -2211,7 +2262,7 @@ async function compileAndFlashFirmware() {
     setFlashProgress(100, "Done");
   } catch (error) {
     console.error(error);
-    appendSerial(`\nGeckCo AI: I couldn’t finish loading the board. ${error.message}\n`);
+    appendSerial(`\nMakeable: I couldn’t finish loading the board. ${error.message}\n`);
     setStatus(els.arduinoStatus, `I couldn’t finish loading the board: ${error.message}`, "danger");
     setFlashProgress(0, "Needs retry");
   } finally {
@@ -2238,7 +2289,7 @@ async function flashFirmwareImages(port, images) {
   const transport = new esptool.Transport(port, true);
   const terminal = {
     clean() {
-      appendSerial("\nGeckCo AI: Starting a fresh board load.\n");
+      appendSerial("\nMakeable: Starting a fresh board load.\n");
     },
     writeLine(data) {
       appendSerial(`Board loader: ${data}\n`);
@@ -2255,15 +2306,15 @@ async function flashFirmwareImages(port, images) {
       terminal,
       debugLogging: false,
     });
-    appendSerial("GeckCo AI: Looking for the ESP32. If it waits here, hold BOOT on the board for a moment.\n");
+    appendSerial("Makeable: Looking for the ESP32. If it waits here, hold BOOT on the board for a moment.\n");
     const chip = await esploader.main("default_reset");
-    appendSerial(`GeckCo AI: Found the board (${chip}).\n`);
+    appendSerial(`Makeable: Found the board (${chip}).\n`);
 
     const fileArray = images.map((image) => ({
       data: base64ToBinaryString(image.dataBase64),
       address: image.address,
     }));
-    appendSerial("GeckCo AI: Sending the code now.\n");
+    appendSerial("Makeable: Sending the code now.\n");
     await esploader.writeFlash({
       fileArray,
       flashMode: "dio",
@@ -2278,7 +2329,7 @@ async function flashFirmwareImages(port, images) {
       },
     });
     await esploader.after("hard_reset");
-    appendSerial("GeckCo AI: Board restarted with the new code.\n");
+    appendSerial("Makeable: Board restarted with the new code.\n");
   } finally {
     await transport.disconnect();
   }
@@ -2308,7 +2359,7 @@ function downloadFirmware() {
     setStatus(els.arduinoStatus, "There isn’t code to download yet. Create the guide first.", "warn");
     return;
   }
-  downloadText("geckco-ai-firmware.ino", sketch, "text/x-arduino");
+  downloadText("makeable-firmware.ino", sketch, "text/x-arduino");
 }
 
 function buildReadme() {
@@ -2335,7 +2386,7 @@ function buildReadme() {
     plan.readmeMarkdown ||
     `# ${plan.projectTitle}
 
-Generated by GeckCo AI on ${generated}.
+Generated by Makeable on ${generated}.
 
 ## Idea
 
@@ -2372,7 +2423,7 @@ function downloadReadme() {
 }
 
 async function publishToGitHub() {
-  const repoName = sanitizeRepoName(els.repoNameInput.value || "geckco-ai-build");
+  const repoName = sanitizeRepoName(els.repoNameInput.value || "makeable-build");
   const isPrivate = els.privateRepoInput.checked;
   const firmware = state.plan?.firmware?.sketch || "";
   if (!state.plan || !firmware) {
@@ -2390,7 +2441,7 @@ async function publishToGitHub() {
         method: "POST",
         body: JSON.stringify({
           name: repoName,
-          description: "Hardware project generated with GeckCo AI",
+          description: "Hardware project generated with Makeable",
           private: isPrivate,
         }),
       });
@@ -2409,7 +2460,7 @@ async function publishToGitHub() {
         repo: repoName,
         path: "README.md",
         content: state.readme,
-        message: "Add GeckCo AI README",
+        message: "Add Makeable README",
       }),
     });
 
@@ -2418,7 +2469,7 @@ async function publishToGitHub() {
       body: JSON.stringify({
         owner,
         repo: repoName,
-        path: "firmware/geckco-ai-firmware.ino",
+        path: "firmware/makeable-firmware.ino",
         content: firmware,
         message: "Add generated ESP32 firmware",
       }),
@@ -2503,7 +2554,7 @@ function sanitizeRepoName(value) {
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9_.-]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "geckco-ai-build"
+      .replace(/^-+|-+$/g, "") || "makeable-build"
   );
 }
 

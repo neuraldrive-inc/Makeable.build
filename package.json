@@ -1,5 +1,5 @@
 {
-  "name": "boba-and-chaos",
+  "name": "makeable-hardware-builder",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,4 +8,3 @@
     "build": "node --check app.js && node --check server.mjs && node --check netlify/functions/api.mjs"
   }
 }
-
