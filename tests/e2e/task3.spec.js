@@ -175,6 +175,24 @@ test("describe examples, sketch input, and secure voice subtitle are operational
   await expect(page.getByText("Listening…")).toBeVisible();
 });
 
+test("accepting a new photo plan clears prior review selection", async ({ page }) => {
+  await mockPlanning(page);
+  await completeIdea(page);
+  await page.evaluate(async () => {
+    await window.MAKEABLE_APP.updateProject("review", {
+      selectedPartId: "board",
+    });
+  });
+
+  await page.getByLabel("Upload my parts").setInputFiles(photoPath);
+
+  await expect(page).toHaveURL(/\/build\/parts\/review$/);
+  await expect(page.getByLabel("Part name")).toHaveCount(0);
+  expect(
+    await page.evaluate(() => window.MAKEABLE_APP.getProject().review),
+  ).toEqual({ selectedPartId: null });
+});
+
 test("upload, persistent annotation review, confirmation, and missing-part actions work", async ({
   page,
 }, testInfo) => {

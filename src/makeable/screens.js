@@ -275,6 +275,7 @@ async function handlePartsPhoto(context, route, file) {
       idea: ideaText(app.getProject().idea),
       imageDataUrl: await blobToDataUrl(normalized.blob),
     });
+    await persistReviewSelection(context, null);
     await app.updateProject("confirmedParts", plan.parts);
     await app.updateProject("feasibility", feasibilityRecord(plan));
     await app.updateProject("wiring", { steps: plan.wiringSteps });
