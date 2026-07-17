@@ -176,7 +176,7 @@ test("missing parts exposes a local shop action and alternatives preserve idea h
           firmware: {
             language: "Arduino C++",
             sketch:
-              "void reportReset(){Serial.println(\"MAKEABLE|RESET|POWER_ON\");} void reportReady(){Serial.println(\"MAKEABLE|READY|ESP32\");} void reportCheck(){Serial.println(\"MAKEABLE|CHECK|board|PASS|ok\");} void handleCommand(String line){if(line.startsWith(\"MAKEABLE|RUN|\"))reportCheck();} void setup(){Serial.begin(115200);reportReset();reportReady();} void loop(){if(Serial.available())handleCommand(Serial.readStringUntil('\\\\n'));}",
+              "const int OUTPUT_PIN=8; bool outputActive=false; unsigned long outputOffDeadline=0; void stopOutput(){digitalWrite(OUTPUT_PIN,LOW);outputActive=false;} void reportReset(){Serial.println(\"MAKEABLE|RESET|POWER_ON\");} void reportReady(){Serial.println(\"MAKEABLE|READY|ESP32\");} void reportCheck(){Serial.println(\"MAKEABLE|CHECK|board|PASS|ok\");} void handleCommand(String line){if(line.startsWith(\"MAKEABLE|STOP|\")){stopOutput();return;} if(line.startsWith(\"MAKEABLE|RUN|\")){unsigned long pulseMs=500;digitalWrite(OUTPUT_PIN,HIGH);outputActive=true;outputOffDeadline=millis()+pulseMs;reportCheck();}} void setup(){Serial.begin(115200);reportReset();reportReady();} void loop(){if(outputActive&&(long)(millis()-outputOffDeadline)>=0)stopOutput();if(Serial.available())handleCommand(Serial.readStringUntil('\\\\n'));}",
             notes: "Keep the board dry.",
           },
           diagnostics: {

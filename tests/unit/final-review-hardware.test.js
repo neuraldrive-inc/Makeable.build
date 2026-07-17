@@ -10,14 +10,28 @@ import * as actions from "../../src/makeable/actions.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const CONTRACT_SKETCH = `
+const int PUMP_PIN = 8;
+bool pumpActive = false;
+unsigned long pumpOffDeadline = 0;
+void stopPump() { digitalWrite(PUMP_PIN, LOW); pumpActive = false; }
 void reportReset() { Serial.println("MAKEABLE|RESET|POWER_ON"); }
 void reportReady() { Serial.println("MAKEABLE|READY|ESP32"); }
 void reportCheck() { Serial.println("MAKEABLE|CHECK|pump|PASS|pulse complete"); }
 void handleCommand(String line) {
-  if (line.startsWith("MAKEABLE|RUN|")) reportCheck();
+  if (line.startsWith("MAKEABLE|STOP|")) { stopPump(); return; }
+  if (line.startsWith("MAKEABLE|RUN|")) {
+    unsigned long pulseMs = 500;
+    digitalWrite(PUMP_PIN, HIGH);
+    pumpActive = true;
+    pumpOffDeadline = millis() + pulseMs;
+    reportCheck();
+  }
 }
 void setup() { Serial.begin(115200); reportReset(); reportReady(); }
-void loop() { if (Serial.available()) handleCommand(Serial.readStringUntil('\\n')); }
+void loop() {
+  if (pumpActive && (long)(millis() - pumpOffDeadline) >= 0) stopPump();
+  if (Serial.available()) handleCommand(Serial.readStringUntil('\\n'));
+}
 `;
 
 let serverProcess;
@@ -331,7 +345,7 @@ async function waitForServer(child, url) {
   child.stderr.on("data", (chunk) => {
     stderr += chunk;
   });
-  for (let attempt = 0; attempt < 80; attempt += 1) {
+  for (let attempt = 0; attempt < 240; attempt += 1) {
     if (child.exitCode !== null) {
       throw new Error(`server exited early: ${stderr}`);
     }

@@ -54,6 +54,7 @@ export function createScreenRenderer({ root, app }) {
     serialSession: null,
     cameraRequest: null,
     routeGeneration: 0,
+    photoSaveQueue: Promise.resolve(),
     hardware: windowLike.MAKEABLE_HARDWARE || {
       compileAndFlashFirmware,
       createDiagnosticSession,
@@ -436,7 +437,7 @@ async function handlePartsPhoto(context, route, file) {
   try {
     const normalized = await normalizeImageFile(file);
     if (!isScopedRequestCurrent(context, request)) return;
-    await app.saveImage("source", normalized.blob);
+    if (!(await saveCurrentPartsPhoto(context, request, normalized.blob))) return;
     const photoRevision =
       context.window.crypto?.randomUUID?.() ||
       `${Date.now()}-${normalized.blob.size}`;
@@ -1389,6 +1390,7 @@ function renderManualTest(context, route) {
 function renderPublish(context, route) {
   const { outlet, app } = context;
   const project = app.getProject();
+  const photoPresentation = publishPhotoPresentation(project);
   const title =
     project.feasibility?.projectTitle || "Makeable Project";
   const repositoryName =
@@ -1460,13 +1462,13 @@ function renderPublish(context, route) {
           <div class="publish-photo-frame">
             <img
               data-source-photo
-              alt="Your finished Makeable project"
+              alt="${escapeAttribute(photoPresentation.publishAlt)}"
               width="640"
               height="480"
             />
           </div>
           <h2>${escapeHtml(title)}</h2>
-          <span>Tested &amp; working</span>
+          <span>${escapeHtml(photoPresentation.label)}</span>
         </div>
       </section>
 
@@ -1491,7 +1493,7 @@ function renderPublish(context, route) {
   `);
   hydrateStoredImage(
     context,
-    project.tests?.manual?.evidenceImageId || project.photo?.imageId || "source",
+    photoPresentation.imageId,
     outlet.querySelector("[data-source-photo]"),
   );
 
@@ -1582,6 +1584,7 @@ function downloadProjectArchive(context, repositoryName) {
 function renderPublishSuccess(context) {
   const { outlet, app } = context;
   const project = app.getProject();
+  const photoPresentation = publishPhotoPresentation(project);
   const published = project.publish || {};
   const title = project.feasibility?.projectTitle || "Makeable Project";
   const owner = published.owner || context.window.MAKEABLE_CONFIG?.githubOwner || "";
@@ -1607,11 +1610,11 @@ function renderPublishSuccess(context) {
         <div class="success-project-photo">
           <img
             data-source-photo
-            alt="Your published Makeable project"
+            alt="${escapeAttribute(photoPresentation.successAlt)}"
             width="640"
             height="480"
           />
-          <span>Built with <strong>Makeable</strong></span>
+          <span><small data-project-photo-label>${escapeHtml(photoPresentation.label)}</small><br />Built with <strong>Makeable</strong></span>
         </div>
 
         <div class="success-project-details">
@@ -1647,7 +1650,7 @@ function renderPublishSuccess(context) {
   `);
   hydrateStoredImage(
     context,
-    project.tests?.manual?.evidenceImageId || project.photo?.imageId || "source",
+    photoPresentation.imageId,
     outlet.querySelector("[data-source-photo]"),
   );
   const status = outlet.querySelector("[data-share-status]");
@@ -1680,6 +1683,21 @@ function renderPublishSuccess(context) {
     await app.resetProject();
     app.navigation.navigate("/build/new", { replace: true });
   });
+}
+
+function publishPhotoPresentation(project) {
+  const evidenceImageId = project.tests?.manual?.evidenceImageId;
+  const hasEvidence = Boolean(evidenceImageId);
+  return {
+    imageId: evidenceImageId || project.photo?.imageId || "source",
+    label: hasEvidence ? "Tested & working" : "Original parts photo",
+    publishAlt: hasEvidence
+      ? "Your finished Makeable project"
+      : "Original parts photo",
+    successAlt: hasEvidence
+      ? "Your published Makeable project"
+      : "Original parts photo",
+  };
 }
 
 function cleanupRouteResources(context) {
@@ -1718,6 +1736,17 @@ function isScopedRequestCurrent(context, request, photoRevision = request.photoR
     return false;
   }
   return photoRevision == null || context.app.getProject().photo?.revision === photoRevision;
+}
+
+async function saveCurrentPartsPhoto(context, request, blob) {
+  const previous = context.runtime.photoSaveQueue || Promise.resolve();
+  const pending = previous.catch(() => {}).then(async () => {
+    if (!isScopedRequestCurrent(context, request)) return false;
+    await context.app.saveImage("source", blob);
+    return isScopedRequestCurrent(context, request);
+  });
+  context.runtime.photoSaveQueue = pending.catch(() => false);
+  return pending;
 }
 
 async function persistWiringProgress(app, wiring) {
@@ -2300,23 +2329,24 @@ async function confirmParts(context, route) {
   button.disabled = true;
   status.textContent = "Regenerating your guide and firmware…";
   const request = beginScopedRequest(context, app.getProject().photo?.revision);
+  request.confirmedPartsFingerprint = stableFingerprint(confirmedParts);
   try {
     const plan = await requestHardwarePlan({
       idea: ideaText(app.getProject().idea),
       confirmedParts,
       signal: request.controller.signal,
     });
-    if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
+    if (!isConfirmedPartsRequestCurrent(context, request)) return;
     await app.updateProject("confirmedParts", confirmedParts);
-    if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
+    if (!isConfirmedPartsRequestCurrent(context, request)) return;
     await app.updateProject("feasibility", feasibilityRecord(plan));
-    if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
+    if (!isConfirmedPartsRequestCurrent(context, request)) return;
     await app.updateProject("wiring", { steps: plan.wiringSteps });
-    if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
+    if (!isConfirmedPartsRequestCurrent(context, request)) return;
     await app.updateProject("firmware", plan.firmware);
-    if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
+    if (!isConfirmedPartsRequestCurrent(context, request)) return;
     await app.completeRoute(route.path);
-    if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
+    if (!isConfirmedPartsRequestCurrent(context, request)) return;
     app.navigation.navigate(
       plan.feasibility.status === "missing"
         ? "/build/feasibility/missing"
@@ -2331,6 +2361,30 @@ async function confirmParts(context, route) {
       context.runtime.requestAbort = null;
     }
   }
+}
+
+function isConfirmedPartsRequestCurrent(context, request) {
+  return (
+    isScopedRequestCurrent(context, request, request.photoRevision) &&
+    stableFingerprint(context.app.getProject().confirmedParts || []) ===
+      request.confirmedPartsFingerprint
+  );
+}
+
+function stableFingerprint(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableFingerprint).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map(
+        (key) =>
+          `${JSON.stringify(key)}:${stableFingerprint(value[key])}`,
+      )
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 async function hydrateStoredImage(context, imageId, image, annotationLayer = null) {

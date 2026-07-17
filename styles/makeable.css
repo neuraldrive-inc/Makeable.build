@@ -811,6 +811,7 @@ body {
 .parts-photo {
   display: block;
   width: 100%;
+  height: auto;
   min-height: 420px;
   aspect-ratio: 16 / 8.4;
   object-fit: contain;
@@ -982,11 +983,12 @@ body {
   place-items: center;
   border-radius: 50%;
   background: var(--part-color, var(--makeable-color-hot-pink));
+  color: var(--makeable-color-ink);
   font-weight: 900;
 }
 
-.part-number::first-line {
-  color: var(--makeable-color-ink);
+.route-screen h1:focus {
+  outline: none;
 }
 
 .part-chip .icon-button {
@@ -2398,6 +2400,10 @@ body {
 
   .screen-heading h1 {
     font-size: 44px;
+  }
+
+  .route-screen h1 {
+    scroll-margin-top: calc(164px + env(safe-area-inset-top));
   }
 
   .paper-panel {

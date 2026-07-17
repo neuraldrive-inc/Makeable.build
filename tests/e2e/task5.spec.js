@@ -136,7 +136,7 @@ test("publish uploads all artifacts, Success actions work, and starting over pre
     page.getByRole("heading", { name: "You built it. Now share it." }),
   ).toBeVisible();
   await expect(page.getByText("README.md", { exact: true })).toBeVisible();
-  await expect(page.getByText("Tested & working")).toBeVisible();
+  await expect(page.getByText("Original parts photo", { exact: true })).toBeVisible();
   await page.getByLabel("Repository name").fill("self-watering-plant");
   await page.getByLabel("Private").check();
   await page.getByLabel("Repository name").press("Enter");
@@ -175,6 +175,77 @@ test("publish uploads all artifacts, Success actions work, and starting over pre
     ),
   ).toBeNull();
   expect(await page.evaluate(() => window.MAKEABLE_CONFIG)).toEqual(configBefore);
+});
+
+test("publish imagery distinguishes camera evidence from the original parts photo", async ({
+  page,
+}) => {
+  await seed(page, publishProject, "/build/publish/connect");
+
+  await expect(page.locator("[data-source-photo]")).toHaveAttribute(
+    "alt",
+    "Original parts photo",
+  );
+  await expect(page.getByText("Original parts photo", { exact: true })).toBeVisible();
+
+  await page.evaluate(async () => {
+    const current = window.MAKEABLE_APP.getProject();
+    await window.MAKEABLE_APP.replaceProject({
+      ...current,
+      publish: {
+        repositoryName: "desk-helper",
+        owner: "ray-builds",
+        visibility: "public",
+        repositoryUrl: "https://github.com/ray-builds/desk-helper",
+      },
+      progress: {
+        completedRoutes: [
+          ...current.progress.completedRoutes,
+          "/build/publish/connect",
+        ],
+      },
+    });
+    window.MAKEABLE_APP.navigation.navigate("/build/publish/success");
+  });
+  await expect(page.locator("[data-source-photo]")).toHaveAttribute(
+    "alt",
+    "Original parts photo",
+  );
+  await expect(page.getByText("Original parts photo", { exact: true })).toBeVisible();
+
+  await page.evaluate(async () => {
+    const current = window.MAKEABLE_APP.getProject();
+    const source = await window.MAKEABLE_APP.loadImage("source");
+    await window.MAKEABLE_APP.saveImage("manual-evidence", source);
+    await window.MAKEABLE_APP.replaceProject({
+      ...current,
+      tests: {
+        ...current.tests,
+        manual: {
+          ...current.tests.manual,
+          evidenceImageId: "manual-evidence",
+        },
+      },
+    });
+    window.MAKEABLE_APP.navigation.navigate("/build/publish/connect", {
+      replace: true,
+    });
+  });
+
+  await expect(page.locator("[data-source-photo]")).toHaveAttribute(
+    "alt",
+    "Your finished Makeable project",
+  );
+  await expect(page.getByText("Tested & working", { exact: true })).toBeVisible();
+
+  await page.evaluate(() =>
+    window.MAKEABLE_APP.navigation.navigate("/build/publish/success"),
+  );
+  await expect(page.locator("[data-source-photo]")).toHaveAttribute(
+    "alt",
+    "Your published Makeable project",
+  );
+  await expect(page.getByText("Tested & working", { exact: true })).toBeVisible();
 });
 
 test("Publish and Success are accessible and contained at desktop, tablet, and mobile widths", async ({

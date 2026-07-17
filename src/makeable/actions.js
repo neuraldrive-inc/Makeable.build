@@ -1485,18 +1485,22 @@ export function hasFirmwareDiagnosticContract(sketch) {
   const handlesRun =
     /(?:startsWith|indexOf)\s*\(\s*["']MAKEABLE\|RUN\|/i.test(source) ||
     /strncmp\s*\([^,\n]+,\s*["']MAKEABLE\|RUN\|/i.test(source);
+  const handlesStop = commandBranchHasSafetyAction(source, "STOP");
+  const enforcesActuatorDeadline = hasActuatorOffDeadline(source);
   return (
     emits("READY") &&
     emits("CHECK") &&
     emits("RESET") &&
-    handlesRun
+    handlesRun &&
+    handlesStop &&
+    enforcesActuatorDeadline
   );
 }
 
 export function assertFirmwareDiagnosticContract(sketch) {
   if (hasFirmwareDiagnosticContract(sketch)) return true;
   throw new Error(
-    "Firmware must emit MAKEABLE READY, CHECK, and RESET markers and handle the safe RUN command contract.",
+    "Firmware must emit MAKEABLE READY, CHECK, and RESET markers, handle executable RUN and STOP commands, and enforce a millis-based actuator-off safety deadline.",
   );
 }
 
@@ -1661,6 +1665,54 @@ function stripCppComments(source) {
   return String(source || "").replace(
     /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g,
     (_match, literal) => literal || "",
+  );
+}
+
+function commandBranchHasSafetyAction(source, command) {
+  const commandPattern = new RegExp(
+    `(?:startsWith|indexOf)\\s*\\(\\s*["']MAKEABLE\\|${command}\\||` +
+      `strncmp\\s*\\([^,\\n]+,\\s*["']MAKEABLE\\|${command}\\|`,
+    "i",
+  );
+  const match = commandPattern.exec(source);
+  if (!match) return false;
+  const tail = source.slice(match.index + match[0].length);
+  const nextCommand = tail.search(
+    /(?:startsWith|indexOf)\s*\(\s*["']MAKEABLE\|(?:RUN|STOP)\||strncmp\s*\([^,\n]+,\s*["']MAKEABLE\|(?:RUN|STOP)\|/i,
+  );
+  const branch = tail.slice(0, nextCommand < 0 ? 500 : nextCommand);
+  return hasActuatorOffAction(branch);
+}
+
+function hasActuatorOffDeadline(source) {
+  const assignments = [
+    ...source.matchAll(
+      /\b([A-Za-z_]\w*)\s*=\s*millis\s*\(\s*\)\s*\+\s*[^;]+;/g,
+    ),
+  ];
+  return assignments.some(([, deadline]) => {
+    const escapedDeadline = deadline.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const deadlineCheck = new RegExp(
+      `\\bif\\b[\\s\\S]{0,240}(?:` +
+        `millis\\s*\\(\\s*\\)[\\s\\S]{0,100}${escapedDeadline}|` +
+        `${escapedDeadline}[\\s\\S]{0,100}millis\\s*\\(\\s*\\)` +
+        `)`,
+      "i",
+    ).exec(source);
+    if (!deadlineCheck) return false;
+    return hasActuatorOffAction(
+      source.slice(deadlineCheck.index, deadlineCheck.index + 600),
+    );
+  });
+}
+
+function hasActuatorOffAction(source) {
+  return (
+    /digitalWrite\s*\([^;]+,\s*LOW\s*\)/i.test(source) ||
+    /\b(?:stop|off|disable|deenergize|de_energize)[A-Za-z0-9_]*\s*\(/i.test(
+      source,
+    ) ||
+    /\b[A-Za-z_]\w*(?:active|enabled|running)\w*\s*=\s*false\b/i.test(source)
   );
 }
 

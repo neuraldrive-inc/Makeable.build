@@ -4,14 +4,28 @@ import test from "node:test";
 import * as actions from "../../src/makeable/actions.js";
 
 const CONTRACT_SKETCH = `
+const int PUMP_PIN = 8;
+bool pumpActive = false;
+unsigned long pumpOffDeadline = 0;
+void stopPump() { digitalWrite(PUMP_PIN, LOW); pumpActive = false; }
 void reportReset() { Serial.println("MAKEABLE|RESET|POWER_ON"); }
 void reportReady() { Serial.println("MAKEABLE|READY|ESP32"); }
 void reportCheck() { Serial.println("MAKEABLE|CHECK|sensor|PASS|value=1"); }
 void handleCommand(String line) {
-  if (line.startsWith("MAKEABLE|RUN|")) reportCheck();
+  if (line.startsWith("MAKEABLE|STOP|")) { stopPump(); return; }
+  if (line.startsWith("MAKEABLE|RUN|")) {
+    unsigned long pulseMs = 500;
+    digitalWrite(PUMP_PIN, HIGH);
+    pumpActive = true;
+    pumpOffDeadline = millis() + pulseMs;
+    reportCheck();
+  }
 }
 void setup() { Serial.begin(115200); reportReset(); reportReady(); }
-void loop() { if (Serial.available()) handleCommand(Serial.readStringUntil('\\n')); }
+void loop() {
+  if (pumpActive && (long)(millis() - pumpOffDeadline) >= 0) stopPump();
+  if (Serial.available()) handleCommand(Serial.readStringUntil('\\n'));
+}
 `;
 
 test("flash transitions clear stale success before retry and persist terminal failure", () => {
@@ -205,7 +219,7 @@ test("strict hardware plans require and normalize diagnostic and manual test fie
   assert.equal(plan.diagnostics.manualSuccessLabel, "Yes, it watered the plant");
 });
 
-test("firmware must emit READY CHECK RESET markers and handle safe RUN commands", () => {
+test("firmware must emit markers, handle RUN and STOP, and enforce its off deadline", () => {
   assert.equal(actions.hasFirmwareDiagnosticContract(CONTRACT_SKETCH), true);
   assert.equal(
     actions.hasFirmwareDiagnosticContract(`
@@ -219,7 +233,7 @@ test("firmware must emit READY CHECK RESET markers and handle safe RUN commands"
   );
   assert.throws(
     () => actions.assertFirmwareDiagnosticContract("void setup() {}"),
-    /READY.*CHECK.*RESET.*RUN/i,
+    /READY.*CHECK.*RESET.*RUN.*STOP.*deadline/i,
   );
 });
 
