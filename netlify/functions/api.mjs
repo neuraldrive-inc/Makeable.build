@@ -25,24 +25,15 @@ export default async function handler(req) {
     }
 
     if (url.pathname === "/api/arduino/status") {
-      return jsonResponse({
-        hasArduinoCli: false,
-        hasEsp32Core: false,
-        hostedMode: true,
-        message:
-          "Hosted guide mode is ready. Loading code onto a physical board still needs the local desktop server.",
-      });
+      return proxyMakeableApi(req, env);
     }
 
     if (url.pathname === "/api/firmware/compile" && req.method === "POST") {
-      return jsonResponse(
-        {
-          error:
-            "This hosted version can make the guide and code, but board loading needs the local desktop app with Arduino installed.",
-          hostedMode: true,
-        },
-        501,
-      );
+      return proxyMakeableApi(req, env);
+    }
+
+    if (url.pathname === "/api/deepgram/token" && req.method === "POST") {
+      return proxyMakeableApi(req, env);
     }
 
     if (url.pathname === "/api/github/repos" && req.method === "POST") {
@@ -59,7 +50,7 @@ export default async function handler(req) {
         hostedMode: true,
         hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
         hasGithubToken: Boolean(env.GITHUB_TOKEN),
-        firmwareCompileSupported: false,
+        firmwareCompileSupported: Boolean(env.MAKEABLE_API_BASE_URL),
       });
     }
 
@@ -80,12 +71,10 @@ function getEnv() {
     "OPENAI_MODEL",
     "OPENAI_REASONING_MODEL",
     "OPENAI_REASONING_EFFORT",
-    "DEEPGRAM_BROWSER_KEY",
-    "DEEPGRAM_API_KEY",
-    "ALLOW_BROWSER_DEEPGRAM_KEY",
     "GITHUB_TOKEN",
     "GITHUB_OWNER",
     "ARDUINO_FQBN",
+    "MAKEABLE_API_BASE_URL",
   ];
   return Object.fromEntries(keys.map((key) => [key, envValue(key)]));
 }
@@ -95,10 +84,8 @@ function envValue(key) {
 }
 
 function publicConfig(env) {
-  const allowDeepgramSecret =
-    String(env.ALLOW_BROWSER_DEEPGRAM_KEY || "").toLowerCase() === "true";
   return {
-    deepgramApiKey: env.DEEPGRAM_BROWSER_KEY || (allowDeepgramSecret ? env.DEEPGRAM_API_KEY : ""),
+    apiBaseUrl: String(env.MAKEABLE_API_BASE_URL || "").replace(/\/$/, ""),
     githubOwner: env.GITHUB_OWNER || "",
     openaiModel: env.OPENAI_MODEL || "gpt-5.6-sol",
     openaiReasoningModel: env.OPENAI_REASONING_MODEL || "gpt-5.6-sol",
@@ -108,8 +95,23 @@ function publicConfig(env) {
     hasGithubToken: Boolean(env.GITHUB_TOKEN),
     hasArduinoCli: false,
     hostedMode: true,
-    firmwareCompileSupported: false,
+    firmwareCompileSupported: Boolean(env.MAKEABLE_API_BASE_URL),
   };
+}
+
+async function proxyMakeableApi(req, env) {
+  const base = String(env.MAKEABLE_API_BASE_URL || "").replace(/\/$/, "");
+  if (!base) return jsonResponse({ error: "The hosted firmware service is not configured." }, 503);
+  const inputUrl = new URL(req.url);
+  const upstream = await fetch(`${base}${inputUrl.pathname}${inputUrl.search}`, {
+    method: req.method,
+    headers: { "Content-Type": req.headers.get("content-type") || "application/json" },
+    body: req.method === "GET" || req.method === "HEAD" ? undefined : await req.text(),
+  });
+  return new Response(await upstream.arrayBuffer(), {
+    status: upstream.status,
+    headers: { "Content-Type": upstream.headers.get("content-type") || "application/json" },
+  });
 }
 
 function publicConfigScript(env) {
@@ -121,7 +123,7 @@ async function proxyOpenAI(req, env) {
   if (missing) return missing;
 
   const body = await req.json();
-  if (!body.model) body.model = env.OPENAI_MODEL || "gpt-5.6-sol";
+  body.model = env.OPENAI_MODEL || "gpt-5.6-sol";
 
   return streamJsonUpstream(
     fetch("https://api.openai.com/v1/responses", {
@@ -139,7 +141,7 @@ async function createOpenAIBackgroundResponse(req, env) {
   const body = await req.json();
   const payload = {
     ...body,
-    model: body.model || env.OPENAI_MODEL || "gpt-5.6-sol",
+    model: env.OPENAI_REASONING_MODEL || env.OPENAI_MODEL || "gpt-5.6-sol",
     background: true,
     store: body.store ?? true,
   };

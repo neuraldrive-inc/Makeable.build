@@ -11,7 +11,6 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23ef2d83'/%3E%3Cpath d='M18 43V21l14 14 14-14v22' stroke='white' stroke-width='7' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="./styles.css?v=makeable-workbench-20260716" />
     <script src="./config.local.js"></script>
-    <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
   </head>
   <body>
     <header class="topbar">
@@ -28,7 +27,7 @@
           <span class="step-number">2</span><span class="step-note step-note--blush"><img src="images/makeable/icon-camera.svg" alt="" /><strong>Scan Parts</strong></span>
         </button>
         <button class="timeline-step" data-workflow-stage="2" type="button">
-          <span class="step-number">3</span><span class="step-note step-note--lilac"><img src="images/makeable/icon-code.svg" alt="" /><strong>Build + Code</strong></span>
+          <span class="step-number">3</span><span class="step-note step-note--lilac"><img src="images/makeable/icon-code.svg" alt="" /><strong>Build + Load</strong></span>
         </button>
         <button class="timeline-step" data-workflow-stage="3" type="button">
           <span class="step-number">4</span><span class="step-note step-note--mint"><img src="images/makeable/icon-bolt.svg" alt="" /><strong>Test</strong></span>
@@ -39,7 +38,6 @@
       </nav>
 
       <div class="rail-actions">
-        <button class="rail-settings" id="settingsButton" type="button">Settings</button>
         <button class="rail-home" id="homeButton" type="button" aria-label="Start over">Start over</button>
         <svg class="rail-squiggle" viewBox="0 0 100 42" aria-hidden="true"><path d="M5 26c9-18 13-17 11 3 12-22 17-20 15 3 14-18 18-16 16 2 12-17 17-17 18-1 7-12 13-13 22-4" /></svg>
       </div>
@@ -126,7 +124,7 @@
           </div>
           <div class="build-mode-switch" role="tablist" aria-label="Build and code views">
             <button class="is-active" id="showWiringButton" type="button" role="tab">Wiring guide</button>
-            <button id="showCodeButton" type="button" role="tab">Code + load</button>
+            <button id="showCodeButton" type="button" role="tab">Connect + load</button>
           </div>
         </header>
 
@@ -147,23 +145,16 @@
         </div>
 
         <div class="code-workspace" id="codeWorkspace" hidden>
-          <div class="flash-stage-grid">
-            <div class="code-panel paper-sheet tape-blue">
-              <div class="code-panel-header">
-                <h2>Your build is wired.<br />Let’s give it a brain.</h2>
-                <div class="button-row"><button class="paper-button" id="copyFirmwareButton" type="button">Copy</button><button class="paper-button" id="downloadFirmwareButton" type="button">Download</button></div>
-              </div>
-              <pre id="firmwareOutput"><code>Your code will appear here after I make the guide.</code></pre>
-            </div>
-            <div class="web-flash-panel">
+          <div class="flash-stage-grid flash-stage-grid--automatic">
+            <div class="web-flash-panel paper-sheet tape-blue">
+              <h2>Your build is wired.<br />Let’s give it a brain.</h2>
               <aside class="sticky-note sticky-note--white tape-grid-pink">Connect your board with a USB cable.</aside>
               <div class="connection-steps">
-                <p><b>1</b> Plug the USB cable into your computer.</p><p><b>2</b> Plug the other end into your board.</p><p><b>3</b> Your board should light up.</p>
+                <p><b>1</b> Plug the USB cable into your computer.</p><p><b>2</b> Click once to allow this board the first time.</p><p><b>3</b> Makeable prepares and loads everything automatically.</p>
               </div>
-              <div class="button-row"><button class="paper-button" id="refreshArduinoStatusButton" type="button">Check setup</button><button class="torn-button torn-button--coral" id="compileFlashButton" type="button">Load code to my board</button></div>
+              <button class="torn-button torn-button--coral" id="compileFlashButton" type="button">Connect &amp; load automatically</button>
               <div class="flash-progress"><span id="flashProgressBar"></span></div>
-              <div class="status-strip" id="arduinoStatus">I’ll check that your computer is ready.</div>
-              <details class="advanced-flash"><summary>Advanced board options</summary><div class="inline-form"><label>Board profile<input id="boardFqbnInput" type="text" value="esp32:esp32:esp32" /></label><label class="checkbox-row"><input id="eraseFlashInput" type="checkbox" checked /> Start fresh before loading code</label></div><div class="inline-form"><input id="manifestUrlInput" type="url" placeholder="Optional firmware link" /><button class="paper-button" id="loadManifestButton" type="button">Use link</button></div><esp-web-install-button id="espInstallButton" manifest=""></esp-web-install-button></details>
+              <div class="status-strip" id="arduinoStatus">The compiler is online. Connect your ESP32 when you’re ready.</div>
             </div>
           </div>
         </div>
@@ -197,8 +188,8 @@
           <div class="doc-actions">
             <label>Repository name<input id="repoNameInput" type="text" value="self-watering-plant" /></label>
             <label class="checkbox-row"><input id="privateRepoInput" type="checkbox" /> Keep it private</label>
-            <div class="package-list"><span>✓ README.md</span><span>✓ build-guide</span><span>✓ firmware code</span><span>✓ parts-list</span><span>✓ test-results</span></div>
-            <div class="button-row"><button class="paper-button" id="generateReadmeButton" type="button">Refresh project notes</button><button class="paper-button" id="downloadReadmeButton" type="button">Download project</button></div>
+            <div class="package-list"><span>✓ project notes</span><span>✓ build guide</span><span>✓ parts list</span><span>✓ test results</span></div>
+            <button class="paper-button" id="generateReadmeButton" type="button">Refresh project notes</button>
             <button class="torn-button torn-button--ink" id="publishGithubButton" type="button">Connect GitHub &amp; publish</button>
             <div class="status-strip" id="githubStatus">Nothing shared yet.</div>
           </div>
@@ -215,14 +206,6 @@
 
     <aside class="orientation-card" aria-label="Landscape mode recommended"><img src="images/makeable/icon-code.svg" alt="" /><h2>Turn sideways to build.</h2><p>Makeable works like a wide workbench, with your photo and next move side by side.</p></aside>
 
-    <dialog class="settings-dialog" id="settingsDialog">
-      <form method="dialog">
-        <div class="dialog-header"><h2>Workbench settings</h2><button class="paper-button" value="close" aria-label="Close settings">Close</button></div>
-        <div class="settings-grid"><label>Deepgram browser key<input id="deepgramKeyInput" type="password" autocomplete="off" /></label><label>GitHub owner<input id="githubOwnerInput" type="text" autocomplete="off" /></label><label>OpenAI model<input id="openaiModelInput" type="text" autocomplete="off" /></label><label>OpenAI reasoning model<input id="openaiReasoningModelInput" type="text" autocomplete="off" /></label></div>
-        <div class="settings-status" id="settingsStatus"></div>
-        <div class="button-row"><button class="torn-button torn-button--pink" id="saveSettingsButton" value="default" type="submit">Save settings</button><button class="paper-button" id="clearSettingsButton" type="button">Clear local overrides</button></div>
-      </form>
-    </dialog>
     <script type="module" src="./app.js?v=makeable-workbench-20260716"></script>
   </body>
 </html>

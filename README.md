@@ -77,9 +77,9 @@ Each step is built around the photo, the selected parts, and a clear action. It 
 
 ![Final guided wiring image](images/step%202%20-%20final%20image.jpg)
 
-### 5. Pick the Board Settings ⚙️
+### 5. Connect the Board 🔌
 
-Makeable keeps the board setup visible so users can confirm the ESP32 target before flashing.
+Connect the ESP32 by USB. Makeable infers the supported board target from the recognized hardware; ordinary users do not see compiler settings or source code.
 
 ![Selected ESP32 board settings](images/flashing%20selected%20board.jpg)
 
@@ -127,13 +127,13 @@ Makeable uses the user’s real photo as the source of truth. The guide is not g
 
 The guide shows one connection at a time so beginners can move slowly and confidently.
 
-### 💻 Firmware Generation
+### 💻 Secure Firmware Generation
 
-The app generates ESP32-ready code based on the project goal and detected components.
+The app generates ESP32-ready firmware based on the project goal and detected components. The source stays inside the Makeable workflow.
 
 ### 🔌 Direct Flashing
 
-With Arduino CLI and Web Serial support, Makeable can compile and flash firmware without forcing the user into Arduino IDE.
+The Render container owns Arduino CLI, the ESP32 core, and common libraries. The browser receives a compiled binary and flashes it with Web Serial, so the user installs no IDE, CLI, extension, or SDK.
 
 ### 👀 Closed-Loop Debugging
 
@@ -149,19 +149,19 @@ The final project can be packaged into a shareable README and uploaded to GitHub
 
 - **Frontend:** HTML, CSS, JavaScript
 - **AI planning:** OpenAI Responses API
-- **Voice input:** Deepgram browser transcription
-- **Firmware compile:** Arduino CLI
+- **Voice input:** Deepgram transcription with short-lived server-issued browser tokens
+- **Firmware compile:** pinned Arduino CLI + ESP32 core in a Render Docker container
 - **Board flashing:** Web Serial + ESP flashing flow
 - **Debugging:** Serial logs + webcam evidence
 - **Publishing:** GitHub API
-- **Hosting-ready flow:** Netlify Functions for server-side API proxying
+- **Hosting:** Netlify frontend + Render build/API service
 
 ---
 
-## Run Locally 🏃
+## Local Development 🏃
 
 ```bash
-npm install
+npm run toolchain:install
 node server.mjs
 ```
 
@@ -171,7 +171,7 @@ Then open:
 http://127.0.0.1:8787
 ```
 
-Chrome or Edge is recommended because Web Serial support is needed for board flashing.
+Chrome or Edge is required for Web Serial board flashing. This local setup is only for Makeable developers; end users visit `makeable.build` and install nothing.
 
 ---
 
@@ -190,13 +190,12 @@ DEEPGRAM_API_KEY=
 GITHUB_TOKEN=
 GITHUB_OWNER=
 
-ARDUINO_CLI_PATH=C:\Program Files\Arduino CLI\arduino-cli.exe
-ARDUINO_FQBN=esp32:esp32:esp32
+ARDUINO_CLI_PATH=.makeable/toolchain/bin/arduino-cli
 
 PORT=8787
 ```
 
-For ESP32 builds, make sure Arduino CLI is installed and the ESP32 board core is available.
+`npm run toolchain:install` installs the pinned CLI and ESP32 core into the ignored `.makeable/toolchain` development directory. Production gets the same toolchain from `Dockerfile`.
 
 ---
 

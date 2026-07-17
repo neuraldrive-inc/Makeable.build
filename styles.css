@@ -926,6 +926,21 @@ body.has-parts-photo .scan-copy {
   gap: 30px;
 }
 
+.flash-stage-grid--automatic {
+  grid-template-columns: minmax(420px, 760px);
+  justify-content: center;
+}
+
+.flash-stage-grid--automatic .web-flash-panel {
+  padding: 42px;
+}
+
+.flash-stage-grid--automatic .web-flash-panel h2 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 2rem;
+}
+
 .code-panel {
   min-width: 0;
   padding: 34px;

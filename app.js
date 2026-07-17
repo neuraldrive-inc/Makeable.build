@@ -1,3 +1,5 @@
+import { selectBoardProfile, USB_SERIAL_FILTERS } from "./lib/board-profiles.mjs";
+
 const $ = (selector) => document.querySelector(selector);
 
 const FRONTIER_MODEL = "gpt-5.6-sol";
@@ -9,10 +11,7 @@ const AI_POLL_BASE_INTERVAL_MS = 2200;
 const AI_TRANSIENT_RETRY_ATTEMPTS = 2;
 const ANNOTATION_LABEL_PADDING = 12;
 const ANNOTATION_LABEL_GAP = 10;
-const SETTINGS_STORAGE_KEY = "makeable.settings";
-const LEGACY_SETTINGS_STORAGE_KEYS = ["geckco.settings", "circuitcodex.settings"];
 let serverConfig = window.MAKEABLE_CONFIG || window.CIRCUIT_CODEX_CONFIG || {};
-let localOverrides = readLocalOverrides();
 const WORKFLOW_STAGES = [
   {
     hash: "#capture",
@@ -26,8 +25,8 @@ const WORKFLOW_STAGES = [
   },
   {
     hash: "#flash",
-    label: "Step 3: Build + Code",
-    hint: "Connect one wire at a time, then load the code.",
+    label: "Step 3: Build + Load",
+    hint: "Connect one wire at a time, then let Makeable load the board.",
   },
   {
     hash: "#verify",
@@ -42,16 +41,10 @@ const WORKFLOW_STAGES = [
 ];
 
 const settings = {
-  deepgramApiKey: localOverrides.deepgramApiKey || serverConfig.deepgramApiKey || "",
-  githubOwner: localOverrides.githubOwner || serverConfig.githubOwner || "",
-  openaiModel: pickModel(localOverrides.openaiModel, serverConfig.openaiModel, FRONTIER_MODEL),
-  openaiReasoningModel:
-    pickModel(localOverrides.openaiReasoningModel, serverConfig.openaiReasoningModel, FRONTIER_MODEL),
-  openaiReasoningEffort: pickReasoningEffort(
-    localOverrides.openaiReasoningEffort,
-    serverConfig.openaiReasoningEffort,
-  ),
-  arduinoFqbn: localOverrides.arduinoFqbn || serverConfig.arduinoFqbn || "esp32:esp32:esp32",
+  githubOwner: serverConfig.githubOwner || "",
+  openaiModel: pickModel("", serverConfig.openaiModel, FRONTIER_MODEL),
+  openaiReasoningModel: pickModel("", serverConfig.openaiReasoningModel, FRONTIER_MODEL),
+  openaiReasoningEffort: pickReasoningEffort("", serverConfig.openaiReasoningEffort),
 };
 
 const state = {
@@ -110,9 +103,6 @@ const els = {
   showCodeButton: $("#showCodeButton"),
   wiringWorkspace: $("#wiringWorkspace"),
   codeWorkspace: $("#codeWorkspace"),
-  firmwareOutput: $("#firmwareOutput"),
-  copyFirmwareButton: $("#copyFirmwareButton"),
-  downloadFirmwareButton: $("#downloadFirmwareButton"),
   baudRateInput: $("#baudRateInput"),
   connectSerialButton: $("#connectSerialButton"),
   disconnectSerialButton: $("#disconnectSerialButton"),
@@ -127,31 +117,15 @@ const els = {
   verifyBehaviorButton: $("#verifyBehaviorButton"),
   evidenceStrip: $("#evidenceStrip"),
   behaviorEvaluation: $("#behaviorEvaluation"),
-  manifestUrlInput: $("#manifestUrlInput"),
-  loadManifestButton: $("#loadManifestButton"),
-  espInstallButton: $("#espInstallButton"),
-  boardFqbnInput: $("#boardFqbnInput"),
-  eraseFlashInput: $("#eraseFlashInput"),
-  refreshArduinoStatusButton: $("#refreshArduinoStatusButton"),
   compileFlashButton: $("#compileFlashButton"),
   flashProgressBar: $("#flashProgressBar"),
   arduinoStatus: $("#arduinoStatus"),
   generateReadmeButton: $("#generateReadmeButton"),
-  downloadReadmeButton: $("#downloadReadmeButton"),
   repoNameInput: $("#repoNameInput"),
   privateRepoInput: $("#privateRepoInput"),
   publishGithubButton: $("#publishGithubButton"),
   githubStatus: $("#githubStatus"),
   readmePreview: $("#readmePreview"),
-  settingsButton: $("#settingsButton"),
-  settingsDialog: $("#settingsDialog"),
-  deepgramKeyInput: $("#deepgramKeyInput"),
-  githubOwnerInput: $("#githubOwnerInput"),
-  openaiModelInput: $("#openaiModelInput"),
-  openaiReasoningModelInput: $("#openaiReasoningModelInput"),
-  settingsStatus: $("#settingsStatus"),
-  saveSettingsButton: $("#saveSettingsButton"),
-  clearSettingsButton: $("#clearSettingsButton"),
 };
 
 const hardwarePlanSchema = {
@@ -281,7 +255,6 @@ const behaviorSchema = {
 };
 
 bindEvents();
-renderSettings();
 renderEmptyPlan();
 const initialStageIndex = WORKFLOW_STAGES.findIndex((stage) => stage.hash === window.location.hash);
 setActiveWorkflowStage(Math.max(initialStageIndex, 0), {
@@ -291,6 +264,24 @@ setActiveWorkflowStage(Math.max(initialStageIndex, 0), {
 drawPartsCanvas();
 refreshServerConfig();
 refreshArduinoStatus();
+if (/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
+  globalThis.__MAKEABLE_TEST_API__ = {
+    loadPlan(plan) {
+      state.plan = plan;
+      state.compiledFirmware = null;
+      renderPlan();
+      setActiveWorkflowStage(2);
+      setBuildMode("code");
+    },
+    getState() {
+      return {
+        board: selectBoardProfile(state.plan).id,
+        compiled: Boolean(state.compiledFirmware),
+        status: els.arduinoStatus.textContent,
+      };
+    },
+  };
+}
 window.addEventListener("resize", () => {
   drawPartsCanvas();
   renderVisualSteps();
@@ -326,8 +317,6 @@ function bindEvents() {
   els.nextBuildStepButton.addEventListener("click", advanceBuildStep);
   els.showWiringButton?.addEventListener("click", () => setBuildMode("wiring"));
   els.showCodeButton?.addEventListener("click", () => setBuildMode("code"));
-  els.copyFirmwareButton.addEventListener("click", copyFirmware);
-  els.downloadFirmwareButton.addEventListener("click", downloadFirmware);
   els.connectSerialButton.addEventListener("click", connectSerial);
   els.disconnectSerialButton.addEventListener("click", disconnectSerial);
   els.sendSerialButton.addEventListener("click", sendSerialCommand);
@@ -335,18 +324,12 @@ function bindEvents() {
   els.startCameraButton.addEventListener("click", startCamera);
   els.captureEvidenceButton.addEventListener("click", captureEvidence);
   els.verifyBehaviorButton.addEventListener("click", verifyBehavior);
-  els.loadManifestButton.addEventListener("click", loadEspManifest);
-  els.refreshArduinoStatusButton.addEventListener("click", refreshArduinoStatus);
   els.compileFlashButton.addEventListener("click", compileAndFlashFirmware);
   els.generateReadmeButton.addEventListener("click", () => {
     state.readme = buildReadme();
     els.readmePreview.textContent = state.readme;
   });
-  els.downloadReadmeButton.addEventListener("click", downloadReadme);
   els.publishGithubButton.addEventListener("click", publishToGitHub);
-  els.settingsButton.addEventListener("click", () => els.settingsDialog.showModal());
-  els.saveSettingsButton.addEventListener("click", saveSettings);
-  els.clearSettingsButton.addEventListener("click", clearLocalOverrides);
 }
 
 function showIntro(event) {
@@ -405,18 +388,6 @@ function setActiveWorkflowStage(index, options = {}) {
   });
 }
 
-function readLocalOverrides() {
-  try {
-    const storedSettings =
-      localStorage.getItem(SETTINGS_STORAGE_KEY) ||
-      LEGACY_SETTINGS_STORAGE_KEYS.map((key) => localStorage.getItem(key)).find(Boolean) ||
-      "{}";
-    return JSON.parse(storedSettings);
-  } catch {
-    return {};
-  }
-}
-
 function pickModel(localValue, serverValue, fallback) {
   if (localValue && !LEGACY_MODEL_DEFAULTS.has(localValue)) return localValue;
   if (serverValue && !LEGACY_MODEL_DEFAULTS.has(serverValue)) return serverValue;
@@ -432,78 +403,15 @@ async function refreshServerConfig() {
   try {
     const freshConfig = await apiJson("/api/config");
     serverConfig = freshConfig;
-    if (!localOverrides.deepgramApiKey) settings.deepgramApiKey = freshConfig.deepgramApiKey || "";
-    if (!localOverrides.githubOwner) settings.githubOwner = freshConfig.githubOwner || "";
-    if (!localOverrides.openaiModel || LEGACY_MODEL_DEFAULTS.has(localOverrides.openaiModel)) {
-      settings.openaiModel = pickModel("", freshConfig.openaiModel, FRONTIER_MODEL);
-    }
-    if (
-      !localOverrides.openaiReasoningModel ||
-      LEGACY_MODEL_DEFAULTS.has(localOverrides.openaiReasoningModel)
-    ) {
-      settings.openaiReasoningModel = pickModel("", freshConfig.openaiReasoningModel, FRONTIER_MODEL);
-    }
-    if (
-      !localOverrides.openaiReasoningEffort ||
-      LEGACY_REASONING_EFFORT_DEFAULTS.has(localOverrides.openaiReasoningEffort)
-    ) {
-      settings.openaiReasoningEffort = pickReasoningEffort("", freshConfig.openaiReasoningEffort);
-    }
-    if (!localOverrides.arduinoFqbn) {
-      settings.arduinoFqbn = freshConfig.arduinoFqbn || "esp32:esp32:esp32";
-    }
-    renderSettings();
-    if (els.boardFqbnInput && !els.boardFqbnInput.value) els.boardFqbnInput.value = settings.arduinoFqbn;
+    settings.githubOwner = freshConfig.githubOwner || "";
+    settings.openaiModel = pickModel("", freshConfig.openaiModel, FRONTIER_MODEL);
+    settings.openaiReasoningModel = pickModel("", freshConfig.openaiReasoningModel, FRONTIER_MODEL);
+    settings.openaiReasoningEffort = pickReasoningEffort("", freshConfig.openaiReasoningEffort);
     return freshConfig;
   } catch (error) {
     console.error(error);
     return serverConfig;
   }
-}
-
-function saveSettings(event) {
-  event.preventDefault();
-  settings.deepgramApiKey = els.deepgramKeyInput.value.trim();
-  settings.githubOwner = els.githubOwnerInput.value.trim();
-  settings.openaiModel = els.openaiModelInput.value.trim() || FRONTIER_MODEL;
-  settings.openaiReasoningModel = els.openaiReasoningModelInput.value.trim() || FRONTIER_MODEL;
-  settings.arduinoFqbn = els.boardFqbnInput.value.trim() || "esp32:esp32:esp32";
-  localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-  localOverrides = { ...settings };
-  renderSettings();
-  els.settingsDialog.close();
-}
-
-function clearLocalOverrides() {
-  localStorage.removeItem(SETTINGS_STORAGE_KEY);
-  LEGACY_SETTINGS_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
-  localOverrides = {};
-  settings.deepgramApiKey = serverConfig.deepgramApiKey || "";
-  settings.githubOwner = serverConfig.githubOwner || "";
-  settings.openaiModel = pickModel("", serverConfig.openaiModel, FRONTIER_MODEL);
-  settings.openaiReasoningModel = pickModel("", serverConfig.openaiReasoningModel, FRONTIER_MODEL);
-  settings.openaiReasoningEffort = pickReasoningEffort("", serverConfig.openaiReasoningEffort);
-  settings.arduinoFqbn = serverConfig.arduinoFqbn || "esp32:esp32:esp32";
-  els.boardFqbnInput.value = settings.arduinoFqbn;
-  renderSettings();
-}
-
-function renderSettings() {
-  els.deepgramKeyInput.value = settings.deepgramApiKey;
-  els.githubOwnerInput.value = settings.githubOwner;
-  els.openaiModelInput.value = settings.openaiModel;
-  els.openaiReasoningModelInput.value = settings.openaiReasoningModel;
-  els.boardFqbnInput.value = settings.arduinoFqbn;
-  els.settingsStatus.innerHTML = [
-    statusLine("OpenAI server key", serverConfig.hasOpenAIKey),
-    statusLine("Deepgram browser key", Boolean(settings.deepgramApiKey)),
-    statusLine("GitHub server token", serverConfig.hasGithubToken),
-    statusLine("Arduino CLI", serverConfig.hasArduinoCli),
-  ].join("");
-}
-
-function statusLine(label, ok) {
-  return `<div><strong class="${ok ? "ok" : "warn"}">${ok ? "Loaded" : "Missing"}</strong> ${escapeHtml(label)}</div>`;
 }
 
 function handlePhotoUpload(event) {
@@ -1231,7 +1139,7 @@ function sleep(ms) {
 
 async function generateFirmwareForPlan(idea) {
   if (!state.plan) return;
-  els.firmwareOutput.textContent = "Generating firmware from verified hardware plan...";
+  setStatus(els.transcriptBox, "Preparing the board software securely...", "warn");
 
   const payload = {
     model: settings.openaiReasoningModel,
@@ -1265,11 +1173,15 @@ async function generateFirmwareForPlan(idea) {
   const data = await openAiResponse(payload, {
     label: "firmware",
     onProgress: ({ elapsedLabel, message }) => {
-      els.firmwareOutput.textContent =
-        message || `Still writing the board code (${elapsedLabel}). This is normal for a careful build.`;
+      setStatus(
+        els.transcriptBox,
+        message || `Still preparing the board software (${elapsedLabel}).`,
+        "warn",
+      );
     },
   });
   state.plan.firmware = normalizeFirmware(parseStructuredJson(data, "firmware"));
+  setStatus(els.transcriptBox, "The guide and board software are ready.", "ok");
 }
 
 function buildFirmwarePrompt(idea, plan) {
@@ -1466,9 +1378,6 @@ function renderPlan() {
     els.diagnosticsList.append(row);
   });
 
-  els.firmwareOutput.textContent =
-    plan.firmware?.sketch ||
-    "I’m still preparing the code for this build.";
   renderVisualSteps();
   state.readme = buildReadme();
   els.readmePreview.textContent = state.readme;
@@ -1819,10 +1728,6 @@ function stepColor(value, index) {
 }
 
 async function startVoiceCapture() {
-  if (!settings.deepgramApiKey) {
-    setVoiceStatus("Voice setup needed", "danger");
-    return;
-  }
   if (!navigator.mediaDevices?.getUserMedia) {
     setVoiceStatus("Mic unavailable", "danger");
     return;
@@ -1833,6 +1738,8 @@ async function startVoiceCapture() {
   els.stopVoiceButton.disabled = false;
 
   try {
+    const grant = await apiJson("/api/deepgram/token", { method: "POST", body: "{}" });
+    if (!grant.access_token) throw new Error("Voice input is temporarily unavailable.");
     const url = new URL("wss://api.deepgram.com/v1/listen");
     url.searchParams.set("model", "nova-3");
     url.searchParams.set("smart_format", "true");
@@ -1841,7 +1748,7 @@ async function startVoiceCapture() {
     url.searchParams.set("utterance_end_ms", "1000");
     url.searchParams.set("vad_events", "true");
 
-    state.deepgramSocket = new WebSocket(url, ["token", settings.deepgramApiKey]);
+    state.deepgramSocket = new WebSocket(url, ["bearer", grant.access_token]);
     state.deepgramSocket.onopen = async () => {
       state.voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
@@ -1928,14 +1835,7 @@ async function connectSerial() {
   }
 
   try {
-    state.serialPort = await navigator.serial.requestPort({
-      filters: [
-        { usbVendorId: 0x10c4 },
-        { usbVendorId: 0x1a86 },
-        { usbVendorId: 0x0403 },
-        { usbVendorId: 0x303a },
-      ],
-    });
+    state.serialPort = await findOrRequestEspPort();
     await state.serialPort.open({ baudRate: Number(els.baudRateInput.value) || 115200 });
     els.connectSerialButton.disabled = true;
     els.disconnectSerialButton.disabled = false;
@@ -2162,58 +2062,25 @@ function friendlyBehaviorStatus(status) {
   return "I’m not fully sure yet.";
 }
 
-function loadEspManifest() {
-  const manifestUrl = els.manifestUrlInput.value.trim();
-  if (!manifestUrl) {
-    setStatus(els.arduinoStatus, "Add a firmware link first.", "warn");
-    return;
-  }
-  els.espInstallButton.setAttribute("manifest", manifestUrl);
-  els.espInstallButton.manifest = manifestUrl;
-  setStatus(els.arduinoStatus, "Firmware link is ready.", "ok");
-}
-
 async function refreshArduinoStatus() {
   try {
     const status = await apiJson("/api/arduino/status");
-    if (status.hostedMode) {
-      setStatus(
-        els.arduinoStatus,
-        "Online guide mode is ready. To put code on a real ESP32, open this project locally where Arduino is installed.",
-        "warn",
-      );
-      els.compileFlashButton.disabled = true;
-      els.compileFlashButton.textContent = "Local app needed";
-      setFlashProgress(0, "");
-      return;
-    }
     const tone = status.hasArduinoCli && status.hasEsp32Core ? "ok" : "warn";
     setStatus(
       els.arduinoStatus,
       status.hasArduinoCli && status.hasEsp32Core
-        ? "Your computer is ready to load code onto the board."
-        : "One setup piece is missing. I’ll still keep the board settings here so we can fix it.",
+        ? "Makeable’s online compiler is ready. Connect your ESP32 when you’re ready."
+        : "The online compiler is warming up. Try again in a moment.",
       tone,
     );
-    if (status.fqbn) {
-      settings.arduinoFqbn = status.fqbn;
-      els.boardFqbnInput.value = status.fqbn;
-    }
+    els.compileFlashButton.disabled = !(status.hasArduinoCli && status.hasEsp32Core);
   } catch (error) {
-    setStatus(els.arduinoStatus, `I couldn’t check the setup yet: ${error.message}`, "danger");
+    setStatus(els.arduinoStatus, `The online compiler is not ready yet: ${error.message}`, "danger");
+    els.compileFlashButton.disabled = true;
   }
 }
 
 async function compileAndFlashFirmware() {
-  if (serverConfig.hostedMode || serverConfig.firmwareCompileSupported === false) {
-    setStatus(
-      els.arduinoStatus,
-      "This online version can guide the build and write the code. Loading it onto the ESP32 needs the local app with Arduino installed.",
-      "warn",
-    );
-    return;
-  }
-
   if (!("serial" in navigator)) {
     setStatus(els.arduinoStatus, "This browser can’t talk to the board. Use Chrome or Edge on desktop.", "danger");
     return;
@@ -2226,38 +2093,39 @@ async function compileAndFlashFirmware() {
   }
 
   els.compileFlashButton.disabled = true;
-  els.compileFlashButton.textContent = "Choose board...";
-  setFlashProgress(0, "Choose your board");
+  els.compileFlashButton.textContent = "Connecting...";
+  setFlashProgress(0, "Finding your board");
 
   let port;
   try {
     if (state.serialPort) await disconnectSerial();
-    port = await requestEspPort();
+    port = await findOrRequestEspPort();
   } catch (error) {
     els.compileFlashButton.disabled = false;
-    els.compileFlashButton.textContent = "Put code on board";
+    els.compileFlashButton.textContent = "Connect & load automatically";
     setStatus(els.arduinoStatus, `No problem. Choose the board again when you’re ready. ${error.message}`, "warn");
     setFlashProgress(0, "");
     return;
   }
 
   try {
-    const fqbn = els.boardFqbnInput.value.trim() || settings.arduinoFqbn || "esp32:esp32:esp32";
-    settings.arduinoFqbn = fqbn;
+    const profile = selectBoardProfile(state.plan);
     els.compileFlashButton.textContent = "Preparing code...";
     setStatus(els.arduinoStatus, "I’m preparing the code for your board.", "warn");
     appendSerial("\nMakeable: Preparing the code for your board.\n");
 
     const compiled = await apiJson("/api/firmware/compile", {
       method: "POST",
-      body: JSON.stringify({ sketch, fqbn }),
+      body: JSON.stringify({ sketch, boardProfile: profile.id }),
     });
     state.compiledFirmware = compiled;
     appendSerial("Makeable: Code is ready. Now I’m sending it to the board.\n");
     if (compiled.stderr) appendSerial(`Makeable: Setup note from the compiler:\n${compiled.stderr}\n`);
 
     els.compileFlashButton.textContent = "Loading board...";
-    await flashFirmwareImages(port, compiled.images);
+    const testAdapter = globalThis.__MAKEABLE_FLASH_TEST_ADAPTER__;
+    if (typeof testAdapter === "function") await testAdapter({ port, images: compiled.images, profile });
+    else await flashFirmwareImages(port, compiled.images);
     setStatus(els.arduinoStatus, "Done. The code is on the board. Continue when you’re ready to watch it work.", "ok");
     setFlashProgress(100, "Done");
   } catch (error) {
@@ -2267,19 +2135,13 @@ async function compileAndFlashFirmware() {
     setFlashProgress(0, "Needs retry");
   } finally {
     els.compileFlashButton.disabled = false;
-    els.compileFlashButton.textContent = "Put code on board";
+    els.compileFlashButton.textContent = "Connect & load automatically";
   }
 }
 
-function requestEspPort() {
-  return navigator.serial.requestPort({
-    filters: [
-      { usbVendorId: 0x10c4 },
-      { usbVendorId: 0x1a86 },
-      { usbVendorId: 0x0403 },
-      { usbVendorId: 0x303a },
-    ],
-  });
+async function findOrRequestEspPort() {
+  const granted = await navigator.serial.getPorts();
+  return granted[0] || navigator.serial.requestPort({ filters: USB_SERIAL_FILTERS });
 }
 
 async function flashFirmwareImages(port, images) {
@@ -2320,7 +2182,7 @@ async function flashFirmwareImages(port, images) {
       flashMode: "dio",
       flashFreq: "40m",
       flashSize: "4MB",
-      eraseAll: Boolean(els.eraseFlashInput.checked),
+      eraseAll: true,
       compress: true,
       reportProgress: (fileIndex, written, total) => {
         const percent = total ? Math.round((written / total) * 100) : 0;
@@ -2344,29 +2206,10 @@ function setFlashProgress(percent, label) {
   els.flashProgressBar.textContent = label || "";
 }
 
-function copyFirmware() {
-  const sketch = state.plan?.firmware?.sketch || "";
-  if (!sketch) return;
-  navigator.clipboard.writeText(sketch).then(() => {
-    els.copyFirmwareButton.textContent = "Copied";
-    setTimeout(() => (els.copyFirmwareButton.textContent = "Copy"), 1000);
-  });
-}
-
-function downloadFirmware() {
-  const sketch = state.plan?.firmware?.sketch || "";
-  if (!sketch) {
-    setStatus(els.arduinoStatus, "There isn’t code to download yet. Create the guide first.", "warn");
-    return;
-  }
-  downloadText("makeable-firmware.ino", sketch, "text/x-arduino");
-}
-
 function buildReadme() {
   const plan = state.plan;
   if (!plan) return "Create your guide first, then I’ll write the project notes here.";
   const generated = new Date().toISOString();
-  const firmwareSketch = plan.firmware?.sketch || "Firmware generation pending.";
   const firmwareNotes = plan.firmware?.notes || "Review all wiring before powering the board.";
   const parts = plan.parts.map((part) => `- ${part.name}: ${part.role}`).join("\n");
   const wiring = plan.wiringSteps
@@ -2382,9 +2225,7 @@ function buildReadme() {
     ? `\n## Evidence\n\nCaptured ${state.evidencePhotos.length} camera frame(s) during verification.\n`
     : "";
 
-  return (
-    plan.readmeMarkdown ||
-    `# ${plan.projectTitle}
+  return `# ${plan.projectTitle}
 
 Generated by Makeable on ${generated}.
 
@@ -2404,30 +2245,21 @@ ${wiring || "Wiring pending."}
 
 ${checks || "- Diagnostics pending."}
 ${warnings}
-## Firmware
+## Board software
 
-\`\`\`cpp
-${firmwareSketch}
-\`\`\`
+Makeable securely prepares and loads the board software from the browser. No source-code download or desktop IDE is required.
 ${evidence}
 ## Notes
 
 ${firmwareNotes}
-`
-  );
-}
-
-function downloadReadme() {
-  state.readme = state.readme || buildReadme();
-  downloadText("README.md", state.readme, "text/markdown");
+`;
 }
 
 async function publishToGitHub() {
   const repoName = sanitizeRepoName(els.repoNameInput.value || "makeable-build");
   const isPrivate = els.privateRepoInput.checked;
-  const firmware = state.plan?.firmware?.sketch || "";
-  if (!state.plan || !firmware) {
-    setStatus(els.githubStatus, "Create the guide and code first, then I can save the project.", "warn");
+  if (!state.plan) {
+    setStatus(els.githubStatus, "Create the guide first, then I can save the project notes.", "warn");
     return;
   }
   state.readme = state.readme || buildReadme();
@@ -2451,7 +2283,7 @@ async function publishToGitHub() {
       els.githubStatus.textContent = "I found the project space. Now I’m saving the files...";
     }
 
-    if (!owner) throw new Error("I need a GitHub owner in Settings before I can save this.");
+    if (!owner) throw new Error("GitHub publishing is not configured on the server.");
 
     await apiJson("/api/github/upload-file", {
       method: "POST",
@@ -2461,17 +2293,6 @@ async function publishToGitHub() {
         path: "README.md",
         content: state.readme,
         message: "Add Makeable README",
-      }),
-    });
-
-    await apiJson("/api/github/upload-file", {
-      method: "POST",
-      body: JSON.stringify({
-        owner,
-        repo: repoName,
-        path: "firmware/makeable-firmware.ino",
-        content: firmware,
-        message: "Add generated ESP32 firmware",
       }),
     });
 
@@ -2486,7 +2307,9 @@ async function publishToGitHub() {
 }
 
 async function apiJson(path, options = {}) {
-  const response = await fetch(path, {
+  const base = String(serverConfig.apiBaseUrl || "").replace(/\/$/, "");
+  const requestUrl = base && path !== "/api/config" ? `${base}${path}` : path;
+  const response = await fetch(requestUrl, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -2534,18 +2357,6 @@ function stripHtml(value) {
 function setStatus(element, text, tone) {
   element.textContent = text;
   element.className = `status-strip ${tone || ""}`.trim();
-}
-
-function downloadText(filename, text, type) {
-  const blob = new Blob([text], { type });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
 }
 
 function sanitizeRepoName(value) {

@@ -6,11 +6,16 @@ import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
+import { getBoardProfile, supportedBoardSummary } from "./lib/board-profiles.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
 const initialEnv = getEnv();
 const port = Number(initialEnv.PORT || 8787);
+const MAX_REQUEST_BYTES = 512 * 1024;
+const MAX_SKETCH_BYTES = 96 * 1024;
+const MAX_CONCURRENT_COMPILES = Math.max(1, Number(initialEnv.MAX_CONCURRENT_COMPILES || 2));
+let activeCompiles = 0;
 
 const mimeTypes = new Map([
   [".html", "text/html; charset=utf-8"],
@@ -31,12 +36,19 @@ const server = createServer(async (req, res) => {
     const env = getEnv();
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
 
+    applyCors(req, res, env);
+    if (req.method === "OPTIONS") return sendText(res, "", "text/plain; charset=utf-8", 204);
+
     if (url.pathname === "/config.local.js") {
       return sendText(res, publicConfigScript(env), "text/javascript; charset=utf-8");
     }
 
     if (url.pathname === "/api/config") {
       return sendJson(res, publicConfig(env));
+    }
+
+    if (url.pathname === "/api/deepgram/token" && req.method === "POST") {
+      return createDeepgramToken(res, env);
     }
 
     if (url.pathname === "/api/openai/responses" && req.method === "POST") {
@@ -74,6 +86,9 @@ const server = createServer(async (req, res) => {
         hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
         hasGithubToken: Boolean(env.GITHUB_TOKEN),
         hasArduinoCli: Boolean(findArduinoCli(env)),
+        hostedMode: true,
+        firmwareCompileSupported: Boolean(findArduinoCli(env)),
+        supportedBoards: supportedBoardSummary(),
       });
     }
 
@@ -116,17 +131,50 @@ function readEnv(filePath) {
 
 function publicConfig(env) {
   const config = {
-    deepgramApiKey: env.DEEPGRAM_API_KEY || "",
     githubOwner: env.GITHUB_OWNER || "",
     openaiModel: env.OPENAI_MODEL || "gpt-5.6-sol",
     openaiReasoningModel: env.OPENAI_REASONING_MODEL || "gpt-5.6-sol",
     openaiReasoningEffort: env.OPENAI_REASONING_EFFORT || "high",
-    arduinoFqbn: env.ARDUINO_FQBN || "esp32:esp32:esp32",
     hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
     hasGithubToken: Boolean(env.GITHUB_TOKEN),
     hasArduinoCli: Boolean(findArduinoCli(env)),
+    hasVoice: Boolean(env.DEEPGRAM_API_KEY),
+    hostedMode: true,
+    firmwareCompileSupported: Boolean(findArduinoCli(env)),
+    supportedBoards: supportedBoardSummary(),
   };
   return config;
+}
+
+function applyCors(req, res, env) {
+  const origin = String(req.headers.origin || "");
+  const configured = String(env.ALLOWED_ORIGINS || "https://makeable.build,https://www.makeable.build")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const localOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+  if (configured.includes(origin) || localOrigin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Cache-Control", "no-store");
+}
+
+async function createDeepgramToken(res, env) {
+  if (!env.DEEPGRAM_API_KEY) {
+    return sendJson(res, { error: "Voice input is not configured." }, 503);
+  }
+  const upstream = await fetch("https://api.deepgram.com/v1/auth/grant", {
+    method: "POST",
+    headers: {
+      Authorization: `Token ${env.DEEPGRAM_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ ttl_seconds: 60 }),
+  });
+  return pipeJson(upstream, res);
 }
 
 function publicConfigScript(env) {
@@ -161,7 +209,7 @@ async function proxyOpenAI(req, res, env) {
   if (!env.OPENAI_API_KEY) return sendJson(res, { error: "OPENAI_API_KEY is missing in .env" }, 401);
 
   const body = await readJsonBody(req);
-  if (!body.model) body.model = env.OPENAI_MODEL || "gpt-5.6-sol";
+  body.model = env.OPENAI_MODEL || "gpt-5.6-sol";
 
   const upstream = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -182,7 +230,7 @@ async function createOpenAIBackgroundResponse(req, res, env) {
   const body = await readJsonBody(req);
   const payload = {
     ...body,
-    model: body.model || env.OPENAI_MODEL || "gpt-5.6-sol",
+    model: env.OPENAI_REASONING_MODEL || env.OPENAI_MODEL || "gpt-5.6-sol",
     background: true,
     store: body.store ?? true,
   };
@@ -219,8 +267,9 @@ async function arduinoStatus(req, res, env) {
     return sendJson(res, {
       hasArduinoCli: false,
       hasEsp32Core: false,
-      message:
-        "arduino-cli was not found. Install Arduino IDE or set ARDUINO_CLI_PATH in .env.",
+      hostedMode: true,
+      firmwareCompileSupported: false,
+      message: "The hosted firmware compiler is temporarily unavailable.",
     });
   }
 
@@ -232,7 +281,9 @@ async function arduinoStatus(req, res, env) {
     return sendJson(res, {
       hasArduinoCli: true,
       hasEsp32Core: /\besp32:esp32\b/.test(coreResult.stdout),
-      fqbn: env.ARDUINO_FQBN || "esp32:esp32:esp32",
+      hostedMode: true,
+      firmwareCompileSupported: true,
+      supportedBoards: supportedBoardSummary(),
       version: versionResult.stdout.trim(),
       cores: coreResult.stdout.trim(),
     });
@@ -253,24 +304,35 @@ async function arduinoStatus(req, res, env) {
 async function compileFirmware(req, res, env) {
   const cliPath = findArduinoCli(env);
   if (!cliPath) {
-    return sendJson(res, { error: "arduino-cli was not found. Set ARDUINO_CLI_PATH in .env." }, 501);
+    return sendJson(res, { error: "The hosted firmware compiler is temporarily unavailable." }, 503);
   }
 
-  const body = await readJsonBody(req);
+  if (activeCompiles >= MAX_CONCURRENT_COMPILES) {
+    res.setHeader("Retry-After", "5");
+    return sendJson(res, { error: "The compiler is busy. Please retry in a few seconds." }, 429);
+  }
+
+  const body = await readJsonBody(req, MAX_REQUEST_BYTES);
   const sketch = String(body.sketch || "").trim();
   if (!sketch) return sendJson(res, { error: "sketch is required" }, 400);
+  if (Buffer.byteLength(sketch, "utf8") > MAX_SKETCH_BYTES) {
+    return sendJson(res, { error: "The generated firmware is too large to compile safely." }, 413);
+  }
 
-  const fqbn = String(body.fqbn || env.ARDUINO_FQBN || "esp32:esp32:esp32").trim();
+  const profile = getBoardProfile(body.boardProfile || body.fqbn || "esp32");
+  if (!profile) return sendJson(res, { error: "Unsupported board profile." }, 400);
+  const fqbn = profile.fqbn;
   const sketchName = "MakeableSketch";
   const buildRoot = path.join(__dirname, ".makeable", "builds", randomUUID());
   const sketchDir = path.join(buildRoot, sketchName);
   const outputDir = path.join(buildRoot, "out");
 
-  await mkdir(sketchDir, { recursive: true });
-  await mkdir(outputDir, { recursive: true });
-  await writeFile(path.join(sketchDir, `${sketchName}.ino`), sketch, "utf8");
+  activeCompiles += 1;
 
   try {
+    await mkdir(sketchDir, { recursive: true });
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(path.join(sketchDir, `${sketchName}.ino`), sketch, "utf8");
     const args = [
       "compile",
       "--fqbn",
@@ -299,33 +361,38 @@ async function compileFirmware(req, res, env) {
     }
     return sendJson(res, {
       ok: true,
-      fqbn,
+      board: profile.id,
+      fqbn: profile.fqbn,
       images,
-      stdout: compileResult.stdout,
-      stderr: compileResult.stderr,
+      compiler: "arduino-cli",
     });
   } catch (error) {
+    console.error("Firmware compile failed", error.stderr || error.message);
     return sendJson(
       res,
       {
-        error: error.message,
-        stdout: error.stdout || "",
-        stderr: error.stderr || "",
-        hint:
-          "If this mentions esp32:esp32, open Arduino IDE once or install the ESP32 boards core with Arduino CLI.",
+        error: "The generated firmware did not compile for this board.",
+        details: sanitizeCompilerError(error.stderr || error.message),
       },
       500,
     );
   } finally {
+    activeCompiles -= 1;
     await rm(buildRoot, { recursive: true, force: true });
   }
+}
+
+function sanitizeCompilerError(value) {
+  return String(value || "")
+    .replaceAll(__dirname, "<workspace>")
+    .replace(/\/[^\s:]+\/\.makeable\/builds\/[^\s:]+/g, "<build>")
+    .slice(-4000);
 }
 
 function findArduinoCli(env) {
   const candidates = [
     env.ARDUINO_CLI_PATH,
-    "/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli",
-    "/Applications/Arduino.app/Contents/MacOS/arduino-cli",
+    path.join(__dirname, ".makeable/toolchain/bin/arduino-cli"),
     "/opt/homebrew/bin/arduino-cli",
     "/usr/local/bin/arduino-cli",
   ].filter(Boolean);
@@ -335,6 +402,8 @@ function findArduinoCli(env) {
 async function collectFirmwareImages(outputDir, sketchName) {
   const files = await walkFiles(outputDir);
   const binFiles = files.filter((filePath) => filePath.endsWith(".bin"));
+  const merged = findByPattern(binFiles, [/\.merged\.bin$/i, /\.factory\.bin$/i, /merged/i]);
+  if (merged) return [await firmwareImage(merged, 0x0, "Merged ESP32 firmware")];
   const bootloader = findByPattern(binFiles, [/bootloader.*\.bin$/i]);
   const partitions = findByPattern(binFiles, [/\.partitions\.bin$/i, /partitions.*\.bin$/i]);
   const bootApp0 = findByPattern(binFiles, [/boot_app0\.bin$/i]) || findBootApp0Bin();
@@ -349,8 +418,7 @@ async function collectFirmwareImages(outputDir, sketchName) {
   if (app) images.push(await firmwareImage(app, 0x10000, "Application"));
   if (images.length) return images;
 
-  const merged = findByPattern(binFiles, [/\.merged\.bin$/i, /\.factory\.bin$/i, /merged/i]);
-  return merged ? [await firmwareImage(merged, 0x0, "Merged ESP32 firmware")] : [];
+  return [];
 }
 
 async function walkFiles(dir) {
@@ -469,9 +537,18 @@ async function pipeJson(upstream, res) {
   res.end(text);
 }
 
-async function readJsonBody(req) {
+async function readJsonBody(req, maxBytes = MAX_REQUEST_BYTES) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBytes) {
+      const error = new Error("Request body is too large.");
+      error.statusCode = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
   const raw = Buffer.concat(chunks).toString("utf8");
   return raw ? JSON.parse(raw) : {};
 }

@@ -1,0 +1,9 @@
+.git
+.env*
+.makeable
+.netlify
+node_modules
+docs
+tests
+*.log
+.DS_Store
