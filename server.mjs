@@ -15,6 +15,8 @@ const port = Number(initialEnv.PORT || 8787);
 const MAX_REQUEST_BYTES = 512 * 1024;
 const MAX_SKETCH_BYTES = 96 * 1024;
 const MAX_CONCURRENT_COMPILES = Math.max(1, Number(initialEnv.MAX_CONCURRENT_COMPILES || 2));
+const ARDUINO_COMPILE_JOBS = Math.max(1, Number(initialEnv.ARDUINO_COMPILE_JOBS || 1));
+const COMPILE_TIMEOUT_MS = Math.max(30000, Number(initialEnv.COMPILE_TIMEOUT_MS || 240000));
 let activeCompiles = 0;
 
 const mimeTypes = new Map([
@@ -335,6 +337,8 @@ async function compileFirmware(req, res, env) {
     await writeFile(path.join(sketchDir, `${sketchName}.ino`), sketch, "utf8");
     const args = [
       "compile",
+      "--jobs",
+      String(ARDUINO_COMPILE_JOBS),
       "--fqbn",
       fqbn,
       "--output-dir",
@@ -344,7 +348,7 @@ async function compileFirmware(req, res, env) {
     ];
     const compileResult = await execFileAsync(cliPath, args, {
       cwd: buildRoot,
-      timeout: 180000,
+      timeout: COMPILE_TIMEOUT_MS,
       maxBuffer: 24 * 1024 * 1024,
     });
     const images = await collectFirmwareImages(outputDir, sketchName);
