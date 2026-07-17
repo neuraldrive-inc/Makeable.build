@@ -5,6 +5,8 @@
 
 > **Implementation update (July 17, 2026):** Hosted ESP32 compilation is now implemented as a pinned Docker/Render service. The browser UI no longer exposes firmware source, downloads, provider settings, FQBN fields, or a local-app fallback. The service allowlists ESP32, S2, S3, C3, and C6 profiles; caps bodies, source size, time, and concurrency; deletes build workspaces; and returns merged flash images. Deepgram now uses temporary tokens and OpenAI model choice is server-owned. Physical Web Serial flashing still requires the browser's one-time native USB permission and must be verified on real target boards before a production claim.
 
+> **Deployment validation:** `makeable-api-preview.onrender.com` is live on Render Free and passed health plus a real Dockerized ESP32 compilation, returning one 4,194,304-byte merged image at address `0x0` with no compiler logs exposed. The agentic test loop found and fixed parallel-build memory pressure and a missing `python3` runtime. The successful free-tier compile took a little over three minutes, so the public site was intentionally not pointed at it. Creating the recommended always-on Starter service returned Render HTTP 402 because the workspace has no payment method. Add billing, promote the same image to Starter, rerun the live compile, then set Netlify `MAKEABLE_API_BASE_URL` before production cutover.
+
 ## Executive recommendation
 
 Use **one paid Render web service plus paid Render Postgres**, keep all provider secrets on the server, and use **Clerk Hobby** for authentication during the initial launch.
