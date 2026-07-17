@@ -8,10 +8,7 @@ ENV NODE_ENV=production \
     ARDUINO_CLI_PATH=/usr/local/bin/arduino-cli \
     ARDUINO_DIRECTORIES_DATA=/opt/arduino/data \
     ARDUINO_DIRECTORIES_DOWNLOADS=/opt/arduino/downloads \
-    ARDUINO_DIRECTORIES_USER=/opt/arduino/user \
-    ARDUINO_COMPILE_JOBS=1 \
-    MAX_CONCURRENT_COMPILES=1 \
-    COMPILE_TIMEOUT_MS=300000
+    ARDUINO_DIRECTORIES_USER=/opt/arduino/user
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
@@ -34,6 +31,10 @@ RUN apt-get update \
       "Adafruit SSD1306" \
       "ArduinoJson" \
       "PubSubClient"
+
+ENV ARDUINO_COMPILE_JOBS=1 \
+    MAX_CONCURRENT_COMPILES=1 \
+    COMPILE_TIMEOUT_MS=300000
 
 WORKDIR /app
 COPY --chown=node:node . .
