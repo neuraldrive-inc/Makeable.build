@@ -142,6 +142,36 @@ test("the injectable project store persists snapshots and image blobs through it
   assert.equal(await loadedImage.text(), "image bytes");
 });
 
+test("the project controller loads, replaces, and persists the live snapshot and images", async () => {
+  assert.equal(
+    typeof state.createProjectController,
+    "function",
+    "createProjectController should be exported",
+  );
+  const store = state.createProjectStore({ adapter: state.createMemoryAdapter() });
+  await store.saveProject(COMPLETE_PROJECT);
+  const controller = state.createProjectController({ store });
+
+  assert.equal(await controller.load("project-1"), COMPLETE_PROJECT);
+  const replacement = state.createProjectSnapshot({
+    id: "project-2",
+    idea: "A replacement project",
+    updatedAt: "2026-07-16T12:00:00.000Z",
+  });
+  await controller.replace(replacement);
+  await controller.completeRoute("/build/new", {
+    now: () => "2026-07-16T12:01:00.000Z",
+  });
+  const image = new Blob(["persisted image"], { type: "image/png" });
+  await controller.saveImage("source", image);
+
+  assert.equal(controller.current.id, "project-2");
+  assert.deepEqual(controller.current.progress.completedRoutes, ["/build/new"]);
+  assert.deepEqual(await store.loadProject("project-2"), controller.current);
+  assert.equal(await (await store.loadImage("project-2", "source")).text(), "persisted image");
+  assert.equal(await (await controller.loadImage("source")).text(), "persisted image");
+});
+
 test("legacy localStorage settings migrate to a small, secret-free Makeable record", () => {
   assert.equal(
     typeof state.createSettingsStore,
@@ -173,6 +203,61 @@ test("legacy localStorage settings migrate to a small, secret-free Makeable reco
     "makeable.settings": JSON.stringify(settings),
   });
   assert.doesNotMatch(JSON.stringify(storage.dump()), /must-not-migrate|giantProjectSnapshot/);
+});
+
+test("current settings are rewritten with bounded strings and all legacy keys are removed", () => {
+  assert.equal(
+    typeof state.createSettingsStore,
+    "function",
+    "createSettingsStore should be exported",
+  );
+  const oversized = "x".repeat(257);
+  const storage = createStorage({
+    "makeable.settings": JSON.stringify({
+      deepgramApiKey: "must-be-erased",
+      githubOwner: "  maker  ",
+      openaiModel: oversized,
+      openaiReasoningEffort: 42,
+      giantProjectSnapshot: { payload: oversized },
+    }),
+    "geckco.settings": JSON.stringify({
+      githubOwner: "legacy-owner",
+      openaiModel: "legacy-model",
+    }),
+    "circuitcodex.settings": JSON.stringify({
+      arduinoFqbn: "legacy:fqbn",
+    }),
+  });
+
+  const settings = state.createSettingsStore({ storage }).load();
+
+  assert.deepEqual(settings, { githubOwner: "maker" });
+  assert.deepEqual(storage.dump(), {
+    "makeable.settings": JSON.stringify({ githubOwner: "maker" }),
+  });
+  assert.doesNotMatch(
+    JSON.stringify(storage.dump()),
+    /must-be-erased|giantProjectSnapshot|legacy-owner|legacy-model|legacy:fqbn/,
+  );
+});
+
+test("saving settings also removes legacy keys and writes only bounded strings", () => {
+  const oversized = "x".repeat(257);
+  const storage = createStorage({
+    "geckco.settings": JSON.stringify({ deepgramApiKey: "legacy-secret" }),
+    "circuitcodex.settings": JSON.stringify({ githubOwner: "legacy-owner" }),
+  });
+
+  const settings = state.createSettingsStore({ storage }).save({
+    githubOwner: "  maker  ",
+    openaiModel: oversized,
+    deepgramApiKey: "new-secret",
+  });
+
+  assert.deepEqual(settings, { githubOwner: "maker" });
+  assert.deepEqual(storage.dump(), {
+    "makeable.settings": JSON.stringify({ githubOwner: "maker" }),
+  });
 });
 
 test("the browser adapter creates separate IndexedDB stores for projects and images", () => {

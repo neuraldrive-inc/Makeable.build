@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import netlifyHandler from "../../netlify/functions/api.mjs";
+import { grantDeepgramToken } from "../../src/makeable/server-contract.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -105,6 +106,31 @@ test("Deepgram failures return a safe error without leaking secrets or upstream 
   }
 });
 
+test("Deepgram rejects non-positive, fractional, and overlong token expiries", async () => {
+  for (const expiresIn of [-1, 0, 1.5, 61]) {
+    const result = await grantDeepgramToken(
+      "server-only-secret",
+      async () =>
+        new Response(
+          JSON.stringify({
+            access_token: "temporary-token",
+            expires_in: expiresIn,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+
+    assert.deepEqual(
+      result,
+      {
+        status: 502,
+        body: { error: "Unable to create a speech token" },
+      },
+      `expires_in=${expiresIn} should be rejected`,
+    );
+  }
+});
+
 test("local and Netlify entrypoints wire the secure token endpoint and /build SPA fallback", async () => {
   const [serverSource, netlifySource, netlifyConfig, html] = await Promise.all([
     readFile(path.join(root, "server.mjs"), "utf8"),
@@ -120,4 +146,28 @@ test("local and Netlify entrypoints wire the secure token endpoint and /build SP
   assert.match(netlifyConfig, /to\s*=\s*"\/index\.html"/);
   assert.match(html, /<base href="\/"\s*\/?>/);
   assert.match(html, /src="\.\/config\.local\.js"/);
+});
+
+test("the local server reads file-backed environment values once instead of per request", async () => {
+  const serverSource = await readFile(path.join(root, "server.mjs"), "utf8");
+
+  assert.match(serverSource, /const fileEnv\s*=\s*readEnv\(/);
+  assert.match(
+    serverSource,
+    /function getEnv\(\)\s*{\s*return\s*{\s*\.\.\.fileEnv,\s*\.\.\.process\.env\s*};\s*}/,
+  );
+  const getEnvSource = serverSource.match(/function getEnv\(\)\s*{[\s\S]*?\n}/)?.[0] || "";
+  assert.doesNotMatch(getEnvSource, /readEnv\(/);
+});
+
+test("Playwright owns the server process directly and the server closes on termination", async () => {
+  const [serverSource, playwrightSource] = await Promise.all([
+    readFile(path.join(root, "server.mjs"), "utf8"),
+    readFile(path.join(root, "playwright.config.js"), "utf8"),
+  ]);
+
+  assert.match(playwrightSource, /command:\s*"node server\.mjs"/);
+  assert.match(serverSource, /process\.once\("SIGTERM",\s*shutdown\)/);
+  assert.match(serverSource, /process\.once\("SIGINT",\s*shutdown\)/);
+  assert.match(serverSource, /server\.close\(/);
 });

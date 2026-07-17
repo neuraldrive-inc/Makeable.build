@@ -1,8 +1,13 @@
 import { APP_READY_MESSAGE, PRODUCT_NAME } from "./content.js";
 import { createRouter } from "./router.js";
-import { createProjectSnapshot, createSettingsStore } from "./state.js";
+import {
+  createIndexedDbAdapter,
+  createProjectController,
+  createProjectStore,
+  createSettingsStore,
+} from "./state.js";
 
-export function initializeShell(root = document) {
+export async function initializeShell(root = document, options = {}) {
   const heading = root.querySelector("[data-app-heading]");
   const status = root.querySelector("#appStatus");
   const skipLink = root.querySelector(".skip-link");
@@ -21,14 +26,32 @@ export function initializeShell(root = document) {
   const windowLike = root.defaultView;
   if (!windowLike) return null;
   createSettingsStore({ storage: windowLike.localStorage }).load();
-  const project = createProjectSnapshot();
+  const projectStore =
+    options.projectStore ||
+    createProjectStore({
+      adapter: createIndexedDbAdapter({ indexedDB: windowLike.indexedDB }),
+    });
+  const project = createProjectController({ store: projectStore });
+  await project.load();
   const navigation = createRouter({
     window: windowLike,
-    getProject: () => project,
+    getProject: () => project.current,
     onRoute: (route) => updateProgressRail(root, route.rail),
   });
   navigation.start();
-  return navigation;
+  const app = Object.freeze({
+    navigation,
+    getProject: () => project.current,
+    replaceProject: (snapshot) => project.replace(snapshot),
+    updateProject: (field, value, updateOptions) =>
+      project.update(field, value, updateOptions),
+    completeRoute: (path, updateOptions) => project.completeRoute(path, updateOptions),
+    saveImage: (imageId, blob) => project.saveImage(imageId, blob),
+    loadImage: (imageId) => project.loadImage(imageId),
+    deleteImage: (imageId) => project.deleteImage(imageId),
+  });
+  windowLike.MAKEABLE_APP = app;
+  return app;
 }
 
 function updateProgressRail(root, activeRail) {

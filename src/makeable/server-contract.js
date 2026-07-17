@@ -44,10 +44,14 @@ export async function grantDeepgramToken(apiKey, fetchImpl = globalThis.fetch) {
     if (!upstream.ok) return safeGrantError();
 
     const payload = await upstream.json();
+    const expiresIn = payload.expires_in;
     if (
       typeof payload.access_token !== "string" ||
       !payload.access_token ||
-      !Number.isFinite(Number(payload.expires_in))
+      typeof expiresIn !== "number" ||
+      !Number.isInteger(expiresIn) ||
+      expiresIn <= 0 ||
+      expiresIn > DEEPGRAM_TOKEN_TTL_SECONDS
     ) {
       return safeGrantError();
     }
@@ -55,7 +59,7 @@ export async function grantDeepgramToken(apiKey, fetchImpl = globalThis.fetch) {
       status: 200,
       body: {
         access_token: payload.access_token,
-        expires_in: Number(payload.expires_in),
+        expires_in: expiresIn,
       },
     };
   } catch {

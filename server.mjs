@@ -14,6 +14,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
+const fileEnv = readEnv(path.join(__dirname, ".env"));
 const initialEnv = getEnv();
 const port = Number(initialEnv.PORT || 8787);
 
@@ -99,9 +100,19 @@ const server = createServer(async (req, res) => {
 server.listen(port, () => {
   console.log(`Makeable running at http://localhost:${port}`);
 });
+process.once("SIGTERM", shutdown);
+process.once("SIGINT", shutdown);
 
 function getEnv() {
-  return { ...readEnv(path.join(__dirname, ".env")), ...process.env };
+  return { ...fileEnv, ...process.env };
+}
+
+function shutdown() {
+  server.close((error) => {
+    if (!error) return;
+    console.error(error);
+    process.exitCode = 1;
+  });
 }
 
 function readEnv(filePath) {

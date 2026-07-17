@@ -26,6 +26,45 @@ test("build routes load the SPA directly and guard unavailable progress", async 
   await expect(page).toHaveURL(/\/build\/new$/);
 });
 
+test("project and image mutations persist across a completed-screen direct reload", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect
+    .poll(() => page.evaluate(() => typeof window.MAKEABLE_APP?.completeRoute))
+    .toBe("function");
+
+  await page.evaluate(async () => {
+    for (const path of [
+      "/build/new",
+      "/build/parts/upload",
+      "/build/parts/review",
+      "/build/feasibility/ready",
+      "/build/assemble",
+      "/build/code",
+    ]) {
+      await window.MAKEABLE_APP.completeRoute(path);
+    }
+    await window.MAKEABLE_APP.saveImage(
+      "source",
+      new Blob(["persisted image"], { type: "image/png" }),
+    );
+  });
+
+  await page.goto("/build/code");
+  await expect(page).toHaveURL(/\/build\/code$/);
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.MAKEABLE_APP?.getProject().progress.completedRoutes),
+    )
+    .toContain("/build/code");
+  const image = await page.evaluate(async () => {
+    const blob = await window.MAKEABLE_APP.loadImage("source");
+    return { text: await blob.text(), type: blob.type };
+  });
+  expect(image).toEqual({ text: "persisted image", type: "image/png" });
+});
+
 test("legacy settings migrate on startup without retaining the Deepgram secret", async ({
   page,
 }) => {

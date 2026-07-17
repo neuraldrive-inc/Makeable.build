@@ -2,6 +2,7 @@ export const PROJECT_SCHEMA_VERSION = 1;
 export const PROJECT_STORE = "projects";
 export const IMAGE_STORE = "images";
 export const SETTINGS_STORAGE_KEY = "makeable.settings";
+export const SETTINGS_VALUE_MAX_LENGTH = 256;
 export const LEGACY_SETTINGS_STORAGE_KEYS = Object.freeze([
   "geckco.settings",
   "circuitcodex.settings",
@@ -187,6 +188,55 @@ export function createProjectStore({ adapter } = {}) {
   });
 }
 
+export function createProjectController({
+  store,
+  initialProject = createProjectSnapshot(),
+} = {}) {
+  if (!store) throw new TypeError("A project store is required");
+  let current = initialProject;
+
+  const controller = {
+    get current() {
+      return current;
+    },
+    async load(projectId = "current") {
+      current = (await store.loadProject(projectId)) || createProjectSnapshot({ id: projectId });
+      return current;
+    },
+    async replace(project) {
+      current = project;
+      await store.saveProject(current);
+      return current;
+    },
+    async update(field, value, options) {
+      const updated = updateProject(current, field, value, options);
+      if (updated !== current) {
+        current = updated;
+        await store.saveProject(current);
+      }
+      return current;
+    },
+    async completeRoute(path, options) {
+      const updated = markRouteCompleted(current, path, options);
+      if (updated !== current) {
+        current = updated;
+        await store.saveProject(current);
+      }
+      return current;
+    },
+    saveImage(imageId, blob) {
+      return store.saveImage(current.id, imageId, blob);
+    },
+    loadImage(imageId) {
+      return store.loadImage(current.id, imageId);
+    },
+    deleteImage(imageId) {
+      return store.deleteImage(current.id, imageId);
+    },
+  };
+  return Object.freeze(controller);
+}
+
 export function createMemoryAdapter() {
   const stores = new Map([
     [PROJECT_STORE, new Map()],
@@ -255,21 +305,22 @@ export function createSettingsStore({ storage = globalThis.localStorage } = {}) 
   return Object.freeze({
     load() {
       const current = readStoredSettings(storage, SETTINGS_STORAGE_KEY);
-      if (current) return sanitizeSettings(current);
-
-      for (const legacyKey of LEGACY_SETTINGS_STORAGE_KEYS) {
-        const legacy = readStoredSettings(storage, legacyKey);
-        if (!legacy) continue;
-        const migrated = sanitizeSettings(legacy);
-        storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(migrated));
-        for (const key of LEGACY_SETTINGS_STORAGE_KEYS) storage.removeItem(key);
-        return migrated;
+      let source = current;
+      if (!source) {
+        for (const legacyKey of LEGACY_SETTINGS_STORAGE_KEYS) {
+          source = readStoredSettings(storage, legacyKey);
+          if (source) break;
+        }
       }
-      return {};
+      const sanitized = sanitizeSettings(source || {});
+      storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(sanitized));
+      for (const key of LEGACY_SETTINGS_STORAGE_KEYS) storage.removeItem(key);
+      return sanitized;
     },
     save(settings) {
       const sanitized = sanitizeSettings(settings);
       storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(sanitized));
+      for (const key of LEGACY_SETTINGS_STORAGE_KEYS) storage.removeItem(key);
       return sanitized;
     },
     clear() {
@@ -293,12 +344,14 @@ function valuesEqual(left, right) {
 }
 
 function sanitizeSettings(settings) {
-  return Object.fromEntries(
-    SETTINGS_FIELDS.filter((field) => settings[field] !== undefined).map((field) => [
-      field,
-      settings[field],
-    ]),
-  );
+  const sanitized = {};
+  for (const field of SETTINGS_FIELDS) {
+    if (typeof settings[field] !== "string") continue;
+    const value = settings[field].trim();
+    if (!value || value.length > SETTINGS_VALUE_MAX_LENGTH) continue;
+    sanitized[field] = value;
+  }
+  return sanitized;
 }
 
 function readStoredSettings(storage, key) {
