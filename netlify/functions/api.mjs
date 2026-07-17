@@ -1,7 +1,12 @@
 import {
   createPublicConfig,
   createPublicConfigScript,
+  GITHUB_MAX_REQUEST_BYTES,
   grantDeepgramToken,
+  safeGitHubRepositoryMetadata,
+  validateGitHubLookupRequest,
+  validateGitHubRepositoryRequest,
+  validateGitHubUploadRequest,
 } from "../../src/makeable/server-contract.js";
 
 export default async function handler(req) {
@@ -59,6 +64,10 @@ export default async function handler(req) {
       return createGitHubRepo(req, env);
     }
 
+    if (url.pathname === "/api/github/repository" && req.method === "GET") {
+      return getGitHubRepository(url, env);
+    }
+
     if (url.pathname === "/api/github/upload-file" && req.method === "POST") {
       return uploadGitHubFile(req, env);
     }
@@ -77,7 +86,19 @@ export default async function handler(req) {
     return jsonResponse({ error: "Not found" }, 404);
   } catch (error) {
     console.error(error);
-    return jsonResponse({ error: String(error.message || error) }, 500);
+    const status =
+      Number.isInteger(error?.status) && error.status >= 400 && error.status < 600
+        ? error.status
+        : 500;
+    return jsonResponse(
+      {
+        error:
+          status === 500
+            ? "The Makeable server could not complete the request."
+            : String(error.message || error),
+      },
+      status,
+    );
   }
 }
 
@@ -233,55 +254,111 @@ async function createGitHubRepo(req, env) {
   if (!env.GITHUB_TOKEN) {
     return jsonResponse({ error: "GITHUB_TOKEN is missing in Netlify environment variables" }, 401);
   }
-  const body = await req.json();
+  const body = await readLimitedJsonRequest(req, GITHUB_MAX_REQUEST_BYTES);
+  const validation = validateGitHubRepositoryRequest(body, env.GITHUB_OWNER);
+  if (!validation.ok) {
+    return jsonResponse({ error: validation.error }, validation.status);
+  }
+  const repository = validation.value;
   const upstream = await fetch("https://api.github.com/user/repos", {
     method: "POST",
     headers: githubHeaders(env),
     body: JSON.stringify({
-      name: body.name,
-      description: body.description || "Hardware project built with Makeable",
-      private: Boolean(body.private),
+      name: repository.name,
+      description: repository.description,
+      private: repository.private,
       auto_init: false,
     }),
   });
   return pipeJson(upstream);
 }
 
+async function getGitHubRepository(url, env) {
+  if (!env.GITHUB_TOKEN) {
+    return jsonResponse(
+      { error: "GITHUB_TOKEN is missing in Netlify environment variables" },
+      401,
+    );
+  }
+  const validation = validateGitHubLookupRequest(
+    url.searchParams.get("repo"),
+    env.GITHUB_OWNER,
+  );
+  if (!validation.ok) {
+    return jsonResponse({ error: validation.error }, validation.status);
+  }
+  const { owner, repo } = validation.value;
+  const upstream = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+      repo,
+    )}`,
+    { headers: githubHeaders(env) },
+  );
+  if (!upstream.ok) {
+    return jsonResponse(
+      {
+        error:
+          upstream.status === 404
+            ? "Repository was not verified."
+            : "GitHub could not verify the repository.",
+      },
+      upstream.status === 404 ? 404 : 502,
+    );
+  }
+  const metadata = safeGitHubRepositoryMetadata(
+    await upstream.json(),
+    owner,
+    repo,
+  );
+  return metadata
+    ? jsonResponse(metadata)
+    : jsonResponse({ error: "Repository was not verified." }, 404);
+}
+
 async function uploadGitHubFile(req, env) {
   if (!env.GITHUB_TOKEN) {
     return jsonResponse({ error: "GITHUB_TOKEN is missing in Netlify environment variables" }, 401);
   }
-  const body = await req.json();
-  const owner = body.owner || env.GITHUB_OWNER;
-  const repo = body.repo;
-  const filePath = body.path;
-  if (!owner || !repo || !filePath) {
-    return jsonResponse({ error: "owner, repo, and path are required" }, 400);
+  const body = await readLimitedJsonRequest(req, GITHUB_MAX_REQUEST_BYTES);
+  const validation = validateGitHubUploadRequest(body, env.GITHUB_OWNER);
+  if (!validation.ok) {
+    return jsonResponse({ error: validation.error }, validation.status);
   }
+  const {
+    owner,
+    repo,
+    path: filePath,
+    content,
+  } = validation.value;
 
   const encodedPath = filePath.split("/").map(encodeURIComponent).join("/");
-  const branchQuery = body.branch ? `?ref=${encodeURIComponent(body.branch)}` : "";
   let sha;
   const existing = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}${branchQuery}`,
+    `https://api.github.com/repos/${encodeURIComponent(
+      owner,
+    )}/${encodeURIComponent(repo)}/contents/${encodedPath}`,
     { headers: githubHeaders(env) },
   );
   if (existing.ok) {
     const existingJson = await existing.json();
+    if (typeof existingJson.sha !== "string" || !existingJson.sha) {
+      return jsonResponse({ error: "GitHub returned invalid file metadata." }, 502);
+    }
     sha = existingJson.sha;
   } else if (existing.status !== 404) {
     return pipeJson(existing);
   }
 
   const payload = {
-    message: body.message || `Update ${filePath}`,
-    content: Buffer.from(body.content || "", "utf8").toString("base64"),
-    ...(body.branch ? { branch: body.branch } : {}),
+    message: `Update ${filePath} from Makeable`,
+    content: Buffer.from(content, "utf8").toString("base64"),
     ...(sha ? { sha } : {}),
   };
 
   const upstream = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`,
+    `https://api.github.com/repos/${encodeURIComponent(
+      owner,
+    )}/${encodeURIComponent(repo)}/contents/${encodedPath}`,
     {
       method: "PUT",
       headers: githubHeaders(env),
@@ -298,6 +375,31 @@ function githubHeaders(env) {
     "Content-Type": "application/json",
     "X-GitHub-Api-Version": "2022-11-28",
   };
+}
+
+async function readLimitedJsonRequest(req, maxBytes) {
+  const advertisedLength = Number(req.headers.get("content-length"));
+  if (
+    Number.isFinite(advertisedLength) &&
+    advertisedLength > maxBytes
+  ) {
+    throw requestError("Request body is too large.", 413);
+  }
+  const raw = await req.text();
+  if (new TextEncoder().encode(raw).byteLength > maxBytes) {
+    throw requestError("Request body is too large.", 413);
+  }
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    throw requestError("Request body must be valid JSON.", 400);
+  }
+}
+
+function requestError(message, status) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
 }
 
 async function pipeJson(upstream) {

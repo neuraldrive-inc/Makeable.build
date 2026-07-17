@@ -2637,7 +2637,7 @@ body {
 
 .visibility-options label {
   position: relative;
-  min-height: 38px;
+  min-height: 44px;
   cursor: pointer;
 }
 
@@ -2653,7 +2653,7 @@ body {
 
 .visibility-options span {
   display: flex;
-  min-height: 38px;
+  min-height: 44px;
   align-items: center;
   gap: 7px;
   padding: 7px 9px 7px 38px;
@@ -3056,6 +3056,11 @@ body {
 }
 
 @media (max-width: 900px) {
+  .app-main {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
   .progress-step.is-complete .progress-complete {
     top: -8px;
     right: -8px;
@@ -3073,11 +3078,21 @@ body {
 
   .publish-package,
   .success-package {
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.72fr);
+    grid-template-columns: 1fr;
+  }
+
+  .publish-form {
+    padding-right: 0;
+    border-right: 0;
+  }
+
+  .publish-preview {
+    order: -1;
   }
 
   .success-project-photo {
-    height: 410px;
+    height: auto;
+    aspect-ratio: 4 / 3;
   }
 }
 

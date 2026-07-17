@@ -46,12 +46,22 @@ const PROJECT = {
       status: "pass",
       checks: [
         { id: "board", name: "Board responds", status: "pass", detail: "OK" },
+        {
+          id: "sensor",
+          name: "Sensor evidence",
+          status: "uncertain",
+          detail: "No stable reading",
+        },
       ],
     },
     manual: {
       acknowledged: true,
-      action: "Lift the sensor out of the soil.",
-      evaluation: { status: "pass", observations: ["Water reached the plant."] },
+      requestedAction: "Lift the sensor out of the soil.",
+      action: "Legacy action that must not win.",
+      evaluation: {
+        status: "needs_attention",
+        observations: ["Water reached the plant slowly."],
+      },
     },
   },
 };
@@ -84,9 +94,13 @@ test("artifact generation produces the five visible, identical publish/export fi
   assert.match(artifacts[0].content, /Built with Makeable/);
   assert.equal(artifacts[2].content, PROJECT.firmware.sketch);
   assert.match(artifacts[4].content, /Board responds.*Pass/is);
+  assert.match(artifacts[4].content, /Sensor evidence.*Uncertain/is);
+  assert.match(artifacts[4].content, /Lift the sensor out of the soil/);
+  assert.doesNotMatch(artifacts[4].content, /Legacy action that must not win/);
+  assert.match(artifacts[4].content, /Needs attention/);
 });
 
-test("GitHub publishing recovers an existing repository and uploads each artifact", async () => {
+test("GitHub publishing verifies an existing repository before upload and uses its actual visibility", async () => {
   const requests = [];
   const artifacts = createProjectArtifacts(PROJECT);
   const result = await publishProjectArtifacts({
@@ -97,25 +111,152 @@ test("GitHub publishing recovers an existing repository and uploads each artifac
     fetchImpl: async (url, options) => {
       requests.push({
         url,
-        body: JSON.parse(options.body),
+        body: options?.body ? JSON.parse(options.body) : null,
       });
       if (url === "/api/github/repos") {
         return response({ message: "name already exists" }, 422);
+      }
+      if (
+        url ===
+        "/api/github/repository?repo=self-watering-plant"
+      ) {
+        return response({
+          owner: "ray-builds",
+          name: "self-watering-plant",
+          html_url: "https://github.com/ray-builds/self-watering-plant",
+          private: true,
+        });
       }
       return response({ content: { sha: `sha-${requests.length}` } });
     },
   });
 
   assert.equal(result.repositoryUrl, "https://github.com/ray-builds/self-watering-plant");
+  assert.equal(result.visibility, "private");
   assert.equal(result.recoveredExisting, true);
-  assert.equal(requests.length, 1 + artifacts.length);
+  assert.equal(requests.length, 2 + artifacts.length);
   assert.deepEqual(
-    requests.slice(1).map(({ body }) => body.path),
+    requests.slice(2).map(({ body }) => body.path),
     artifacts.map(({ path }) => path),
   );
   assert.deepEqual(
-    requests.slice(1).map(({ body }) => body.content),
+    requests.slice(2).map(({ body }) => body.content),
     artifacts.map(({ content }) => content),
+  );
+});
+
+test("an arbitrary GitHub 422 never becomes existing-repository recovery", async () => {
+  const calls = [];
+  await assert.rejects(
+    publishProjectArtifacts({
+      project: PROJECT,
+      repositoryName: "self-watering-plant",
+      configuredOwner: "ray-builds",
+      fetchImpl: async (url) => {
+        calls.push(url);
+        if (url === "/api/github/repos") {
+          return response({ message: "Validation Failed" }, 422);
+        }
+        return response({ error: "Repository was not verified" }, 404);
+      },
+    }),
+    /not verified/i,
+  );
+  assert.deepEqual(calls, [
+    "/api/github/repos",
+    "/api/github/repository?repo=self-watering-plant",
+  ]);
+});
+
+test("GitHub create and upload failures are surfaced without claiming success", async () => {
+  await assert.rejects(
+    publishProjectArtifacts({
+      project: PROJECT,
+      repositoryName: "self-watering-plant",
+      configuredOwner: "ray-builds",
+      fetchImpl: async () => response({ message: "Forbidden" }, 403),
+    }),
+    /Forbidden/,
+  );
+
+  let uploads = 0;
+  await assert.rejects(
+    publishProjectArtifacts({
+      project: PROJECT,
+      repositoryName: "self-watering-plant",
+      configuredOwner: "ray-builds",
+      fetchImpl: async (url) => {
+        if (url === "/api/github/repos") {
+          return response({
+            owner: { login: "ray-builds" },
+            name: "self-watering-plant",
+            html_url: "https://github.com/ray-builds/self-watering-plant",
+            private: false,
+          });
+        }
+        uploads += 1;
+        return uploads === 3
+          ? response({ message: "Upload failed" }, 502)
+          : response({ content: { sha: `sha-${uploads}` } });
+      },
+    }),
+    /Upload failed/,
+  );
+  assert.equal(uploads, 3);
+});
+
+test("retry after a partial upload verifies the existing repo and safely re-uploads all artifacts", async () => {
+  const artifacts = createProjectArtifacts(PROJECT);
+  let attempt = 0;
+  const uploadedPaths = [];
+  const fetchImpl = async (url, options) => {
+    if (url === "/api/github/repos") {
+      attempt += 1;
+      return attempt === 1
+        ? response({
+            owner: { login: "ray-builds" },
+            name: "self-watering-plant",
+            html_url: "https://github.com/ray-builds/self-watering-plant",
+            private: false,
+          })
+        : response({ message: "already exists" }, 422);
+    }
+    if (url.startsWith("/api/github/repository?")) {
+      return response({
+        owner: "ray-builds",
+        name: "self-watering-plant",
+        html_url: "https://github.com/ray-builds/self-watering-plant",
+        private: false,
+      });
+    }
+    const path = JSON.parse(options.body).path;
+    uploadedPaths.push([attempt, path]);
+    if (attempt === 1 && path === "code/makeable.ino") {
+      return response({ message: "temporary failure" }, 503);
+    }
+    return response({ content: { sha: `${attempt}-${path}` } });
+  };
+
+  await assert.rejects(
+    publishProjectArtifacts({
+      project: PROJECT,
+      repositoryName: "self-watering-plant",
+      configuredOwner: "ray-builds",
+      fetchImpl,
+    }),
+    /temporary failure/,
+  );
+  const result = await publishProjectArtifacts({
+    project: PROJECT,
+    repositoryName: "self-watering-plant",
+    configuredOwner: "ray-builds",
+    fetchImpl,
+  });
+
+  assert.equal(result.recoveredExisting, true);
+  assert.deepEqual(
+    uploadedPaths.filter(([uploadAttempt]) => uploadAttempt === 2).map(([, path]) => path),
+    artifacts.map(({ path }) => path),
   );
 });
 
@@ -171,6 +312,27 @@ test("project sharing uses Web Share and falls back to the clipboard", async () 
   assert.deepEqual(copied, [
     "https://github.com/ray-builds/self-watering-plant",
   ]);
+});
+
+test("cancelling the native share sheet does not copy without consent", async () => {
+  const copied = [];
+  const result = await sharePublishedProject({
+    repositoryUrl: "https://github.com/ray-builds/self-watering-plant",
+    title: "Self-Watering Plant",
+    navigatorLike: {
+      async share() {
+        throw new DOMException("Share cancelled", "AbortError");
+      },
+      clipboard: {
+        async writeText(value) {
+          copied.push(value);
+        },
+      },
+    },
+  });
+
+  assert.equal(result, "cancelled");
+  assert.deepEqual(copied, []);
 });
 
 function response(body, status = 200) {

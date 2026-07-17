@@ -9,7 +9,12 @@ import { promisify } from "node:util";
 import {
   createPublicConfig,
   createPublicConfigScript,
+  GITHUB_MAX_REQUEST_BYTES,
   grantDeepgramToken,
+  safeGitHubRepositoryMetadata,
+  validateGitHubLookupRequest,
+  validateGitHubRepositoryRequest,
+  validateGitHubUploadRequest,
 } from "./src/makeable/server-contract.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -76,6 +81,10 @@ const server = createServer(async (req, res) => {
       return createGitHubRepo(req, res, env);
     }
 
+    if (url.pathname === "/api/github/repository" && req.method === "GET") {
+      return getGitHubRepository(url, res, env);
+    }
+
     if (url.pathname === "/api/github/upload-file" && req.method === "POST") {
       return uploadGitHubFile(req, res, env);
     }
@@ -93,7 +102,20 @@ const server = createServer(async (req, res) => {
     return serveStatic(url.pathname, res);
   } catch (error) {
     console.error(error);
-    return sendJson(res, { error: String(error.message || error) }, 500);
+    const status =
+      Number.isInteger(error?.status) && error.status >= 400 && error.status < 600
+        ? error.status
+        : 500;
+    return sendJson(
+      res,
+      {
+        error:
+          status === 500
+            ? "The Makeable server could not complete the request."
+            : String(error.message || error),
+      },
+      status,
+    );
   }
 });
 
@@ -415,55 +437,110 @@ async function createGitHubRepo(req, res, env) {
   if (!env.GITHUB_TOKEN) {
     return sendJson(res, { error: "GITHUB_TOKEN is missing in .env" }, 401);
   }
-  const body = await readJsonBody(req);
+  const body = await readJsonBody(req, GITHUB_MAX_REQUEST_BYTES);
+  const validation = validateGitHubRepositoryRequest(body, env.GITHUB_OWNER);
+  if (!validation.ok) {
+    return sendJson(res, { error: validation.error }, validation.status);
+  }
+  const repository = validation.value;
   const upstream = await fetch("https://api.github.com/user/repos", {
     method: "POST",
     headers: githubHeaders(env),
     body: JSON.stringify({
-      name: body.name,
-      description: body.description || "Hardware project built with Makeable",
-      private: Boolean(body.private),
+      name: repository.name,
+      description: repository.description,
+      private: repository.private,
       auto_init: false,
     }),
   });
   return pipeJson(upstream, res);
 }
 
+async function getGitHubRepository(url, res, env) {
+  if (!env.GITHUB_TOKEN) {
+    return sendJson(res, { error: "GITHUB_TOKEN is missing in .env" }, 401);
+  }
+  const validation = validateGitHubLookupRequest(
+    url.searchParams.get("repo"),
+    env.GITHUB_OWNER,
+  );
+  if (!validation.ok) {
+    return sendJson(res, { error: validation.error }, validation.status);
+  }
+  const { owner, repo } = validation.value;
+  const upstream = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+      repo,
+    )}`,
+    { headers: githubHeaders(env) },
+  );
+  if (!upstream.ok) {
+    return sendJson(
+      res,
+      {
+        error:
+          upstream.status === 404
+            ? "Repository was not verified."
+            : "GitHub could not verify the repository.",
+      },
+      upstream.status === 404 ? 404 : 502,
+    );
+  }
+  const metadata = safeGitHubRepositoryMetadata(
+    await upstream.json(),
+    owner,
+    repo,
+  );
+  if (!metadata) {
+    return sendJson(res, { error: "Repository was not verified." }, 404);
+  }
+  return sendJson(res, metadata);
+}
+
 async function uploadGitHubFile(req, res, env) {
   if (!env.GITHUB_TOKEN) {
     return sendJson(res, { error: "GITHUB_TOKEN is missing in .env" }, 401);
   }
-  const body = await readJsonBody(req);
-  const owner = body.owner || env.GITHUB_OWNER;
-  const repo = body.repo;
-  const filePath = body.path;
-  if (!owner || !repo || !filePath) {
-    return sendJson(res, { error: "owner, repo, and path are required" }, 400);
+  const body = await readJsonBody(req, GITHUB_MAX_REQUEST_BYTES);
+  const validation = validateGitHubUploadRequest(body, env.GITHUB_OWNER);
+  if (!validation.ok) {
+    return sendJson(res, { error: validation.error }, validation.status);
   }
+  const {
+    owner,
+    repo,
+    path: filePath,
+    content,
+  } = validation.value;
 
   const encodedPath = filePath.split("/").map(encodeURIComponent).join("/");
-  const branchQuery = body.branch ? `?ref=${encodeURIComponent(body.branch)}` : "";
   let sha;
   const existing = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}${branchQuery}`,
+    `https://api.github.com/repos/${encodeURIComponent(
+      owner,
+    )}/${encodeURIComponent(repo)}/contents/${encodedPath}`,
     { headers: githubHeaders(env) },
   );
   if (existing.ok) {
     const existingJson = await existing.json();
+    if (typeof existingJson.sha !== "string" || !existingJson.sha) {
+      return sendJson(res, { error: "GitHub returned invalid file metadata." }, 502);
+    }
     sha = existingJson.sha;
   } else if (existing.status !== 404) {
     return pipeJson(existing, res);
   }
 
   const payload = {
-    message: body.message || `Update ${filePath}`,
-    content: Buffer.from(body.content || "", "utf8").toString("base64"),
-    ...(body.branch ? { branch: body.branch } : {}),
+    message: `Update ${filePath} from Makeable`,
+    content: Buffer.from(content, "utf8").toString("base64"),
     ...(sha ? { sha } : {}),
   };
 
   const upstream = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`,
+    `https://api.github.com/repos/${encodeURIComponent(
+      owner,
+    )}/${encodeURIComponent(repo)}/contents/${encodedPath}`,
     {
       method: "PUT",
       headers: githubHeaders(env),
@@ -490,11 +567,33 @@ async function pipeJson(upstream, res) {
   res.end(text);
 }
 
-async function readJsonBody(req) {
+async function readJsonBody(req, maxBytes = 4 * 1024 * 1024) {
+  const advertisedLength = Number(req.headers["content-length"]);
+  if (
+    Number.isFinite(advertisedLength) &&
+    advertisedLength > maxBytes
+  ) {
+    throw requestError("Request body is too large.", 413);
+  }
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > maxBytes) throw requestError("Request body is too large.", 413);
+    chunks.push(chunk);
+  }
   const raw = Buffer.concat(chunks).toString("utf8");
-  return raw ? JSON.parse(raw) : {};
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    throw requestError("Request body must be valid JSON.", 400);
+  }
+}
+
+function requestError(message, status) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
 }
 
 function sendJson(res, data, status = 200, headers = {}) {

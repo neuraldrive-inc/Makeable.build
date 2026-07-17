@@ -1115,7 +1115,12 @@ function renderPublish(context, route) {
 
         <div class="publish-preview">
           <div class="publish-photo-frame">
-            <img data-source-photo alt="Your finished Makeable project" />
+            <img
+              data-source-photo
+              alt="Your finished Makeable project"
+              width="640"
+              height="480"
+            />
           </div>
           <h2>${escapeHtml(title)}</h2>
           <span>Tested &amp; working</span>
@@ -1243,7 +1248,12 @@ function renderPublishSuccess(context) {
 
       <section class="paper-panel success-package">
         <div class="success-project-photo">
-          <img data-source-photo alt="Your published Makeable project" />
+          <img
+            data-source-photo
+            alt="Your published Makeable project"
+            width="640"
+            height="480"
+          />
           <span>Built with <strong>Makeable</strong></span>
         </div>
 
@@ -1300,7 +1310,11 @@ function renderPublishSuccess(context) {
         navigatorLike: context.window.navigator,
       });
       status.textContent =
-        mode === "shared" ? "Share sheet opened." : "Repository link copied.";
+        mode === "shared"
+          ? "Share sheet opened."
+          : mode === "cancelled"
+            ? "Sharing cancelled."
+            : "Repository link copied.";
     } catch (error) {
       status.textContent = error.message;
     }

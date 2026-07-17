@@ -403,7 +403,10 @@ ${automaticChecks.length
 
 ## Real-world check
 
-- Action: ${cleanText(manual.action, "Not recorded")}
+- Action: ${cleanText(
+    manual.requestedAction,
+    cleanText(manual.action, "Not recorded"),
+  )}
 - Result: ${manual.acknowledged ? "Acknowledged" : "Not confirmed"}
 - Evaluation: ${resultLabel(manual.evaluation?.status)}
 ${array(manual.evaluation?.observations)
@@ -434,8 +437,13 @@ export async function publishProjectArtifacts({
   const validation = validateRepositoryName(repositoryName);
   if (!validation.valid) throw new Error(validation.message);
   const artifacts = createProjectArtifacts(project);
-  let owner = String(configuredOwner || "").trim();
-  let repositoryUrl = "";
+  const configured = String(configuredOwner || "").trim();
+  if (!configured) {
+    throw new Error(
+      "Set GITHUB_OWNER on the Makeable server before publishing.",
+    );
+  }
+  let repository;
   let recoveredExisting = false;
 
   const createResponse = await fetchImpl("/api/github/repos", {
@@ -452,9 +460,39 @@ export async function publishProjectArtifacts({
   });
   const created = await safeResponseJson(createResponse);
   if (createResponse.ok) {
-    owner = cleanText(created.owner?.login, owner);
-    repositoryUrl = cleanText(created.html_url, "");
-  } else if (createResponse.status === 422 && owner) {
+    repository = verifiedRepositoryMetadata(
+      created,
+      configured,
+      validation.value,
+    );
+    if (!repository) {
+      throw new Error("GitHub returned repository details that could not be verified.");
+    }
+  } else if (createResponse.status === 422) {
+    const lookupResponse = await fetchImpl(
+      `/api/github/repository?repo=${encodeURIComponent(validation.value)}`,
+      {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      },
+    );
+    const existing = await safeResponseJson(lookupResponse);
+    if (!lookupResponse.ok) {
+      throw new Error(
+        cleanText(
+          existing.error || existing.message,
+          "The existing repository was not verified.",
+        ),
+      );
+    }
+    repository = verifiedRepositoryMetadata(
+      existing,
+      configured,
+      validation.value,
+    );
+    if (!repository) {
+      throw new Error("The existing repository was not verified.");
+    }
     recoveredExisting = true;
   } else {
     throw new Error(
@@ -464,18 +502,13 @@ export async function publishProjectArtifacts({
       ),
     );
   }
-  if (!owner) {
-    throw new Error(
-      "Set GITHUB_OWNER on the Makeable server before publishing.",
-    );
-  }
 
   for (const artifact of artifacts) {
     const uploadResponse = await fetchImpl("/api/github/upload-file", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        owner,
+        owner: repository.owner,
         repo: validation.value,
         path: artifact.path,
         content: artifact.content,
@@ -494,14 +527,10 @@ export async function publishProjectArtifacts({
   }
 
   return {
-    owner,
+    owner: repository.owner,
     repositoryName: validation.value,
-    repositoryUrl:
-      repositoryUrl ||
-      `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(
-        validation.value,
-      )}`,
-    visibility: isPrivate ? "private" : "public",
+    repositoryUrl: repository.html_url,
+    visibility: repository.private ? "private" : "public",
     recoveredExisting,
     uploadedPaths: artifacts.map(({ path }) => path),
   };
@@ -577,7 +606,8 @@ export async function sharePublishedProject({
         url: repositoryUrl,
       });
       return "shared";
-    } catch {
+    } catch (error) {
+      if (error?.name === "AbortError") return "cancelled";
       // A denied or unavailable share sheet falls through to clipboard.
     }
   }
@@ -1709,9 +1739,34 @@ function markdownCell(value) {
 
 function resultLabel(status) {
   if (status === "pass") return "Pass";
+  if (status === "needs_attention") return "Needs attention";
   if (status === "fail") return "Needs attention";
+  if (status === "uncertain") return "Uncertain";
   if (status === "stopped") return "Stopped";
   return "Not run";
+}
+
+function verifiedRepositoryMetadata(raw, configuredOwner, expectedName) {
+  const owner =
+    typeof raw?.owner === "string"
+      ? raw.owner
+      : typeof raw?.owner?.login === "string"
+        ? raw.owner.login
+        : "";
+  const name = typeof raw?.name === "string" ? raw.name.trim() : "";
+  if (
+    owner.toLowerCase() !== String(configuredOwner).toLowerCase() ||
+    name.toLowerCase() !== String(expectedName).toLowerCase() ||
+    typeof raw?.private !== "boolean"
+  ) {
+    return null;
+  }
+  return {
+    owner,
+    name,
+    private: raw.private,
+    html_url: `https://github.com/${owner}/${name}`,
+  };
 }
 
 async function safeResponseJson(response) {

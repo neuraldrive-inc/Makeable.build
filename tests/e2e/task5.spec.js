@@ -106,7 +106,9 @@ test.beforeEach(async ({ page }) => {
       contentType: "application/json",
       body: JSON.stringify({
         owner: { login: "ray-builds" },
+        name: "self-watering-plant",
         html_url: "https://github.com/ray-builds/self-watering-plant",
+        private: true,
       }),
     }),
   );
@@ -207,6 +209,31 @@ test("Publish and Success are accessible and contained at desktop, tablet, and m
     expect(widths.scroll, `${path} horizontal overflow`).toBeLessThanOrEqual(
       widths.client,
     );
+    if (path.endsWith("/connect")) {
+      for (const label of await page.locator(".visibility-options label").all()) {
+        const box = await label.boundingBox();
+        expect(box.height, "visibility choice touch height").toBeGreaterThanOrEqual(
+          44,
+        );
+      }
+    }
+    const viewport = page.viewportSize();
+    if (viewport.width <= 834) {
+      const layout = await page
+        .locator(path.endsWith("/connect") ? ".publish-package" : ".success-package")
+        .evaluate((element) => {
+          const styles = getComputedStyle(element);
+          const box = element.getBoundingClientRect();
+          return {
+            columns: styles.gridTemplateColumns.split(" ").filter(Boolean).length,
+            left: Math.round(box.left),
+            right: Math.round(innerWidth - box.right),
+          };
+        });
+      expect(layout.columns, `${path} must stack at ${viewport.width}px`).toBe(1);
+      expect(layout.left, `${path} left gutter`).toBe(20);
+      expect(layout.right, `${path} right gutter`).toBe(20);
+    }
   }
 });
 

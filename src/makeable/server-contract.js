@@ -1,5 +1,14 @@
 export const DEEPGRAM_GRANT_URL = "https://api.deepgram.com/v1/auth/grant";
 export const DEEPGRAM_TOKEN_TTL_SECONDS = 60;
+export const GITHUB_ARTIFACT_PATHS = Object.freeze([
+  "README.md",
+  "build-guide/README.md",
+  "code/makeable.ino",
+  "parts-list/README.md",
+  "test-results/README.md",
+]);
+export const GITHUB_MAX_CONTENT_BYTES = 1024 * 1024;
+export const GITHUB_MAX_REQUEST_BYTES = GITHUB_MAX_CONTENT_BYTES + 32 * 1024;
 
 export function createPublicConfig(env, extras = {}) {
   return {
@@ -65,6 +74,171 @@ export async function grantDeepgramToken(apiKey, fetchImpl = globalThis.fetch) {
   } catch {
     return safeGrantError();
   }
+}
+
+export function validateGitHubRepositoryRequest(body, configuredOwner) {
+  const owner = validateGitHubOwner(configuredOwner);
+  if (!owner) return invalidGitHubRequest("GITHUB_OWNER is not configured.", 503);
+  if (!isPlainObject(body)) {
+    return invalidGitHubRequest("A JSON object is required.");
+  }
+  const unexpected = unexpectedKeys(body, ["name", "description", "private"]);
+  if (unexpected.length) {
+    return invalidGitHubRequest(`Unsupported field: ${unexpected[0]}.`);
+  }
+  const repo = validateGitHubRepositoryName(body.name);
+  if (!repo) return invalidGitHubRequest("Invalid repository name.");
+  if (typeof body.private !== "boolean") {
+    return invalidGitHubRequest("Repository visibility must be a boolean.");
+  }
+  if (
+    body.description !== undefined &&
+    (typeof body.description !== "string" ||
+      byteLength(body.description) > 240)
+  ) {
+    return invalidGitHubRequest("Repository description is invalid.");
+  }
+  return {
+    ok: true,
+    value: {
+      owner,
+      name: repo,
+      description:
+        String(body.description || "").trim() ||
+        "Hardware project built with Makeable",
+      private: body.private,
+    },
+  };
+}
+
+export function validateGitHubUploadRequest(body, configuredOwner) {
+  const owner = validateGitHubOwner(configuredOwner);
+  if (!owner) return invalidGitHubRequest("GITHUB_OWNER is not configured.", 503);
+  if (!isPlainObject(body)) {
+    return invalidGitHubRequest("A JSON object is required.");
+  }
+  const unexpected = unexpectedKeys(body, [
+    "owner",
+    "repo",
+    "path",
+    "content",
+    "message",
+  ]);
+  if (unexpected.length) {
+    return invalidGitHubRequest(`Unsupported field: ${unexpected[0]}.`);
+  }
+  if (
+    body.owner !== undefined &&
+    (typeof body.owner !== "string" ||
+      body.owner.toLowerCase() !== owner.toLowerCase())
+  ) {
+    return invalidGitHubRequest("The repository owner is not allowed.");
+  }
+  const repo = validateGitHubRepositoryName(body.repo);
+  if (!repo) return invalidGitHubRequest("Invalid repository name.");
+  if (
+    typeof body.path !== "string" ||
+    !GITHUB_ARTIFACT_PATHS.includes(body.path)
+  ) {
+    return invalidGitHubRequest("The artifact path is not allowed.");
+  }
+  if (
+    typeof body.content !== "string" ||
+    byteLength(body.content) > GITHUB_MAX_CONTENT_BYTES
+  ) {
+    return invalidGitHubRequest("The artifact content is invalid or too large.");
+  }
+  if (
+    body.message !== undefined &&
+    (typeof body.message !== "string" || byteLength(body.message) > 240)
+  ) {
+    return invalidGitHubRequest("The commit message is invalid.");
+  }
+  return {
+    ok: true,
+    value: {
+      owner,
+      repo,
+      path: body.path,
+      content: body.content,
+    },
+  };
+}
+
+export function validateGitHubLookupRequest(repoName, configuredOwner) {
+  const owner = validateGitHubOwner(configuredOwner);
+  if (!owner) return invalidGitHubRequest("GITHUB_OWNER is not configured.", 503);
+  const repo = validateGitHubRepositoryName(repoName);
+  if (!repo) return invalidGitHubRequest("Invalid repository name.");
+  return { ok: true, value: { owner, repo } };
+}
+
+export function safeGitHubRepositoryMetadata(
+  raw,
+  configuredOwner,
+  expectedRepo,
+) {
+  const owner = validateGitHubOwner(configuredOwner);
+  const repo = validateGitHubRepositoryName(expectedRepo);
+  const upstreamOwner = validateGitHubOwner(raw?.owner?.login);
+  const upstreamName = validateGitHubRepositoryName(raw?.name);
+  if (
+    !owner ||
+    !repo ||
+    !upstreamOwner ||
+    !upstreamName ||
+    owner.toLowerCase() !== upstreamOwner.toLowerCase() ||
+    repo.toLowerCase() !== upstreamName.toLowerCase() ||
+    typeof raw?.private !== "boolean"
+  ) {
+    return null;
+  }
+  return {
+    owner,
+    name: upstreamName,
+    html_url: `https://github.com/${owner}/${upstreamName}`,
+    private: raw.private,
+  };
+}
+
+function validateGitHubOwner(value) {
+  const owner = String(value || "").trim();
+  return /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(owner) &&
+    !owner.endsWith("-") &&
+    !owner.includes("--")
+    ? owner
+    : "";
+}
+
+function validateGitHubRepositoryName(value) {
+  const repo = String(value || "").trim();
+  return repo.length <= 100 &&
+    /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$/.test(repo) &&
+    !repo.includes("..")
+    ? repo
+    : "";
+}
+
+function invalidGitHubRequest(error, status = 400) {
+  return { ok: false, status, error };
+}
+
+function isPlainObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.getPrototypeOf(value) === Object.prototype
+  );
+}
+
+function unexpectedKeys(value, allowed) {
+  const allowlist = new Set(allowed);
+  return Object.keys(value).filter((key) => !allowlist.has(key));
+}
+
+function byteLength(value) {
+  return new TextEncoder().encode(String(value || "")).byteLength;
 }
 
 function safeGrantError() {
