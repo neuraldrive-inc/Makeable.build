@@ -75,6 +75,7 @@ const WIRING_STEP_SCHEMA = Object.freeze({
     pin: { type: "string" },
     wireColor: { type: "string" },
     check: { type: "string" },
+    explanation: { type: "string" },
   },
   required: [
     "order",
@@ -87,6 +88,7 @@ const WIRING_STEP_SCHEMA = Object.freeze({
     "pin",
     "wireColor",
     "check",
+    "explanation",
   ],
 });
 
@@ -883,6 +885,7 @@ export async function requestHardwarePlan({
   confirmedParts,
   fetchImpl = globalThis.fetch,
   model = globalThis.MAKEABLE_CONFIG?.openaiModel || "gpt-5.5",
+  signal,
 }) {
   const confirmation = Array.isArray(confirmedParts);
   const userContent = confirmation
@@ -938,6 +941,7 @@ export async function requestHardwarePlan({
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal,
   });
   const data = await safeJson(response);
   if (!response.ok) {
@@ -1036,6 +1040,14 @@ export function createSafeDiagnosticCommand(diagnostic = {}) {
   return `MAKEABLE|RUN|${id}|${pulseMs}\n`;
 }
 
+export function createSafeDiagnosticStopCommand(diagnostic = {}) {
+  const id = String(diagnostic.id || "");
+  if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(id)) {
+    throw new TypeError("A safe diagnostic id is required.");
+  }
+  return `MAKEABLE|STOP|${id}\n`;
+}
+
 export function inferPowerStatus(markers, observationComplete, evidence) {
   const reset = array(markers).find(
     (marker) =>
@@ -1079,6 +1091,8 @@ export async function runSequentialDiagnostics({
   session,
   onStatus = () => {},
   signal,
+  scheduleDeadline = globalThis.setTimeout,
+  clearDeadline = globalThis.clearTimeout,
 } = {}) {
   if (!session) throw new TypeError("A serial diagnostic session is required.");
   const checks = normalizeDiagnosticTests(diagnostics).map((check) => ({
@@ -1114,13 +1128,32 @@ export async function runSequentialDiagnostics({
         if (check.kind !== "board") {
           await session.write(createSafeDiagnosticCommand(check));
         }
-        const marker = await session.waitForMarker(
-          (candidate) =>
-            check.kind === "board"
-              ? candidate?.type === "ready"
-              : candidate?.type === "check" && candidate.id === check.id,
-          { timeoutMs: 6000, signal },
-        );
+        let offDeadline;
+        let offPromise;
+        let actuatorStopped = false;
+        const stopActuator = async () => {
+          if (actuatorStopped || check.kind !== "actuator") return;
+          actuatorStopped = true;
+          await session.write(createSafeDiagnosticStopCommand(check));
+        };
+        if (check.kind === "actuator") {
+          offDeadline = scheduleDeadline(() => {
+            offPromise = stopActuator();
+          }, check.pulseMs);
+        }
+        let marker;
+        try {
+          marker = await session.waitForMarker(
+            (candidate) =>
+              check.kind === "board"
+                ? candidate?.type === "ready"
+                : candidate?.type === "check" && candidate.id === check.id,
+            { timeoutMs: 6000, signal },
+          );
+        } finally {
+          if (offDeadline !== undefined) clearDeadline(offDeadline);
+          await (offPromise || stopActuator());
+        }
         if (!marker) {
           check.status = "fail";
           check.detail = "The expected board marker did not arrive.";
@@ -1298,7 +1331,7 @@ export async function compileAndFlashFirmware({
   serial = globalThis.navigator?.serial,
   fetchImpl = globalThis.fetch,
   loadEsptool = () =>
-    import("https://unpkg.com/esptool-js@0.5.7/bundle.js"),
+    import("../../assets/vendor/esptool-js/bundle.js"),
   onProgress = () => {},
   signal,
 } = {}) {
@@ -1383,9 +1416,9 @@ export async function compileAndFlashFirmware({
         data: base64ToBinaryString(image.dataBase64),
         address: image.address,
       })),
-      flashMode: "dio",
-      flashFreq: "40m",
-      flashSize: "4MB",
+      flashMode: "keep",
+      flashFreq: "keep",
+      flashSize: "keep",
       eraseAll: Boolean(erase),
       compress: true,
       reportProgress(fileIndex, written, total) {
@@ -1474,6 +1507,7 @@ export async function evaluateManualTest({
   serialOutput,
   fetchImpl = globalThis.fetch,
   model = globalThis.MAKEABLE_CONFIG?.openaiReasoningModel || "gpt-5.5",
+  signal,
 } = {}) {
   if (!imageDataUrl) throw new Error("Capture one camera frame first.");
   const payload = {
@@ -1525,6 +1559,7 @@ export async function evaluateManualTest({
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal,
   });
   const data = await safeJson(response);
   if (!response.ok) {
@@ -1616,7 +1651,8 @@ function firmwareDiagnosticRequirements() {
     "The firmware sketch must implement Makeable’s complete serial diagnostic contract.",
     'Emit `MAKEABLE|RESET|<reason>` from setup using the ESP32 reset reason, then emit `MAKEABLE|READY|<detected board>`.',
     'Emit `MAKEABLE|CHECK|<id>|PASS|<detail>` or `MAKEABLE|CHECK|<id>|FAIL|<detail>` for every diagnostic.',
-    'Read newline-delimited serial input, handle only `MAKEABLE|RUN|<id>|<pulseMs>`, reject unknown IDs, and clamp actuator pulses to at most 1000 ms.',
+    'Read newline-delimited serial input, handle only `MAKEABLE|RUN|<id>|<pulseMs>` and `MAKEABLE|STOP|<id>`, reject unknown IDs, and clamp actuator pulses to at most 1000 ms.',
+    "Before energizing an actuator, set an internal monotonic millis() off deadline; the main loop must de-energize it when that deadline arrives even if no more serial input is received, and STOP must de-energize it immediately.",
     "Do not place these markers only in comments; print them through Serial and parse the RUN prefix in executable code.",
   ].join(" ");
 }

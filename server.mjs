@@ -41,6 +41,12 @@ const mimeTypes = new Map([
   [".woff", "font/woff"],
   [".woff2", "font/woff2"],
 ]);
+const publicRootFiles = new Set(["index.html", "app.js", "styles.css"]);
+const publicDirectoryRoots = new Map([
+  ["assets", path.join(__dirname, "assets")],
+  ["src", path.join(__dirname, "src", "makeable")],
+  ["styles", path.join(__dirname, "styles")],
+]);
 
 const server = createServer(async (req, res) => {
   try {
@@ -125,8 +131,8 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(port, () => {
-  console.log(`Makeable running at http://localhost:${port}`);
+server.listen(port, "127.0.0.1", () => {
+  console.log(`Makeable running at http://127.0.0.1:${port}`);
 });
 process.once("SIGTERM", shutdown);
 process.once("SIGINT", shutdown);
@@ -181,18 +187,8 @@ async function createDeepgramToken(res, env) {
 }
 
 async function serveStatic(pathname, res) {
-  const safePath =
-    pathname === "/" || pathname.startsWith("/build/")
-      ? "/index.html"
-      : decodeURIComponent(pathname);
-  const filePath = path.normalize(path.join(__dirname, safePath));
-  const relativePath = path.relative(__dirname, filePath);
-
-  if (
-    relativePath.startsWith("..") ||
-    path.isAbsolute(relativePath) ||
-    path.basename(filePath).startsWith(".")
-  ) {
+  const filePath = resolvePublicFile(pathname);
+  if (!filePath) {
     return sendText(res, "Not found", "text/plain; charset=utf-8", 404);
   }
 
@@ -204,6 +200,46 @@ async function serveStatic(pathname, res) {
   } catch {
     sendText(res, "Not found", "text/plain; charset=utf-8", 404);
   }
+}
+
+function resolvePublicFile(pathname) {
+  let decoded;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return "";
+  }
+  const segments = decoded.split(/[\\/]+/).filter(Boolean);
+  if (segments.some((segment) => segment.startsWith("."))) {
+    return "";
+  }
+  if (pathname === "/" || pathname.startsWith("/build/")) {
+    return path.join(__dirname, "index.html");
+  }
+  if (!segments.length) return "";
+  if (segments.length === 1 && publicRootFiles.has(segments[0])) {
+    return path.join(__dirname, segments[0]);
+  }
+
+  const [publicRoot, ...relativeSegments] = segments;
+  const allowedRoot =
+    publicRoot === "src"
+      ? relativeSegments.shift() === "makeable"
+        ? publicDirectoryRoots.get("src")
+        : ""
+      : publicDirectoryRoots.get(publicRoot);
+  if (!allowedRoot || !relativeSegments.length) return "";
+
+  const filePath = path.resolve(allowedRoot, ...relativeSegments);
+  const relativePath = path.relative(allowedRoot, filePath);
+  if (
+    !relativePath ||
+    relativePath.startsWith("..") ||
+    path.isAbsolute(relativePath)
+  ) {
+    return "";
+  }
+  return filePath;
 }
 
 async function proxyOpenAI(req, res, env) {
@@ -310,8 +346,8 @@ async function compileFirmware(req, res, env) {
   if (!sketch) return sendJson(res, { error: "sketch is required" }, 400);
 
   const fqbn = String(body.fqbn || env.ARDUINO_FQBN || "esp32:esp32:esp32").trim();
-  const sketchName = "GeckCoAISketch";
-  const buildRoot = path.join(__dirname, ".geckco-ai", "builds", randomUUID());
+  const sketchName = "MakeableSketch";
+  const buildRoot = path.join(__dirname, ".makeable", "builds", randomUUID());
   const sketchDir = path.join(buildRoot, sketchName);
   const outputDir = path.join(buildRoot, "out");
 
@@ -384,21 +420,12 @@ function findArduinoCli(env) {
 async function collectFirmwareImages(outputDir, sketchName) {
   const files = await walkFiles(outputDir);
   const binFiles = files.filter((filePath) => filePath.endsWith(".bin"));
-  const bootloader = findByPattern(binFiles, [/bootloader.*\.bin$/i]);
-  const partitions = findByPattern(binFiles, [/\.partitions\.bin$/i, /partitions.*\.bin$/i]);
-  const bootApp0 = findByPattern(binFiles, [/boot_app0\.bin$/i]) || findBootApp0Bin();
-  const app =
-    findByPattern(binFiles, [new RegExp(`${sketchName}\\.ino\\.bin$`, "i")]) ||
-    findByPattern(binFiles, [/\.ino\.bin$/i]);
-
-  const images = [];
-  if (bootloader) images.push(await firmwareImage(bootloader, 0x1000, "Bootloader"));
-  if (partitions) images.push(await firmwareImage(partitions, 0x8000, "Partition table"));
-  if (bootApp0) images.push(await firmwareImage(bootApp0, 0xe000, "Boot app"));
-  if (app) images.push(await firmwareImage(app, 0x10000, "Application"));
-  if (images.length) return images;
-
-  const merged = findByPattern(binFiles, [/\.merged\.bin$/i, /\.factory\.bin$/i, /merged/i]);
+  const merged =
+    findByPattern(binFiles, [
+      new RegExp(`${sketchName}\\.ino\\.merged\\.bin$`, "i"),
+      /\.merged\.bin$/i,
+      /\.factory\.bin$/i,
+    ]);
   return merged ? [await firmwareImage(merged, 0x0, "Merged ESP32 firmware")] : [];
 }
 
@@ -417,15 +444,6 @@ async function walkFiles(dir) {
 
 function findByPattern(files, patterns) {
   return files.find((filePath) => patterns.some((pattern) => pattern.test(path.basename(filePath))));
-}
-
-function findBootApp0Bin() {
-  const home = process.env.HOME || "";
-  const candidates = [
-    path.join(home, "Library/Arduino15/packages/esp32/hardware/esp32/3.3.5/tools/partitions/boot_app0.bin"),
-    path.join(home, "Library/Arduino15/packages/arduino/hardware/esp32/2.0.18-arduino.5/tools/partitions/boot_app0.bin"),
-  ];
-  return candidates.find((candidate) => existsSync(candidate)) || "";
 }
 
 async function firmwareImage(filePath, address, label) {

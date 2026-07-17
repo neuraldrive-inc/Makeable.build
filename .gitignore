@@ -5,6 +5,9 @@ config.local.js
 node_modules/
 tmp/
 .circuitcodex/
+# Current Makeable compiler workspace.
+.makeable/
+# Legacy workspace retained only so upgrades never commit old generated builds.
 .geckco-ai/
 .netlify/
 Makeable-v1-developer-handoff.zip

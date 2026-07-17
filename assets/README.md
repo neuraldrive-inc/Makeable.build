@@ -7,8 +7,14 @@ The fonts are the Latin variable-weight WOFF2 builds from Fontsource and retain 
 - Shantell Sans `@fontsource-variable/shantell-sans@5.2.7`
 - Roboto Mono `@fontsource-variable/roboto-mono@5.2.9`
 
-The Lucide SVG subset under `icons/lucide/` combines the original 16 files from
+The Lucide SVG subset under `icons/lucide/` combines the original 16-icon Lucide SVG subset from
 `lucide-static@0.468.0` with the eight Makeable v1 instruction/navigation icons
 from the official `lucide-static@1.25.0` package. The package license is retained
 in the same directory. SVGs are referenced as files so their source and license
 remain auditable.
+
+The offline Web Serial loader under `vendor/esptool-js/` is the browser bundle
+from the pinned `esptool-js@0.5.7` dependency. Its Apache License 2.0 text is
+retained beside the vendored bundle. Makeable imports this local copy so board
+loading never depends on a runtime CDN request. The bundle's pako, atob-lite,
+and tslib dependency licenses are retained under `vendor/esptool-js/licenses/`.
