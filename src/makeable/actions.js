@@ -120,6 +120,22 @@ const FIRMWARE_SCHEMA = Object.freeze({
   required: ["language", "sketch", "notes"],
 });
 
+const DIAGNOSTIC_TEST_SCHEMA = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    id: { type: "string" },
+    name: { type: "string" },
+    kind: {
+      type: "string",
+      enum: ["board", "sensor", "actuator", "power"],
+    },
+    pulseMs: { type: "integer" },
+    assemblyStep: { type: "integer" },
+  },
+  required: ["id", "name", "kind", "pulseMs", "assemblyStep"],
+});
+
 export const HARDWARE_PLAN_SCHEMA = Object.freeze({
   type: "object",
   additionalProperties: false,
@@ -146,6 +162,10 @@ export const HARDWARE_PLAN_SCHEMA = Object.freeze({
       additionalProperties: false,
       properties: {
         warnings: { type: "array", items: { type: "string" } },
+        tests: { type: "array", items: DIAGNOSTIC_TEST_SCHEMA },
+        manualAction: { type: "string" },
+        manualQuestion: { type: "string" },
+        manualSuccessLabel: { type: "string" },
       },
       required: ["warnings"],
     },
@@ -223,6 +243,27 @@ export function normalizeHardwarePlan(raw = {}, options = {}) {
       warnings: textArray(raw.diagnostics?.warnings || raw.warnings),
       partCount: parts.length,
       lowConfidencePartIds,
+      ...(Array.isArray(raw.diagnostics?.tests || raw.diagnosticTests)
+        ? {
+            tests: normalizeDiagnosticTests(
+              raw.diagnostics?.tests || raw.diagnosticTests,
+            ),
+          }
+        : {}),
+      ...(cleanText(raw.diagnostics?.manualAction, "")
+        ? { manualAction: cleanText(raw.diagnostics.manualAction, "") }
+        : {}),
+      ...(cleanText(raw.diagnostics?.manualQuestion, "")
+        ? { manualQuestion: cleanText(raw.diagnostics.manualQuestion, "") }
+        : {}),
+      ...(cleanText(raw.diagnostics?.manualSuccessLabel, "")
+        ? {
+            manualSuccessLabel: cleanText(
+              raw.diagnostics.manualSuccessLabel,
+              "",
+            ),
+          }
+        : {}),
     },
   };
 }
@@ -536,6 +577,483 @@ export function ideaText(idea) {
   return typeof idea === "string" ? idea : cleanText(idea?.text, "");
 }
 
+export function advanceAssembly(wiring = {}) {
+  const steps = array(wiring.steps);
+  const currentStep = clamp(
+    Number.isInteger(wiring.currentStep) ? wiring.currentStep : 0,
+    0,
+    Math.max(0, steps.length - 1),
+  );
+  const completedSteps = new Set(
+    array(wiring.completedSteps).filter(
+      (index) => Number.isInteger(index) && index >= 0 && index < steps.length,
+    ),
+  );
+  if (steps.length) completedSteps.add(currentStep);
+  return {
+    ...wiring,
+    currentStep: Math.min(currentStep + 1, Math.max(0, steps.length - 1)),
+    completedSteps: [...completedSteps].sort((left, right) => left - right),
+  };
+}
+
+export function selectAssemblyStep(wiring = {}, requestedStep) {
+  const steps = array(wiring.steps);
+  if (!steps.length) return { ...wiring, currentStep: 0, completedSteps: [] };
+  const completedSteps = array(wiring.completedSteps);
+  const firstIncomplete = steps.findIndex((_step, index) => !completedSteps.includes(index));
+  const furthestAvailable =
+    firstIncomplete === -1 ? steps.length - 1 : Math.min(firstIncomplete, steps.length - 1);
+  return {
+    ...wiring,
+    currentStep: clamp(Number(requestedStep) || 0, 0, furthestAvailable),
+    completedSteps: [...completedSteps],
+  };
+}
+
+export function isAssemblyComplete(wiring = {}) {
+  const steps = array(wiring.steps);
+  return (
+    steps.length > 0 &&
+    steps.every((_step, index) => array(wiring.completedSteps).includes(index))
+  );
+}
+
+export function createSerialMarkerParser() {
+  let carry = "";
+  return Object.freeze({
+    push(chunk) {
+      carry = `${carry}${String(chunk || "")}`.slice(-25_000);
+      const lines = carry.split(/\r?\n/);
+      carry = lines.pop() || "";
+      return lines.map(parseSerialMarker).filter(Boolean);
+    },
+    flush() {
+      const marker = parseSerialMarker(carry);
+      carry = "";
+      return marker ? [marker] : [];
+    },
+  });
+}
+
+export function createSafeDiagnosticCommand(diagnostic = {}) {
+  const id = String(diagnostic.id || "");
+  if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(id)) {
+    throw new TypeError("A safe diagnostic id is required.");
+  }
+  const pulseMs =
+    diagnostic.kind === "actuator"
+      ? clamp(Math.round(Number(diagnostic.pulseMs) || 500), 100, 1000)
+      : 0;
+  return `MAKEABLE|RUN|${id}|${pulseMs}\n`;
+}
+
+export function inferPowerStatus(markers, observationComplete) {
+  const reset = array(markers).find(
+    (marker) =>
+      marker?.type === "reset" &&
+      /brownout|reset|panic|watchdog/i.test(String(marker.reason || marker.raw || "")),
+  );
+  if (reset) {
+    return {
+      status: "fail",
+      detail: /brownout/i.test(String(reset.reason || reset.raw || ""))
+        ? "The board reported a brownout reset."
+        : "The board restarted during the power observation.",
+    };
+  }
+  if (!observationComplete) {
+    return {
+      status: "waiting",
+      detail: "Watching for reset or brownout evidence.",
+    };
+  }
+  return {
+    status: "pass",
+    detail: "No reset or brownout markers appeared during the observation window.",
+  };
+}
+
+export async function runSequentialDiagnostics({
+  diagnostics,
+  session,
+  onStatus = () => {},
+  signal,
+} = {}) {
+  if (!session) throw new TypeError("A serial diagnostic session is required.");
+  const checks = normalizeDiagnosticTests(diagnostics).map((check) => ({
+    ...check,
+    status: "waiting",
+    detail: "",
+  }));
+  const publish = () => onStatus(checks.map((check) => ({ ...check })));
+  publish();
+  try {
+    for (const check of checks) {
+      throwIfAborted(signal);
+      check.status = "running";
+      check.detail =
+        check.kind === "power"
+          ? "Watching for resets and brownouts."
+          : `Waiting for the ${check.name.toLowerCase()} marker.`;
+      publish();
+
+      if (check.kind === "power") {
+        const markers = await session.observePower?.({
+          durationMs: 2500,
+          signal,
+        });
+        Object.assign(check, inferPowerStatus(markers, true));
+      } else {
+        if (check.kind !== "board") {
+          await session.write(createSafeDiagnosticCommand(check));
+        }
+        const marker = await session.waitForMarker(
+          (candidate) =>
+            check.kind === "board"
+              ? candidate?.type === "ready"
+              : candidate?.type === "check" && candidate.id === check.id,
+          { timeoutMs: 6000, signal },
+        );
+        if (!marker) {
+          check.status = "fail";
+          check.detail = "The expected board marker did not arrive.";
+        } else if (marker.type === "check" && marker.status !== "pass") {
+          check.status = "fail";
+          check.detail = cleanText(marker.detail, "The board reported a failed check.");
+        } else {
+          check.status = "pass";
+          check.detail =
+            marker.type === "ready"
+              ? `Board found: ${cleanText(marker.board, "connected board")}`
+              : cleanText(marker.detail, "Expected marker received.");
+        }
+      }
+      publish();
+      if (check.status === "fail") break;
+    }
+  } catch (error) {
+    const running = checks.find(({ status }) => status === "running");
+    if (running) {
+      running.status = signal?.aborted ? "stopped" : "fail";
+      running.detail = signal?.aborted
+        ? "The automatic check was stopped."
+        : cleanText(error?.message, "The check could not finish.");
+      publish();
+    }
+  } finally {
+    await session.close?.();
+  }
+  return {
+    status: checks.length > 0 && checks.every(({ status }) => status === "pass")
+      ? "pass"
+      : checks.some(({ status }) => status === "stopped")
+        ? "stopped"
+        : "fail",
+    checks,
+    serialOutput: String(session.serialOutput || "").slice(-25_000),
+  };
+}
+
+export async function createDiagnosticSession({
+  serial = globalThis.navigator?.serial,
+  onText = () => {},
+  baudRate = 115200,
+} = {}) {
+  if (!serial?.requestPort) {
+    throw new Error(
+      "This browser can’t listen to the board. Use Chrome or Edge on desktop.",
+    );
+  }
+  const port = await serial.requestPort({ filters: ESP_SERIAL_FILTERS });
+  await port.open({ baudRate });
+  const reader = port.readable?.getReader();
+  const decoder = new TextDecoder();
+  const parser = createSerialMarkerParser();
+  const markers = [];
+  const consumed = new Set();
+  const waiters = new Set();
+  let output = "";
+  let closed = false;
+
+  const notify = (marker) => {
+    markers.push(marker);
+    for (const waiter of [...waiters]) {
+      if (!waiter.predicate(marker)) continue;
+      consumed.add(marker);
+      clearTimeout(waiter.timeout);
+      waiters.delete(waiter);
+      waiter.resolve(marker);
+    }
+  };
+  const readLoop = (async () => {
+    if (!reader) return;
+    try {
+      while (!closed) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        const text = decoder.decode(value, { stream: true });
+        output = `${output}${text}`.slice(-25_000);
+        onText(text);
+        parser.push(text).forEach(notify);
+      }
+    } catch (error) {
+      if (!closed) onText(`\n[serial read stopped] ${error.message}\n`);
+    }
+  })();
+
+  return Object.freeze({
+    get serialOutput() {
+      return output;
+    },
+    async write(command) {
+      const writer = port.writable?.getWriter();
+      if (!writer) throw new Error("The board serial connection is read-only.");
+      try {
+        await writer.write(new TextEncoder().encode(command));
+      } finally {
+        writer.releaseLock();
+      }
+    },
+    async waitForMarker(predicate, { timeoutMs = 6000, signal } = {}) {
+      const existing = markers.find(
+        (marker) => !consumed.has(marker) && predicate(marker),
+      );
+      if (existing) {
+        consumed.add(existing);
+        return existing;
+      }
+      throwIfAborted(signal);
+      return new Promise((resolve, reject) => {
+        const waiter = {
+          predicate,
+          resolve,
+          reject,
+          timeout: setTimeout(() => {
+            waiters.delete(waiter);
+            resolve(null);
+          }, timeoutMs),
+        };
+        waiters.add(waiter);
+        signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(waiter.timeout);
+            waiters.delete(waiter);
+            reject(abortError());
+          },
+          { once: true },
+        );
+      });
+    },
+    async observePower({ durationMs = 2500, signal } = {}) {
+      const startingIndex = markers.length;
+      await abortableDelay(durationMs, signal);
+      return markers.slice(startingIndex);
+    },
+    async close() {
+      if (closed) return;
+      closed = true;
+      for (const waiter of waiters) {
+        clearTimeout(waiter.timeout);
+        waiter.resolve(null);
+      }
+      waiters.clear();
+      try {
+        await reader?.cancel();
+        await readLoop;
+      } finally {
+        reader?.releaseLock();
+        await port.close?.();
+      }
+    },
+  });
+}
+
+export async function compileAndFlashFirmware({
+  sketch,
+  fqbn = "esp32:esp32:esp32",
+  erase = false,
+  serial = globalThis.navigator?.serial,
+  fetchImpl = globalThis.fetch,
+  loadEsptool = () =>
+    import("https://unpkg.com/esptool-js@0.5.7/bundle.js"),
+  onProgress = () => {},
+  signal,
+} = {}) {
+  if (!String(sketch || "").trim()) {
+    throw new Error("There isn’t code to load yet.");
+  }
+  const statusResponse = await fetchImpl("/api/arduino/status", { signal });
+  const status = await safeJson(statusResponse);
+  if (!statusResponse.ok || status.hostedMode) {
+    throw new Error(
+      status.message ||
+        "This hosted version can write the code, but loading a board needs the local Makeable server.",
+    );
+  }
+  if (!status.hasArduinoCli || !status.hasEsp32Core) {
+    throw new Error(
+      "Arduino CLI or the ESP32 boards core is missing. Install it, then retry.",
+    );
+  }
+  if (!serial?.requestPort) {
+    throw new Error(
+      "This browser can’t talk to the board. Use Chrome or Edge on desktop.",
+    );
+  }
+
+  onProgress({ phase: "select", percent: 0, label: "Choose your board" });
+  const port = await serial.requestPort({ filters: ESP_SERIAL_FILTERS });
+  throwIfAborted(signal);
+  onProgress({ phase: "compile", percent: 5, label: "Preparing code" });
+  const compileResponse = await fetchImpl("/api/firmware/compile", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sketch: String(sketch), fqbn }),
+    signal,
+  });
+  const compiled = await safeJson(compileResponse);
+  if (!compileResponse.ok || !array(compiled.images).length) {
+    throw new Error(
+      compiled.hint ||
+        compiled.error ||
+        "The code did not compile into a flashable ESP32 image.",
+    );
+  }
+
+  const esptool = await loadEsptool();
+  const transport = new esptool.Transport(port, true);
+  let boardName = "";
+  try {
+    const loader = new esptool.ESPLoader({
+      transport,
+      baudrate: 115200,
+      terminal: {
+        clean() {},
+        write() {},
+        writeLine() {},
+      },
+      debugLogging: false,
+    });
+    throwIfAborted(signal);
+    boardName = cleanText(await loader.main("default_reset"), "");
+    const images = array(compiled.images);
+    await loader.writeFlash({
+      fileArray: images.map((image) => ({
+        data: base64ToBinaryString(image.dataBase64),
+        address: image.address,
+      })),
+      flashMode: "dio",
+      flashFreq: "40m",
+      flashSize: "4MB",
+      eraseAll: Boolean(erase),
+      compress: true,
+      reportProgress(fileIndex, written, total) {
+        const percent = total ? Math.round((written / total) * 100) : 0;
+        const image = images[fileIndex] || images[0];
+        onProgress({
+          phase: "flash",
+          percent,
+          label: `${image?.label || image?.name || "Firmware"} ${percent}%`,
+        });
+      },
+    });
+    throwIfAborted(signal);
+    await loader.after("hard_reset");
+    onProgress({ phase: "complete", percent: 100, label: "Code loaded" });
+  } finally {
+    await transport.disconnect();
+  }
+  return {
+    boardName: boardName || cleanText(status.boardName, "ESP32"),
+    fqbn: cleanText(compiled.fqbn, fqbn),
+    compilerOutput: cleanText(compiled.stderr || compiled.stdout, ""),
+  };
+}
+
+export async function evaluateManualTest({
+  projectTitle,
+  requestedAction,
+  imageDataUrl,
+  serialOutput,
+  fetchImpl = globalThis.fetch,
+  model = globalThis.MAKEABLE_CONFIG?.openaiReasoningModel || "gpt-5.5",
+} = {}) {
+  if (!imageDataUrl) throw new Error("Capture one camera frame first.");
+  const payload = {
+    model,
+    input: [
+      {
+        role: "system",
+        content:
+          "You conservatively evaluate beginner electronics from the requested action, one current camera frame, and recent serial markers. Do not infer success from the request alone. Return only schema-valid JSON.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              `Project: ${cleanText(projectTitle, "Makeable project")}`,
+              `Requested real-world action: ${cleanText(requestedAction, "Observe the requested behavior.")}`,
+              `Recent serial output:\n${String(serialOutput || "No serial output captured.").slice(-3000)}`,
+              "Judge only the visible and serial evidence. Give one actionable next step.",
+            ].join("\n\n"),
+          },
+          { type: "input_image", image_url: imageDataUrl, detail: "high" },
+        ],
+      },
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "makeable_manual_test",
+        strict: true,
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            status: {
+              type: "string",
+              enum: ["pass", "needs_attention", "fail", "uncertain"],
+            },
+            observations: { type: "array", items: { type: "string" } },
+            nextStep: { type: "string" },
+          },
+          required: ["status", "observations", "nextStep"],
+        },
+      },
+    },
+  };
+  const response = await fetchImpl("/api/openai/responses", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await safeJson(response);
+  if (!response.ok) {
+    throw new Error(
+      cleanText(data?.error?.message || data?.error, "The evidence check could not finish."),
+    );
+  }
+  const evaluation = parseResponsePayload(data);
+  return {
+    responseId: cleanText(data.id, ""),
+    status: ["pass", "needs_attention", "fail", "uncertain"].includes(
+      evaluation.status,
+    )
+      ? evaluation.status
+      : "uncertain",
+    observations: textArray(evaluation.observations),
+    nextStep: cleanText(
+      evaluation.nextStep,
+      "Check the related connection and try again.",
+    ),
+  };
+}
+
 function parseResponsePayload(data) {
   const text =
     (typeof data?.output_text === "string" && data.output_text) ||
@@ -563,8 +1081,108 @@ function normalizeWiringStep(step, index) {
     pin: cleanText(step?.pin, ""),
     wireColor: cleanText(step?.wireColor, ""),
     check: cleanText(step?.check, ""),
+    explanation: cleanText(step?.explanation, step?.instruction || ""),
   };
 }
+
+function normalizeDiagnosticTests(diagnostics) {
+  const usedIds = new Set();
+  return array(diagnostics).map((diagnostic, index) => {
+    const id = uniqueId(
+      diagnostic?.id || diagnostic?.name || `check-${index + 1}`,
+      usedIds,
+    );
+    const kind = ["board", "sensor", "actuator", "power"].includes(
+      diagnostic?.kind,
+    )
+      ? diagnostic.kind
+      : "sensor";
+    return {
+      id,
+      name: cleanText(diagnostic?.name, `Hardware check ${index + 1}`),
+      kind,
+      ...(kind === "actuator"
+        ? {
+            pulseMs: clamp(
+              Math.round(Number(diagnostic?.pulseMs) || 500),
+              100,
+              1000,
+            ),
+          }
+        : {}),
+      assemblyStep: Math.max(
+        1,
+        Math.round(Number(diagnostic?.assemblyStep) || 1),
+      ),
+    };
+  });
+}
+
+function parseSerialMarker(line) {
+  const raw = String(line || "").trim();
+  if (!raw.startsWith("MAKEABLE|")) return null;
+  const [prefix, type, ...fields] = raw.split("|");
+  if (prefix !== "MAKEABLE") return null;
+  if (type === "READY" && fields[0]) {
+    return { type: "ready", board: cleanText(fields.join("|"), "board"), raw };
+  }
+  if (
+    type === "CHECK" &&
+    /^[a-z0-9][a-z0-9-]{0,47}$/.test(fields[0] || "") &&
+    /^(PASS|FAIL)$/.test(fields[1] || "")
+  ) {
+    return {
+      type: "check",
+      id: fields[0],
+      status: fields[1].toLowerCase(),
+      detail: fields.slice(2).join("|"),
+      raw,
+    };
+  }
+  if (type === "RESET" && fields[0]) {
+    return {
+      type: "reset",
+      reason: fields.join("|").toLowerCase(),
+      raw,
+    };
+  }
+  return null;
+}
+
+function base64ToBinaryString(base64) {
+  if (typeof atob === "function") return atob(String(base64 || ""));
+  return Buffer.from(String(base64 || ""), "base64").toString("binary");
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw abortError();
+}
+
+function abortError() {
+  return new DOMException("The operation was stopped.", "AbortError");
+}
+
+function abortableDelay(durationMs, signal) {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(resolve, durationMs);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timeout);
+        reject(abortError());
+      },
+      { once: true },
+    );
+  });
+}
+
+const ESP_SERIAL_FILTERS = Object.freeze([
+  Object.freeze({ usbVendorId: 0x10c4 }),
+  Object.freeze({ usbVendorId: 0x1a86 }),
+  Object.freeze({ usbVendorId: 0x0403 }),
+  Object.freeze({ usbVendorId: 0x303a }),
+]);
 
 function normalizeFirmwareSpec(spec = {}) {
   return {

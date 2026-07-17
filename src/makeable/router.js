@@ -34,6 +34,13 @@ export function getRoute(pathname) {
 export function resolveRoute(pathname, project = {}) {
   const requested = getRoute(pathname);
   const completed = new Set(project.progress?.completedRoutes || []);
+  if (
+    requested &&
+    routeComesAfterCode(requested.path) &&
+    project.firmware?.flash?.status !== "success"
+  ) {
+    return ROUTES_BY_PATH.get("/build/code");
+  }
   if (requested && completed.has(requested.path)) return requested;
 
   const availablePath = firstIncompletePath(project, completed);
@@ -101,9 +108,20 @@ function firstIncompletePath(project, completed) {
   if (project.feasibility?.status === "missing") return MISSING_PARTS_PATH;
 
   for (const path of READY_PROGRESSION.slice(3)) {
+    if (
+      path === "/build/test/automatic" &&
+      project.firmware?.flash?.status !== "success"
+    ) {
+      return "/build/code";
+    }
     if (!completed.has(path)) return path;
   }
   return READY_PROGRESSION.at(-1);
+}
+
+function routeComesAfterCode(path) {
+  return READY_PROGRESSION.indexOf(path) >
+    READY_PROGRESSION.indexOf("/build/code");
 }
 
 function normalizePath(pathname) {

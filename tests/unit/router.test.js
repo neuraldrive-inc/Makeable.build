@@ -20,6 +20,7 @@ const EXPECTED_ROUTES = [
 function projectWith(...completedRoutes) {
   return {
     feasibility: { status: "ready" },
+    firmware: { flash: { status: "success", boardName: "ESP32" } },
     progress: { completedRoutes },
   };
 }

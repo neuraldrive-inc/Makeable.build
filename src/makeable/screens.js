@@ -1,14 +1,21 @@
 import {
   acquireMissingPart,
+  advanceAssembly,
   blobToDataUrl,
   calculateContainedImageFrame,
   canConfirmParts,
+  compileAndFlashFirmware,
+  createDiagnosticSession,
   createObjectUrlRegistry,
   createPartSearchUrl,
+  evaluateManualTest,
   ideaText,
   inventoryCompatibleAlternatives,
+  isAssemblyComplete,
   normalizeImageFile,
   requestHardwarePlan,
+  runSequentialDiagnostics,
+  selectAssemblyStep,
   updateDetectedPart,
 } from "./actions.js";
 import { APP_READY_MESSAGE, PRODUCT_NAME } from "./content.js";
@@ -19,6 +26,10 @@ const ROUTE_RENDERERS = Object.freeze({
   "/build/parts/review": renderReview,
   "/build/feasibility/ready": renderReady,
   "/build/feasibility/missing": renderMissing,
+  "/build/assemble": renderAssemble,
+  "/build/code": renderCode,
+  "/build/test/automatic": renderAutomaticTest,
+  "/build/test/manual": renderManualTest,
 });
 
 export function createScreenRenderer({ root, app }) {
@@ -27,6 +38,14 @@ export function createScreenRenderer({ root, app }) {
   const windowLike = root.defaultView;
   const runtime = {
     voice: null,
+    cameraStream: null,
+    evidence: null,
+    operationAbort: null,
+    serialSession: null,
+    hardware: windowLike.MAKEABLE_HARDWARE || {
+      compileAndFlashFirmware,
+      createDiagnosticSession,
+    },
     currentRoute: null,
     imageObservers: new Map(),
     objectUrls: createObjectUrlRegistry({
@@ -42,6 +61,7 @@ export function createScreenRenderer({ root, app }) {
     app,
     runtime,
     render(route) {
+      cleanupRouteResources(context);
       runtime.currentRoute = route;
       for (const observer of runtime.imageObservers.values()) observer.disconnect();
       runtime.imageObservers.clear();
@@ -54,6 +74,7 @@ export function createScreenRenderer({ root, app }) {
     if (destroyed) return;
     destroyed = true;
     stopVoice(context);
+    cleanupRouteResources(context);
     for (const observer of runtime.imageObservers.values()) observer.disconnect();
     runtime.imageObservers.clear();
     runtime.objectUrls.revokeAll();
@@ -419,7 +440,7 @@ function renderReady(context) {
 
       <div class="ready-action">
         <p class="annotation-note">Next, we’ll connect one piece at a time.</p>
-        <a class="primary-button" href="/build/assemble">
+        <a class="primary-button" href="/build/assemble" data-start-assembly>
           Show me how
           ${icon("arrow-right")}
         </a>
@@ -432,6 +453,11 @@ function renderReady(context) {
     outlet.querySelector("[data-source-photo]"),
     outlet.querySelector(".annotation-layer"),
   );
+  outlet.querySelector("[data-start-assembly]").addEventListener("click", async (event) => {
+    event.preventDefault();
+    await app.completeRoute("/build/feasibility/ready");
+    app.navigation.navigate("/build/assemble");
+  });
 }
 
 function renderMissing(context) {
@@ -510,6 +536,924 @@ function renderMissing(context) {
         renderMissing(context);
       }
     });
+  }
+}
+
+function renderAssemble(context, route) {
+  const { outlet, app } = context;
+  const project = app.getProject();
+  const wiring = {
+    ...(project.wiring || {}),
+    steps: project.wiring?.steps || [],
+    currentStep: Number.isInteger(project.wiring?.currentStep)
+      ? project.wiring.currentStep
+      : 0,
+    completedSteps: project.wiring?.completedSteps || [],
+  };
+  const steps = wiring.steps;
+  const currentIndex = Math.min(
+    Math.max(0, wiring.currentStep),
+    Math.max(0, steps.length - 1),
+  );
+  const step = steps[currentIndex];
+  if (!step) {
+    outlet.innerHTML = screenFrame(`
+      <article class="route-screen assembly-screen">
+        <header class="screen-heading">
+          <h1>Your connection guide needs another look.</h1>
+          <p>No safe wiring steps were generated. Return to your confirmed parts and regenerate the guide.</p>
+        </header>
+        <a class="secondary-button" href="/build/parts/review">Back to my parts</a>
+      </article>
+    `);
+    return;
+  }
+  const fromPart = project.confirmedParts?.find(
+    ({ id }) => id === step.fromPartId,
+  );
+  const toPart = project.confirmedParts?.find(({ id }) => id === step.toPartId);
+  outlet.innerHTML = screenFrame(`
+    <article class="route-screen assembly-screen">
+      <header class="screen-heading assembly-heading">
+        <h1>Step ${currentIndex + 1} of ${steps.length}: ${escapeHtml(step.title)}</h1>
+      </header>
+
+      <ol class="connection-progress" aria-label="Assembly connections">
+        ${steps
+          .map(
+            (_entry, index) => `
+              <li>
+                <button
+                  type="button"
+                  data-assembly-step="${index}"
+                  aria-label="Connection ${index + 1}"
+                  aria-current="${index === currentIndex ? "step" : "false"}"
+                  ${
+                    index <= firstIncompleteAssemblyStep(wiring)
+                      ? ""
+                      : "disabled"
+                  }
+                >
+                  ${wiring.completedSteps.includes(index) ? icon("check") : index + 1}
+                </button>
+              </li>
+            `,
+          )
+          .join("")}
+      </ol>
+
+      <div class="assembly-layout">
+        <section class="paper-panel assembly-photo-panel" aria-label="Current connection on your uploaded photo">
+          <img
+            class="parts-photo"
+            data-source-photo
+            alt="Your uploaded parts with this connection highlighted"
+          />
+          <div class="annotation-layer">
+            ${connectionAnnotation(fromPart, step.from || "From", "from")}
+            ${connectionAnnotation(toPart, step.to || "To", "to")}
+          </div>
+          <div class="connection-caption">
+            <strong>${escapeHtml(step.pin || `${step.from} to ${step.to}`)}</strong>
+            <span>${escapeHtml(step.wireColor || "matching")} wire</span>
+          </div>
+        </section>
+
+        <div class="assembly-notes">
+          <section class="sticky-note" aria-labelledby="why-title">
+            <h2 id="why-title">Why?</h2>
+            <p>${escapeHtml(step.explanation || step.instruction)}</p>
+          </section>
+          <section class="paper-panel watch-card">
+            <button type="button" class="watch-button" data-watch-connection aria-pressed="false">
+              ${icon("play")}
+              Watch this move.
+            </button>
+            <p>This animates the labels on your photo. It is not live camera footage.</p>
+          </section>
+        </div>
+      </div>
+
+      <section class="connection-instruction" aria-labelledby="connection-title">
+        <h2 id="connection-title">${escapeHtml(step.instruction)}</h2>
+        <p><strong>Quick check:</strong> ${escapeHtml(step.check)}</p>
+      </section>
+
+      <div class="assembly-actions">
+        <button class="secondary-button" type="button" data-assembly-back>
+          ${icon("arrow-left")} Back
+        </button>
+        <button class="primary-button" type="button" data-complete-connection>
+          I connected it
+        </button>
+      </div>
+    </article>
+  `);
+  hydrateStoredImage(
+    context,
+    "source",
+    outlet.querySelector("[data-source-photo]"),
+    outlet.querySelector(".annotation-layer"),
+  );
+  for (const button of outlet.querySelectorAll("[data-assembly-step]")) {
+    button.addEventListener("click", async () => {
+      const updated = selectAssemblyStep(
+        app.getProject().wiring,
+        Number(button.dataset.assemblyStep),
+      );
+      await persistWiringProgress(app, updated);
+      renderAssemble(context, route);
+    });
+  }
+  outlet.querySelector("[data-watch-connection]").addEventListener("click", (event) => {
+    const panel = outlet.querySelector(".assembly-photo-panel");
+    panel.classList.remove("is-animating");
+    void panel.offsetWidth;
+    panel.classList.add("is-animating");
+    event.currentTarget.setAttribute("aria-pressed", "true");
+    context.window.setTimeout(() => {
+      panel.classList.remove("is-animating");
+      event.currentTarget?.setAttribute("aria-pressed", "false");
+    }, 900);
+  });
+  outlet.querySelector("[data-assembly-back]").addEventListener("click", async () => {
+    if (currentIndex === 0) {
+      app.navigation.navigate("/build/feasibility/ready");
+      return;
+    }
+    await persistWiringProgress(app, selectAssemblyStep(wiring, currentIndex - 1));
+    renderAssemble(context, route);
+  });
+  outlet
+    .querySelector("[data-complete-connection]")
+    .addEventListener("click", async () => {
+      const updated = advanceAssembly(app.getProject().wiring);
+      await persistWiringProgress(app, updated);
+      if (isAssemblyComplete(updated)) {
+        await app.completeRoute(route.path);
+        app.navigation.navigate("/build/code");
+      } else {
+        renderAssemble(context, route);
+      }
+    });
+}
+
+function renderCode(context, route) {
+  const { outlet, app, window: windowLike } = context;
+  const project = app.getProject();
+  const firmware = project.firmware || {};
+  const configuredBoard =
+    firmware.flash?.boardName ||
+    project.feasibility?.firmwareSpec?.board ||
+    windowLike.MAKEABLE_CONFIG?.arduinoFqbn ||
+    "esp32:esp32:esp32";
+  const configuredFqbn =
+    firmware.flash?.fqbn ||
+    windowLike.MAKEABLE_CONFIG?.arduinoFqbn ||
+    "esp32:esp32:esp32";
+  outlet.innerHTML = screenFrame(`
+    <article class="route-screen code-screen">
+      <header class="screen-heading code-heading">
+        <h1>Your build is wired. Let’s give it a brain.</h1>
+      </header>
+
+      <div class="code-layout">
+        <section class="paper-panel firmware-panel" aria-labelledby="firmware-title">
+          <h2 class="visually-hidden" id="firmware-title">Generated firmware</h2>
+          <div class="code-tabs" role="tablist" aria-label="Firmware view">
+            <button type="button" role="tab" aria-selected="true" data-code-view="simple">Simple view</button>
+            <button type="button" role="tab" aria-selected="false" data-code-view="advanced">Advanced view</button>
+          </div>
+          <pre class="firmware-code" data-simple-code><code>${escapeHtml(
+            firmware.sketch || "Firmware generation is still pending.",
+          )}</code></pre>
+          <label class="visually-hidden" for="firmware-editor">Firmware code</label>
+          <textarea
+            id="firmware-editor"
+            class="firmware-editor"
+            data-advanced-code
+            aria-label="Firmware code"
+            spellcheck="false"
+            hidden
+          >${escapeHtml(firmware.sketch || "")}</textarea>
+          <div class="firmware-tools">
+            <button class="tool-button" type="button" data-copy-code>${icon("paperclip")} Copy</button>
+            <button class="tool-button" type="button" data-download-code>${icon("download")} Download</button>
+          </div>
+          <aside class="sticky-note code-note">${escapeHtml(
+            firmware.notes ||
+              project.feasibility?.firmwareSpec?.behavior ||
+              "Review the wiring before you load the code.",
+          )}</aside>
+        </section>
+
+        <section class="board-panel" aria-labelledby="connect-title">
+          <h2 id="connect-title">Connect your board</h2>
+          <ol class="board-steps">
+            <li><span>1</span>Plug the USB cable into your computer.</li>
+            <li><span>2</span>Plug the other end into your board.</li>
+            <li><span>3</span>Your board should light up.</li>
+          </ol>
+          <p class="board-found" data-board-found>
+            <span aria-hidden="true"></span>
+            Board found: ${escapeHtml(configuredBoard)}
+          </p>
+          <p class="configured-board">Configured board: <code>${escapeHtml(
+            configuredFqbn,
+          )}</code></p>
+          <p class="hardware-status" data-hardware-status role="status" aria-live="polite">
+            Checking the local Arduino setup…
+          </p>
+          <label class="erase-option">
+            <input type="checkbox" data-erase-flash />
+            Erase the board before loading
+          </label>
+          <button class="primary-button" type="button" data-flash-board>
+            Load code to my board
+          </button>
+          <button class="secondary-button cancel-operation" type="button" data-cancel-flash hidden>
+            Cancel loading
+          </button>
+          <p class="safety-note">${icon("circle-alert")}Keep moving parts clear while we upload.</p>
+        </section>
+      </div>
+
+      <section class="load-progress" aria-label="Firmware loading progress">
+        <div>
+          <span data-progress-label>${
+            firmware.flash?.status === "success" ? "Code loaded" : "Ready to load"
+          }</span>
+          <span data-progress-value>${
+            firmware.flash?.status === "success" ? "100%" : "0%"
+          }</span>
+        </div>
+        <progress data-flash-progress max="100" value="${
+          firmware.flash?.status === "success" ? "100" : "0"
+        }">0%</progress>
+      </section>
+    </article>
+  `);
+
+  const editor = outlet.querySelector("[data-advanced-code]");
+  const simple = outlet.querySelector("[data-simple-code]");
+  for (const tab of outlet.querySelectorAll("[data-code-view]")) {
+    tab.addEventListener("click", () => {
+      const advanced = tab.dataset.codeView === "advanced";
+      simple.hidden = advanced;
+      editor.hidden = !advanced;
+      for (const candidate of outlet.querySelectorAll("[data-code-view]")) {
+        candidate.setAttribute(
+          "aria-selected",
+          String(candidate === tab),
+        );
+      }
+      if (advanced) editor.focus();
+    });
+  }
+  editor.addEventListener("change", async () => {
+    const current = app.getProject().firmware || {};
+    await app.updateProject("firmware", {
+      language: current.language || "Arduino C++",
+      sketch: editor.value,
+      notes: current.notes || "",
+    });
+    simple.querySelector("code").textContent = editor.value;
+    outlet.querySelector("[data-progress-label]").textContent = "Ready to load";
+    outlet.querySelector("[data-progress-value]").textContent = "0%";
+    outlet.querySelector("[data-flash-progress]").value = 0;
+  });
+  outlet.querySelector("[data-copy-code]").addEventListener("click", async (event) => {
+    try {
+      await windowLike.navigator.clipboard.writeText(editor.value);
+      event.currentTarget.lastChild.textContent = " Copied";
+    } catch {
+      outlet.querySelector("[data-hardware-status]").textContent =
+        "Copy is blocked in this browser. Select the code in Advanced view.";
+    }
+  });
+  outlet.querySelector("[data-download-code]").addEventListener("click", () => {
+    downloadFirmware(context, editor.value);
+  });
+  outlet.querySelector("[data-cancel-flash]").addEventListener("click", () => {
+    context.runtime.operationAbort?.abort();
+  });
+  outlet.querySelector("[data-flash-board]").addEventListener("click", () =>
+    flashCurrentFirmware(context, route, editor.value, configuredFqbn),
+  );
+  refreshArduinoSetup(context);
+}
+
+function renderAutomaticTest(context, route) {
+  const { outlet, app } = context;
+  const project = app.getProject();
+  const diagnostics = project.feasibility?.diagnostics?.tests || [];
+  const previous = project.tests?.automatic;
+  const checks =
+    previous?.checks?.length === diagnostics.length
+      ? previous.checks
+      : diagnostics.map((check) => ({ ...check, status: "waiting", detail: "" }));
+  const passed = previous?.status === "pass";
+  outlet.innerHTML = screenFrame(`
+    <article class="route-screen automatic-test-screen">
+      <header class="screen-heading test-heading">
+        <div>
+          <h1>Test 1 of 2: I’ll check the hardware</h1>
+          <p>Keep everything plugged in. I’ll run each safe check one at a time.</p>
+        </div>
+        <aside class="sticky-note">Actuators only receive a short pulse of 1 second or less.</aside>
+      </header>
+
+      <div class="test-stage-tabs" aria-label="Test progress">
+        <span aria-current="step"><strong>1</strong> Automatic check</span>
+        <button type="button" data-your-turn ${passed ? "" : "disabled"}><strong>2</strong> Your turn</button>
+      </div>
+
+      <div class="automatic-layout">
+        <section class="paper-panel test-photo-panel" aria-label="Your assembled project">
+          <img class="parts-photo" data-source-photo alt="Your uploaded project ready for hardware checks" />
+          <div class="annotation-layer">
+            ${(project.confirmedParts || [])
+              .filter(({ bounds }) => bounds)
+              .map((part, index) => readyAnnotation(part, index))
+              .join("")}
+          </div>
+          <p class="detected-test-board">Board found: ${escapeHtml(
+            project.firmware?.flash?.boardName || "connected ESP32",
+          )}</p>
+        </section>
+
+        <section class="paper-panel status-panel" aria-labelledby="status-title">
+          <h2 class="visually-hidden" id="status-title">Automatic check status</h2>
+          <ol class="diagnostic-statuses" data-diagnostic-statuses>
+            ${checks.map(diagnosticStatusRow).join("")}
+          </ol>
+          <p class="test-count" data-test-count>${checks.filter(({ status }) => status === "pass").length} of ${checks.length}</p>
+        </section>
+      </div>
+
+      <section class="paper-panel test-progress-panel">
+        <div>
+          <p data-automatic-message role="status" aria-live="polite">${
+            passed
+              ? `Hardware check passed · ${checks.length} of ${checks.length}`
+              : diagnostics.length
+                ? "Ready for the automatic check."
+                : "No stable diagnostic plan is available. Regenerate the guide before testing."
+          }</p>
+          <progress data-test-progress max="${Math.max(1, checks.length)}" value="${
+            checks.filter(({ status }) => status === "pass").length
+          }"></progress>
+        </div>
+        <button class="primary-button" type="button" data-start-test ${
+          diagnostics.length && !passed ? "" : "disabled"
+        }>Start automatic check</button>
+        <button class="secondary-button" type="button" data-stop-test hidden>Stop test</button>
+      </section>
+    </article>
+  `);
+  hydrateStoredImage(
+    context,
+    "source",
+    outlet.querySelector("[data-source-photo]"),
+    outlet.querySelector(".annotation-layer"),
+  );
+  attachRepairLinks(context);
+  outlet.querySelector("[data-start-test]").addEventListener("click", () =>
+    startAutomaticTest(context, route, diagnostics),
+  );
+  outlet.querySelector("[data-stop-test]").addEventListener("click", async () => {
+    context.runtime.operationAbort?.abort();
+    await context.runtime.serialSession?.close?.();
+  });
+  outlet.querySelector("[data-your-turn]").addEventListener("click", async () => {
+    if (app.getProject().tests?.automatic?.status !== "pass") return;
+    await app.completeRoute(route.path);
+    app.navigation.navigate("/build/test/manual");
+  });
+}
+
+function renderManualTest(context, route) {
+  const { outlet, app } = context;
+  const project = app.getProject();
+  const diagnostics = project.feasibility?.diagnostics || {};
+  const action =
+    diagnostics.manualAction ||
+    project.feasibility?.firmwareSpec?.behavior ||
+    "Perform the project’s real-world action and watch what happens.";
+  const question = diagnostics.manualQuestion || "Did the project respond as expected?";
+  const yesLabel = diagnostics.manualSuccessLabel || "Yes, it worked";
+  const actionSteps = manualActionSteps(action);
+  const automaticCount = project.tests?.automatic?.checks?.length || 0;
+  outlet.innerHTML = screenFrame(`
+    <article class="route-screen manual-test-screen">
+      <header class="screen-heading test-heading">
+        <div>
+          <h1>Test 2 of 2: Your turn</h1>
+          <p>Let’s make sure it works in the real world.</p>
+        </div>
+        <p class="automatic-pass-note">Hardware check passed · ${automaticCount} of ${automaticCount}</p>
+      </header>
+
+      <div class="test-stage-tabs" aria-label="Test progress">
+        <span><strong>1</strong> Automatic check ${icon("check")}</span>
+        <span aria-current="step"><strong>2</strong> Your turn</span>
+      </div>
+
+      <section class="paper-panel manual-action-panel" aria-labelledby="manual-action-title">
+        <h2 class="visually-hidden" id="manual-action-title">${escapeHtml(action)}</h2>
+        <ol>
+          ${actionSteps
+            .map(
+              (instruction, index) => `
+                <li>
+                  <span>${index + 1}</span>
+                  <p>${escapeHtml(instruction)}</p>
+                  ${
+                    index === actionSteps.length - 1
+                      ? `
+                        <video data-camera-preview playsinline muted aria-label="Live camera preview"></video>
+                        <div class="camera-actions">
+                          <button class="secondary-button" type="button" data-start-camera>${icon("camera")} Start camera</button>
+                          <button class="secondary-button" type="button" data-capture-evidence disabled>Capture evidence</button>
+                        </div>
+                      `
+                      : ""
+                  }
+                </li>
+              `,
+            )
+            .join("")}
+        </ol>
+        <p class="evidence-status" data-evidence-status role="status" aria-live="polite">
+          Point the camera at the behavior you want to confirm.
+        </p>
+      </section>
+
+      <section class="paper-panel manual-answer-panel" aria-labelledby="manual-question">
+        <h2 id="manual-question">${escapeHtml(question)}</h2>
+        <div>
+          <button class="primary-button" type="button" data-manual-yes>${escapeHtml(
+            yesLabel,
+          )}</button>
+          <button class="manual-not-yet" type="button" data-manual-not-yet>Not yet — help me fix it</button>
+        </div>
+        <div class="repair-guidance" data-repair-guidance role="status" aria-live="polite"></div>
+      </section>
+    </article>
+  `);
+  outlet.querySelector("[data-start-camera]").addEventListener("click", () =>
+    startManualCamera(context),
+  );
+  outlet.querySelector("[data-capture-evidence]").addEventListener("click", () =>
+    captureManualEvidence(context),
+  );
+  outlet.querySelector("[data-manual-yes]").addEventListener("click", () =>
+    acknowledgeManualTest(context, route, {
+      action,
+      acknowledged: true,
+    }),
+  );
+  outlet.querySelector("[data-manual-not-yet]").addEventListener("click", () =>
+    acknowledgeManualTest(context, route, {
+      action,
+      acknowledged: false,
+    }),
+  );
+}
+
+function cleanupRouteResources(context) {
+  context.runtime.operationAbort?.abort();
+  context.runtime.operationAbort = null;
+  const session = context.runtime.serialSession;
+  context.runtime.serialSession = null;
+  session?.close?.().catch?.(() => {});
+  context.runtime.cameraStream?.getTracks?.().forEach((track) => track.stop());
+  context.runtime.cameraStream = null;
+  context.runtime.evidence = null;
+}
+
+async function persistWiringProgress(app, wiring) {
+  await app.replaceProject({
+    ...app.getProject(),
+    wiring,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function firstIncompleteAssemblyStep(wiring) {
+  const index = (wiring.steps || []).findIndex(
+    (_step, candidate) => !(wiring.completedSteps || []).includes(candidate),
+  );
+  return index === -1 ? Math.max(0, (wiring.steps || []).length - 1) : index;
+}
+
+function connectionAnnotation(part, label, role) {
+  if (!part?.bounds) return "";
+  const { x, y, width, height } = part.bounds;
+  return `
+    <div
+      class="connection-annotation connection-annotation--${role}"
+      style="left:${x}%;top:${y}%;width:${width}%;height:${height}%"
+    >
+      <strong>${escapeHtml(label)}</strong>
+    </div>
+  `;
+}
+
+async function refreshArduinoSetup(context) {
+  const statusNode = context.outlet.querySelector("[data-hardware-status]");
+  const flashButton = context.outlet.querySelector("[data-flash-board]");
+  if (!statusNode || !flashButton) return;
+  try {
+    const response = await context.window.fetch("/api/arduino/status");
+    const status = await response.json();
+    if (context.runtime.currentRoute?.path !== "/build/code") return;
+    if (status.hostedMode) {
+      statusNode.textContent =
+        "Online guide mode is ready. Loading a physical ESP32 needs the local Makeable server.";
+      flashButton.textContent = "Local app needed";
+      flashButton.disabled = true;
+      return;
+    }
+    if (status.hasArduinoCli && status.hasEsp32Core) {
+      statusNode.textContent =
+        "Arduino CLI and the ESP32 boards core are ready on this computer.";
+      return;
+    }
+    statusNode.textContent =
+      status.message ||
+      "Arduino CLI or the ESP32 boards core is missing. Install it, then retry.";
+  } catch (error) {
+    statusNode.textContent = `I couldn’t check the local Arduino setup: ${error.message}`;
+  }
+}
+
+async function flashCurrentFirmware(context, route, sketch, configuredFqbn) {
+  const { outlet, app } = context;
+  const button = outlet.querySelector("[data-flash-board]");
+  const cancelButton = outlet.querySelector("[data-cancel-flash]");
+  const statusNode = outlet.querySelector("[data-hardware-status]");
+  const progress = outlet.querySelector("[data-flash-progress]");
+  const progressLabel = outlet.querySelector("[data-progress-label]");
+  const progressValue = outlet.querySelector("[data-progress-value]");
+  const erase = outlet.querySelector("[data-erase-flash]").checked;
+  if (!sketch.trim()) {
+    statusNode.textContent = "There isn’t code to load yet.";
+    return;
+  }
+  const controller = new AbortController();
+  context.runtime.operationAbort = controller;
+  button.disabled = true;
+  button.textContent = "Loading code…";
+  cancelButton.hidden = false;
+  statusNode.textContent =
+    "Choose your ESP32 when the browser asks. Nothing is marked successful until the loader finishes.";
+  try {
+    const result = await context.runtime.hardware.compileAndFlashFirmware({
+      sketch,
+      fqbn: configuredFqbn || "esp32:esp32:esp32",
+      erase,
+      serial: context.window.navigator.serial,
+      fetchImpl: context.window.fetch.bind(context.window),
+      signal: controller.signal,
+      onProgress(event) {
+        const percent = Math.min(100, Math.max(0, Number(event.percent) || 0));
+        progress.value = percent;
+        progress.textContent = `${percent}%`;
+        progressLabel.textContent = event.label || "Loading code";
+        progressValue.textContent = `${percent}%`;
+      },
+    });
+    if (controller.signal.aborted) return;
+    const firmware = app.getProject().firmware || {};
+    await app.updateProject("firmware", {
+      ...firmware,
+      sketch,
+      flash: {
+        status: "success",
+        boardName: result.boardName,
+        fqbn: result.fqbn,
+        flashedAt: new Date().toISOString(),
+      },
+    });
+    await app.completeRoute(route.path);
+    app.navigation.navigate("/build/test/automatic");
+  } catch (error) {
+    const cancelled = controller.signal.aborted || error?.name === "AbortError";
+    statusNode.textContent = cancelled
+      ? "Loading stopped. The board was not marked as ready; retry when you’re ready."
+      : `I couldn’t finish loading the board: ${error.message}`;
+    progress.value = 0;
+    progressLabel.textContent = cancelled ? "Stopped" : "Needs retry";
+    progressValue.textContent = "0%";
+    button.disabled = false;
+    button.textContent = "Try loading again";
+  } finally {
+    if (context.runtime.operationAbort === controller) {
+      context.runtime.operationAbort = null;
+    }
+    cancelButton.hidden = true;
+  }
+}
+
+function downloadFirmware(context, sketch) {
+  if (!sketch.trim()) {
+    context.outlet.querySelector("[data-hardware-status]").textContent =
+      "There isn’t code to download yet.";
+    return;
+  }
+  const blob = new Blob([sketch], { type: "text/x-arduino;charset=utf-8" });
+  const key = `${sketch.length}:${sketch.slice(0, 32)}`;
+  const url = context.runtime.objectUrls.replace("firmware-download", key, blob);
+  const link = context.root.createElement("a");
+  link.href = url;
+  link.download = "makeable-firmware.ino";
+  link.click();
+}
+
+function diagnosticStatusRow(check) {
+  const iconName =
+    check.status === "pass"
+      ? "check"
+      : check.status === "fail"
+        ? "x"
+        : check.status === "running"
+          ? "play"
+          : "circle-alert";
+  return `
+    <li class="diagnostic-row diagnostic-row--${escapeAttribute(check.status)}" data-check-id="${escapeAttribute(
+      check.id,
+    )}">
+      <span class="diagnostic-icon">${icon(iconName)}</span>
+      <div>
+        <strong>${escapeHtml(check.name)}</strong>
+        <span>${escapeHtml(diagnosticStatusLabel(check))}</span>
+        ${
+          check.status === "fail"
+            ? `<a href="/build/assemble" data-repair-step="${Math.max(
+                0,
+                Number(check.assemblyStep || 1) - 1,
+              )}">Check connection ${Math.max(
+                1,
+                Number(check.assemblyStep || 1),
+              )}</a>`
+            : ""
+        }
+      </div>
+    </li>
+  `;
+}
+
+function diagnosticStatusLabel(check) {
+  if (check.status === "pass") return check.detail || "OK";
+  if (check.status === "fail") return check.detail || "Needs a wiring check";
+  if (check.status === "running") return check.detail || "Testing…";
+  if (check.status === "stopped") return "Stopped";
+  return "Waiting";
+}
+
+function updateDiagnosticView(context, checks, message = "") {
+  const list = context.outlet.querySelector("[data-diagnostic-statuses]");
+  if (!list) return;
+  list.innerHTML = checks.map(diagnosticStatusRow).join("");
+  const passed = checks.filter(({ status }) => status === "pass").length;
+  context.outlet.querySelector("[data-test-count]").textContent =
+    `${passed} of ${checks.length}`;
+  const progress = context.outlet.querySelector("[data-test-progress]");
+  progress.max = Math.max(1, checks.length);
+  progress.value = passed;
+  if (message) {
+    context.outlet.querySelector("[data-automatic-message]").textContent = message;
+  }
+  attachRepairLinks(context);
+}
+
+function attachRepairLinks(context) {
+  for (const link of context.outlet.querySelectorAll("[data-repair-step]")) {
+    link.addEventListener("click", async (event) => {
+      event.preventDefault();
+      const updated = selectAssemblyStep(
+        context.app.getProject().wiring,
+        Number(link.dataset.repairStep),
+      );
+      await persistWiringProgress(context.app, updated);
+      context.app.navigation.navigate("/build/assemble");
+    });
+  }
+}
+
+async function startAutomaticTest(context, route, diagnostics) {
+  const { outlet, app } = context;
+  const startButton = outlet.querySelector("[data-start-test]");
+  const stopButton = outlet.querySelector("[data-stop-test]");
+  const message = outlet.querySelector("[data-automatic-message]");
+  const controller = new AbortController();
+  context.runtime.operationAbort = controller;
+  startButton.disabled = true;
+  stopButton.hidden = false;
+  message.textContent = "Choose the flashed board so I can listen for real markers.";
+  try {
+    const session = await context.runtime.hardware.createDiagnosticSession({
+      serial: context.window.navigator.serial,
+      signal: controller.signal,
+      onText(text) {
+        message.textContent = `Board says: ${String(text).trim().slice(-120)}`;
+      },
+    });
+    context.runtime.serialSession = session;
+    const result = await runSequentialDiagnostics({
+      diagnostics,
+      session,
+      signal: controller.signal,
+      onStatus(checks) {
+        updateDiagnosticView(context, checks);
+      },
+    });
+    context.runtime.serialSession = null;
+    const tests = app.getProject().tests || {};
+    await app.updateProject("tests", {
+      ...tests,
+      automatic: {
+        ...result,
+        boardName: app.getProject().firmware?.flash?.boardName || "",
+        completedAt: new Date().toISOString(),
+      },
+    });
+    if (result.status === "pass") {
+      updateDiagnosticView(
+        context,
+        result.checks,
+        `Hardware check passed · ${result.checks.length} of ${result.checks.length}`,
+      );
+      outlet.querySelector("[data-your-turn]").disabled = false;
+    } else if (result.status === "stopped") {
+      updateDiagnosticView(context, result.checks, "Automatic check stopped safely.");
+      startButton.disabled = false;
+      startButton.textContent = "Retry automatic check";
+    } else {
+      updateDiagnosticView(
+        context,
+        result.checks,
+        "One check needs attention. Open its connection link, repair it, then retry.",
+      );
+      startButton.disabled = false;
+      startButton.textContent = "Retry automatic check";
+    }
+  } catch (error) {
+    message.textContent =
+      controller.signal.aborted || error?.name === "AbortError"
+        ? "Automatic check stopped safely."
+        : `I couldn’t start the automatic check: ${error.message}`;
+    startButton.disabled = false;
+    startButton.textContent = "Retry automatic check";
+  } finally {
+    if (context.runtime.operationAbort === controller) {
+      context.runtime.operationAbort = null;
+    }
+    stopButton.hidden = true;
+  }
+}
+
+function manualActionSteps(action) {
+  const chunks = String(action)
+    .split(/,\s*|\s+and\s+(?=(?:watch|look|confirm|check)\b)/i)
+    .map((value) => value.trim().replace(/[.!]+$/, ""))
+    .filter(Boolean)
+    .slice(0, 3);
+  return chunks.length ? chunks : ["Perform the requested real-world action"];
+}
+
+async function startManualCamera(context) {
+  const status = context.outlet.querySelector("[data-evidence-status]");
+  const video = context.outlet.querySelector("[data-camera-preview]");
+  const capture = context.outlet.querySelector("[data-capture-evidence]");
+  if (!context.window.navigator.mediaDevices?.getUserMedia) {
+    status.textContent =
+      "Camera access is unavailable in this browser. Use a browser with camera support.";
+    return;
+  }
+  try {
+    context.runtime.cameraStream?.getTracks?.().forEach((track) => track.stop());
+    const stream = await context.window.navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
+      audio: false,
+    });
+    context.runtime.cameraStream = stream;
+    video.srcObject = stream;
+    await video.play();
+    capture.disabled = false;
+    status.textContent =
+      "Camera ready. Keep the project in frame, perform the action, then capture evidence.";
+  } catch (error) {
+    status.textContent = `I couldn’t open the camera: ${error.message}`;
+  }
+}
+
+async function captureManualEvidence(context) {
+  const status = context.outlet.querySelector("[data-evidence-status]");
+  const video = context.outlet.querySelector("[data-camera-preview]");
+  if (!context.runtime.cameraStream) {
+    status.textContent = "Start the camera before capturing evidence.";
+    return;
+  }
+  const canvas = context.root.createElement("canvas");
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 360;
+  const drawing = canvas.getContext("2d", { alpha: false });
+  drawing.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+  const blob = await new Promise((resolve, reject) =>
+    canvas.toBlob(
+      (value) =>
+        value ? resolve(value) : reject(new Error("Camera capture failed.")),
+      "image/jpeg",
+      0.82,
+    ),
+  );
+  const evidence = {
+    dataUrl,
+    blob,
+    takenAt: new Date().toISOString(),
+  };
+  evidence.savePromise = context.app.saveImage("manual-evidence", blob);
+  context.runtime.evidence = evidence;
+  await evidence.savePromise;
+  status.textContent =
+    "Evidence captured. I’ll combine this frame with the requested action and recent board output.";
+}
+
+async function acknowledgeManualTest(context, route, { action, acknowledged }) {
+  const { outlet, app } = context;
+  const guidance = outlet.querySelector("[data-repair-guidance]");
+  const yesButton = outlet.querySelector("[data-manual-yes]");
+  const notYetButton = outlet.querySelector("[data-manual-not-yet]");
+  const evidence = context.runtime.evidence;
+  if (!evidence) {
+    guidance.textContent =
+      "Capture one current camera frame first so the check uses real evidence.";
+    return;
+  }
+  yesButton.disabled = true;
+  notYetButton.disabled = true;
+  guidance.textContent =
+    "Comparing the requested action, camera evidence, and recent board output…";
+  try {
+    await evidence.savePromise;
+    const project = app.getProject();
+    const evaluator =
+      context.runtime.hardware.evaluateManualTest || evaluateManualTest;
+    const evaluation = await evaluator({
+      projectTitle:
+        project.feasibility?.projectTitle || ideaText(project.idea),
+      requestedAction: action,
+      imageDataUrl: evidence.dataUrl,
+      serialOutput: project.tests?.automatic?.serialOutput || "",
+      fetchImpl: context.window.fetch.bind(context.window),
+    });
+    const tests = app.getProject().tests || {};
+    await app.updateProject("tests", {
+      ...tests,
+      manual: {
+        acknowledged,
+        requestedAction: action,
+        evidenceImageId: "manual-evidence",
+        capturedAt: evidence.takenAt,
+        recentSerialOutput: String(
+          project.tests?.automatic?.serialOutput || "",
+        ).slice(-3000),
+        evaluation,
+      },
+    });
+    if (acknowledged) {
+      await app.completeRoute(route.path);
+      context.runtime.cameraStream?.getTracks?.().forEach((track) => track.stop());
+      context.runtime.cameraStream = null;
+      app.navigation.navigate("/build/publish/connect");
+      return;
+    }
+    guidance.replaceChildren();
+    const text = context.root.createElement("p");
+    text.textContent = `Try this repair: ${evaluation.nextStep}`;
+    const link = context.root.createElement("a");
+    link.href = "/build/assemble";
+    link.textContent = "Review the related connection";
+    link.dataset.repairStep = "0";
+    const retry = context.root.createElement("button");
+    retry.type = "button";
+    retry.className = "secondary-button";
+    retry.textContent = "Retry manual test";
+    retry.addEventListener("click", () => {
+      guidance.textContent =
+        "Perform the action again, then capture a fresh camera frame.";
+      context.runtime.evidence = null;
+    });
+    guidance.append(text, link, retry);
+    attachRepairLinks(context);
+  } catch (error) {
+    guidance.textContent = `I couldn’t finish the evidence check: ${error.message}. Retry with the project in view.`;
+  } finally {
+    yesButton.disabled = false;
+    notYetButton.disabled = false;
   }
 }
 
