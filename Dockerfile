@@ -32,6 +32,11 @@ RUN apt-get update \
       "ArduinoJson" \
       "PubSubClient"
 
+# The ESP32 build recipes invoke Python at compile time.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV ARDUINO_COMPILE_JOBS=1 \
     MAX_CONCURRENT_COMPILES=1 \
     COMPILE_TIMEOUT_MS=300000
