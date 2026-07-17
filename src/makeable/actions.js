@@ -310,6 +310,21 @@ export function createRecoverySecret(cryptoLike = globalThis.crypto) {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+export function recoverySecretForRepository(
+  authorization,
+  repositoryName,
+  cryptoLike = globalThis.crypto,
+) {
+  if (
+    String(authorization?.repositoryName || "").toLowerCase() ===
+      String(repositoryName || "").toLowerCase() &&
+    /^[a-f0-9]{64}$/.test(authorization?.recoverySecret || "")
+  ) {
+    return authorization.recoverySecret;
+  }
+  return createRecoverySecret(cryptoLike);
+}
+
 export function createProjectArtifacts(project = {}) {
   const title = cleanText(
     project.feasibility?.projectTitle,
@@ -527,7 +542,7 @@ export async function publishProjectArtifacts({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         owner: repository.owner,
-        repo: validation.value,
+        repo: repository.name,
         path: artifact.path,
         content: artifact.content,
         message: `Update ${artifact.path} from Makeable`,
@@ -547,7 +562,7 @@ export async function publishProjectArtifacts({
 
   return {
     owner: repository.owner,
-    repositoryName: validation.value,
+    repositoryName: repository.name,
     repositoryUrl: repository.html_url,
     visibility: repository.private ? "private" : "public",
     recoveredExisting,

@@ -7,7 +7,6 @@ import {
   compileAndFlashFirmware,
   createProjectArtifacts,
   createProjectZip,
-  createRecoverySecret,
   createDiagnosticSession,
   createObjectUrlRegistry,
   createPartSearchUrl,
@@ -17,6 +16,7 @@ import {
   isAssemblyComplete,
   normalizeImageFile,
   requestHardwarePlan,
+  recoverySecretForRepository,
   runSequentialDiagnostics,
   sharePublishedProject,
   selectAssemblyStep,
@@ -1191,11 +1191,11 @@ async function publishFromScreen(context, route, form, validate) {
   status.textContent = "Creating the repository and uploading five project files…";
   try {
     const currentAuthorization = app.getProject().publishAuthorization;
-    const recoverySecret =
-      currentAuthorization?.repositoryName === validation.value &&
-      /^[a-f0-9]{64}$/.test(currentAuthorization?.recoverySecret || "")
-        ? currentAuthorization.recoverySecret
-        : createRecoverySecret(window.crypto);
+    const recoverySecret = recoverySecretForRepository(
+      currentAuthorization,
+      validation.value,
+      window.crypto,
+    );
     if (recoverySecret !== currentAuthorization?.recoverySecret) {
       await app.updateProject("publishAuthorization", {
         repositoryName: validation.value,

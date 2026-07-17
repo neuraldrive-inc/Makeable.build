@@ -7,6 +7,7 @@ import {
   createProjectZip,
   publishProjectArtifacts,
   sharePublishedProject,
+  recoverySecretForRepository,
   validateRepositoryName,
 } from "../../src/makeable/actions.js";
 
@@ -93,6 +94,21 @@ test("a 256-bit recovery secret is generated from browser crypto", () => {
   assert.match(secret, /^[a-f0-9]{64}$/);
 });
 
+test("casing-only repository edits reuse the existing recovery proof", () => {
+  const existing = {
+    repositoryName: "self-watering-plant",
+    recoverySecret: RECOVERY_SECRET,
+  };
+  assert.equal(
+    recoverySecretForRepository(existing, "Self-Watering-Plant", {
+      getRandomValues() {
+        throw new Error("a new secret must not be generated");
+      },
+    }),
+    RECOVERY_SECRET,
+  );
+});
+
 test("artifact generation produces the five visible, identical publish/export files", () => {
   const artifacts = createProjectArtifacts(PROJECT);
   assert.deepEqual(
@@ -115,12 +131,12 @@ test("artifact generation produces the five visible, identical publish/export fi
   assert.match(artifacts[4].content, /Needs attention/);
 });
 
-test("GitHub publishing verifies an existing repository before upload and uses its actual visibility", async () => {
+test("mixed-case recovery uses GitHub's canonical repository name for every upload and result", async () => {
   const requests = [];
   const artifacts = createProjectArtifacts(PROJECT);
   const result = await publishProjectArtifacts({
     project: PROJECT,
-    repositoryName: "self-watering-plant",
+    repositoryName: "Self-Watering-Plant",
     isPrivate: false,
     configuredOwner: "ray-builds",
     recoverySecret: RECOVERY_SECRET,
@@ -135,7 +151,7 @@ test("GitHub publishing verifies an existing repository before upload and uses i
       }
       if (url === "/api/github/repository-recovery") {
         assert.deepEqual(requests.at(-1).body, {
-          repo: "self-watering-plant",
+          repo: "Self-Watering-Plant",
           recoverySecret: RECOVERY_SECRET,
         });
         return response({
@@ -151,6 +167,7 @@ test("GitHub publishing verifies an existing repository before upload and uses i
   });
 
   assert.equal(result.repositoryUrl, "https://github.com/ray-builds/self-watering-plant");
+  assert.equal(result.repositoryName, "self-watering-plant");
   assert.equal(result.visibility, "private");
   assert.equal(result.recoveredExisting, true);
   assert.equal(requests.length, 2 + artifacts.length);
@@ -161,6 +178,10 @@ test("GitHub publishing verifies an existing repository before upload and uses i
   assert.deepEqual(
     requests.slice(2).map(({ body }) => body.content),
     artifacts.map(({ content }) => content),
+  );
+  assert.equal(
+    requests.slice(2).every(({ body }) => body.repo === "self-watering-plant"),
+    true,
   );
   assert.equal(
     requests.slice(2).every(({ body }) => body.capability === PUBLISH_CAPABILITY),
