@@ -1670,6 +1670,7 @@ function hasBranchBoundActuatorSafety(source) {
 
   const runPrefix = canonicalTopLevelPrefix(runBlock.body);
   const stopPrefix = canonicalTopLevelPrefix(stopBlock.body);
+  if (runPrefix === null || stopPrefix === null) return false;
   const energizedWrites = directActuatorWrites(runPrefix, "on");
   const energizedTargets = new Set(energizedWrites.map(({ target }) => target));
   if (!energizedTargets.size) return false;
@@ -1683,7 +1684,7 @@ function hasBranchBoundActuatorSafety(source) {
   }
 
   const deadlineAssignments = findMillisDeadlineAssignments(source);
-  const runDeadlineAssignments = findMillisDeadlineAssignments(runPrefix);
+  const runDeadlineAssignments = directMillisDeadlineAssignments(runPrefix);
   const firstEnergizeIndex = Math.min(
     ...energizedWrites.map(({ index }) => index),
   );
@@ -1703,19 +1704,23 @@ function hasBranchBoundActuatorSafety(source) {
   const deadlineNames = new Set(deadlineAssignments.map(({ name }) => name));
   for (const deadline of deadlineNames) {
     if (hasDeadlineResetOutsideRun(source, deadline, runBlock)) return false;
-    const safetyBlock = ifBlocks.find(
-      (block) =>
-        !rangeContains(runBlock, block.start) &&
-        !rangeContains(stopBlock, block.start) &&
-        conditionEnforcesDeadline(block.condition, deadline) &&
+    const safetyBlock = ifBlocks.find((block) => {
+      if (
+        rangeContains(runBlock, block.start) ||
+        rangeContains(stopBlock, block.start) ||
+        !conditionEnforcesDeadline(block.condition, deadline)
+      ) {
+        return false;
+      }
+      const safetyPrefix = canonicalTopLevelPrefix(block.body);
+      return (
+        safetyPrefix !== null &&
         setContainsAll(
-          directActuatorTargets(
-            canonicalTopLevelPrefix(block.body),
-            "off",
-          ),
+          directActuatorTargets(safetyPrefix, "off"),
           energizedTargets,
-        ),
-    );
+        )
+      );
+    });
     if (!safetyBlock) return false;
   }
   return true;
@@ -1762,23 +1767,78 @@ function directActuatorWrites(block, state) {
   const writes = [];
   const digitalLevel = state === "on" ? "HIGH" : "LOW";
   const digitalPattern = new RegExp(
-    `\\bdigitalWrite\\s*\\(\\s*([A-Za-z_]\\w*|\\d+)\\s*,\\s*${digitalLevel}\\s*\\)\\s*;`,
-    "g",
+    `^digitalWrite\\s*\\(\\s*([A-Za-z_]\\w*|\\d+)\\s*,\\s*${digitalLevel}\\s*\\)\\s*;$`,
   );
-  for (const match of block.matchAll(digitalPattern)) {
-    writes.push({ target: match[1], index: match.index });
-  }
-
   const pwmPattern =
-    /\b(?:analogWrite|ledcWrite)\s*\(\s*([A-Za-z_]\w*|\d+)\s*,\s*(\d+)\s*\)\s*;/g;
-  for (const match of block.matchAll(pwmPattern)) {
-    const [, target, rawValue] = match;
-    const value = Number(rawValue);
-    if ((state === "on" && value > 0) || (state === "off" && value === 0)) {
-      writes.push({ target, index: match.index });
+    /^(?:analogWrite|ledcWrite)\s*\(\s*([A-Za-z_]\w*|\d+)\s*,\s*(\d+)\s*\)\s*;$/;
+  for (const statement of topLevelSemicolonStatements(block)) {
+    const source = statement.source.trim();
+    const index = statement.start + statement.source.indexOf(source);
+    const digitalMatch = digitalPattern.exec(source);
+    if (digitalMatch) {
+      writes.push({ target: digitalMatch[1], index });
+      continue;
+    }
+    const pwmMatch = pwmPattern.exec(source);
+    if (pwmMatch) {
+      const [, target, rawValue] = pwmMatch;
+      const value = Number(rawValue);
+      if ((state === "on" && value > 0) || (state === "off" && value === 0)) {
+        writes.push({ target, index });
+      }
     }
   }
   return writes;
+}
+
+function directMillisDeadlineAssignments(block) {
+  const pattern =
+    /^([A-Za-z_]\w*)\s*=\s*millis\s*\(\s*\)\s*\+\s*[^;]+;$/;
+  return topLevelSemicolonStatements(block).flatMap((statement) => {
+    const source = statement.source.trim();
+    const match = pattern.exec(source);
+    if (!match) return [];
+    return [
+      {
+        name: match[1],
+        index: statement.start + statement.source.indexOf(source),
+      },
+    ];
+  });
+}
+
+function topLevelSemicolonStatements(source) {
+  const statements = [];
+  let start = 0;
+  let parentheses = 0;
+  let quote = "";
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (character === "\\") index += 1;
+      else if (character === quote) quote = "";
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === "(") {
+      parentheses += 1;
+      continue;
+    }
+    if (character === ")") {
+      parentheses = Math.max(0, parentheses - 1);
+      continue;
+    }
+    if (character !== ";" || parentheses !== 0) continue;
+    statements.push({
+      start,
+      source: source.slice(start, index + 1),
+    });
+    start = index + 1;
+  }
+  return statements;
 }
 
 function findMillisDeadlineAssignments(source) {
@@ -1853,6 +1913,7 @@ function canonicalTopLevelPrefix(block) {
       quote = character;
       continue;
     }
+    if (character === "#") return null;
     if (character === "{") return block.slice(0, index);
     if (!/[A-Za-z_]/.test(character)) continue;
     const tokenMatch = /^[A-Za-z_]\w*/.exec(block.slice(index));

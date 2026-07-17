@@ -103,6 +103,33 @@ test("firmware diagnostics reject actuator writes hidden in nested control block
   assert.equal(hasFirmwareDiagnosticContract(nestedOff), false);
 });
 
+test("firmware diagnostics reject actuator writes embedded in string literals", () => {
+  const quotedOff = COMPLIANT_FIRMWARE.replaceAll(
+    "digitalWrite(PUMP_PIN, LOW);",
+    'Serial.println("digitalWrite(PUMP_PIN, LOW);");',
+  );
+
+  assert.equal(hasFirmwareDiagnosticContract(quotedOff), false);
+});
+
+test("firmware diagnostics reject actuator writes inside preprocessor-disabled sections", () => {
+  const compiledOutOff = COMPLIANT_FIRMWARE.replaceAll(
+    "digitalWrite(PUMP_PIN, LOW);",
+    "#ifdef MAKEABLE_DISABLED\n    digitalWrite(PUMP_PIN, LOW);\n    #endif",
+  );
+
+  assert.equal(hasFirmwareDiagnosticContract(compiledOutOff), false);
+});
+
+test("firmware diagnostics reject actuator writes embedded in larger expressions", () => {
+  const conditionalOff = COMPLIANT_FIRMWARE.replaceAll(
+    "digitalWrite(PUMP_PIN, LOW);",
+    "false && digitalWrite(PUMP_PIN, LOW);",
+  );
+
+  assert.equal(hasFirmwareDiagnosticContract(conditionalOff), false);
+});
+
 test("firmware diagnostics reject helper calls in place of direct physical shutoff", () => {
   const helperOnly = COMPLIANT_FIRMWARE
     .replace(
