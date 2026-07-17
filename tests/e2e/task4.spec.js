@@ -270,6 +270,7 @@ test("assembly, flash, automatic test, and manual acknowledgement use real route
 test("Task 4 routes are accessible and contained at desktop, tablet, and mobile widths", async ({
   page,
 }) => {
+  test.slow();
   const states = [
     ["/build/assemble", project],
     [

@@ -566,18 +566,43 @@ function renderReview(context, route) {
     renderReview(context, route);
   });
   for (const input of outlet.querySelectorAll("[data-bound-field]")) {
-    input.addEventListener("change", async () => {
+    const previewBounds = () => {
       const current = (app.getProject().confirmedParts || []).find(
         ({ id }) => id === selected.id,
       );
-      await persistPartEdit(context, selected.id, {
+      if (!current) return null;
+      const preview = updateDetectedPart([current], selected.id, {
         bounds: {
           ...current.bounds,
           [input.dataset.boundField]: Number(input.value),
         },
-      });
+      })[0];
+      for (const field of outlet.querySelectorAll("[data-bound-field]")) {
+        field.value = preview.bounds[field.dataset.boundField];
+      }
+      const annotation = outlet.querySelector(
+        `[data-select-part="${CSS.escape(selected.id)}"]`,
+      );
+      if (annotation) {
+        annotation.style.left = `${preview.bounds.x}%`;
+        annotation.style.top = `${preview.bounds.y}%`;
+        annotation.style.width = `${preview.bounds.width}%`;
+        annotation.style.height = `${preview.bounds.height}%`;
+      }
+      return preview;
+    };
+    let commitStarted = false;
+    const commitBounds = async () => {
+      if (commitStarted) return;
+      commitStarted = true;
+      const preview = previewBounds();
+      if (!preview) return;
+      await persistPartEdit(context, selected.id, { bounds: preview.bounds });
       renderReview(context, route);
-    });
+    };
+    input.addEventListener("input", previewBounds);
+    input.addEventListener("change", commitBounds);
+    input.addEventListener("blur", commitBounds);
   }
   const confidenceInput = outlet.querySelector("[data-confirm-confidence]");
   confidenceInput?.addEventListener("change", async () => {
