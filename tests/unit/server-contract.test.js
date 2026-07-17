@@ -6,14 +6,18 @@ import { fileURLToPath } from "node:url";
 
 import netlifyHandler from "../../netlify/functions/api.mjs";
 import {
+  createGitHubRepositoryDescription,
+  createPublishCapability,
   GITHUB_ARTIFACT_PATHS,
   GITHUB_MAX_CONTENT_BYTES,
   grantDeepgramToken,
   safeGitHubRepositoryMetadata,
+  verifyPublishCapability,
   validateGitHubUploadRequest,
 } from "../../src/makeable/server-contract.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const RECOVERY_SECRET = "ab".repeat(32);
 
 async function withDeepgramEnvironment(value, callback) {
   const previous = process.env.DEEPGRAM_API_KEY;
@@ -204,6 +208,7 @@ test("the GitHub upload boundary accepts only configured-owner Makeable artifact
         path: artifactPath,
         content: "safe content",
         message: "ignored client message",
+        capability: "opaque-capability",
       },
       "ray-builds",
     );
@@ -291,6 +296,13 @@ test("Netlify upload performs server-owned SHA GET/PUT and never accepts client 
   };
   try {
     await withGitHubEnvironment({}, async () => {
+      const capability = createPublishCapability(
+        {
+          owner: "ray-builds",
+          repo: "self-watering-plant",
+        },
+        "server-token",
+      ).capability;
       const response = await netlifyHandler(
         new Request("https://makeable.test/api/github/upload-file", {
           method: "POST",
@@ -300,6 +312,7 @@ test("Netlify upload performs server-owned SHA GET/PUT and never accepts client 
             repo: "self-watering-plant",
             path: "README.md",
             content: "Makeable",
+            capability,
           }),
         }),
       );
@@ -374,7 +387,7 @@ test("Netlify rejects cross-owner, arbitrary-path, branch, and oversized uploads
   assert.equal(calls, 0);
 });
 
-test("repository lookup returns verified configured-owner metadata only", async () => {
+test("a recovery secret verifies a Makeable-owned repository and mints a capability", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>
     new Response(
@@ -383,28 +396,220 @@ test("repository lookup returns verified configured-owner metadata only", async 
         html_url: "https://github.com/ray-builds/self-watering-plant",
         private: true,
         owner: { login: "ray-builds" },
-        token_must_not_leak: "secret",
+        description: createGitHubRepositoryDescription(
+          "Self-watering plant",
+          RECOVERY_SECRET,
+        ),
       }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
   try {
     await withGitHubEnvironment({}, async () => {
       const response = await netlifyHandler(
-        new Request(
-          "https://makeable.test/api/github/repository?repo=self-watering-plant",
-        ),
+        new Request("https://makeable.test/api/github/repository-recovery", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repo: "self-watering-plant",
+            recoverySecret: RECOVERY_SECRET,
+          }),
+        }),
       );
       assert.equal(response.status, 200);
-      assert.deepEqual(await response.json(), {
-        owner: "ray-builds",
-        name: "self-watering-plant",
-        html_url: "https://github.com/ray-builds/self-watering-plant",
-        private: true,
-      });
+      const recovered = await response.json();
+      assert.deepEqual(
+        {
+          owner: recovered.owner,
+          name: recovered.name,
+          html_url: recovered.html_url,
+          private: recovered.private,
+        },
+        {
+          owner: "ray-builds",
+          name: "self-watering-plant",
+          html_url: "https://github.com/ray-builds/self-watering-plant",
+          private: true,
+        },
+      );
+      assert.equal(
+        verifyPublishCapability(
+          recovered.publishCapability,
+          {
+            owner: "ray-builds",
+            repo: "self-watering-plant",
+            path: "README.md",
+          },
+          "server-token",
+        ).ok,
+        true,
+      );
     });
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("publish capabilities reject tampering, expiry, the wrong repo, and the wrong path", () => {
+  const issued = createPublishCapability(
+    { owner: "ray-builds", repo: "self-watering-plant" },
+    "server-token",
+    { now: 1_000_000 },
+  );
+  const request = {
+    owner: "ray-builds",
+    repo: "self-watering-plant",
+    path: "README.md",
+  };
+  assert.equal(
+    verifyPublishCapability(issued.capability, request, "server-token", {
+      now: 1_001_000,
+    }).ok,
+    true,
+  );
+  assert.equal(
+    verifyPublishCapability(
+      `${issued.capability.slice(0, -1)}x`,
+      request,
+      "server-token",
+      { now: 1_001_000 },
+    ).ok,
+    false,
+  );
+  assert.equal(
+    verifyPublishCapability(
+      issued.capability,
+      { ...request, repo: "another-repo" },
+      "server-token",
+      { now: 1_001_000 },
+    ).ok,
+    false,
+  );
+  assert.equal(
+    verifyPublishCapability(
+      issued.capability,
+      { ...request, path: ".github/workflows/pwn.yml" },
+      "server-token",
+      { now: 1_001_000 },
+    ).ok,
+    false,
+  );
+  assert.equal(
+    verifyPublishCapability(issued.capability, request, "server-token", {
+      now: issued.expiresAt + 1,
+    }).ok,
+    false,
+  );
+});
+
+test("wrong or missing recovery secrets never mint a capability and no public GET recovery exists", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(
+      JSON.stringify({
+        name: "self-watering-plant",
+        private: false,
+        owner: { login: "ray-builds" },
+        description: createGitHubRepositoryDescription(
+          "Self-watering plant",
+          RECOVERY_SECRET,
+        ),
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  };
+  try {
+    await withGitHubEnvironment({}, async () => {
+      for (const body of [
+        { repo: "self-watering-plant" },
+        {
+          repo: "self-watering-plant",
+          recoverySecret: "cd".repeat(32),
+        },
+      ]) {
+        const response = await netlifyHandler(
+          new Request("https://makeable.test/api/github/repository-recovery", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+        );
+        assert.ok([400, 403].includes(response.status));
+        assert.equal("publishCapability" in (await response.json()), false);
+      }
+      const getResponse = await netlifyHandler(
+        new Request(
+          "https://makeable.test/api/github/repository-recovery?repo=self-watering-plant",
+        ),
+      );
+      assert.equal(getResponse.status, 404);
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls, 1);
+});
+
+test("upload rejects missing, tampered, wrong-repo, and wrong-path capabilities before GitHub", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response("unexpected", { status: 500 });
+  };
+  const issued = createPublishCapability(
+    { owner: "ray-builds", repo: "self-watering-plant" },
+    "server-token",
+  ).capability;
+  try {
+    await withGitHubEnvironment({}, async () => {
+      for (const body of [
+        {
+          owner: "ray-builds",
+          repo: "self-watering-plant",
+          path: "README.md",
+          content: "Makeable",
+        },
+        {
+          owner: "ray-builds",
+          repo: "self-watering-plant",
+          path: "README.md",
+          content: "Makeable",
+          capability: `${issued.slice(0, -1)}x`,
+        },
+        {
+          owner: "ray-builds",
+          repo: "another-repo",
+          path: "README.md",
+          content: "Makeable",
+          capability: issued,
+        },
+        {
+          owner: "ray-builds",
+          repo: "self-watering-plant",
+          path: "parts-list/README.md",
+          content: "Makeable",
+          capability: createPublishCapability(
+            { owner: "ray-builds", repo: "another-repo" },
+            "server-token",
+          ).capability,
+        },
+      ]) {
+        const response = await netlifyHandler(
+          new Request("https://makeable.test/api/github/upload-file", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+        );
+        assert.ok([400, 403].includes(response.status));
+      }
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls, 0);
 });
 
 test("repository metadata from a different owner or visibility-less response is rejected", () => {
@@ -431,4 +636,70 @@ test("repository metadata from a different owner or visibility-less response is 
     ),
     null,
   );
+});
+
+test("repository creation stores only a recovery proof and returns a short-lived capability", async () => {
+  const originalFetch = globalThis.fetch;
+  let upstreamBody;
+  globalThis.fetch = async (_url, options) => {
+    upstreamBody = JSON.parse(options.body);
+    return new Response(
+      JSON.stringify({
+        name: "self-watering-plant",
+        private: false,
+        owner: { login: "ray-builds" },
+        description: upstreamBody.description,
+      }),
+      { status: 201, headers: { "Content-Type": "application/json" } },
+    );
+  };
+  try {
+    await withGitHubEnvironment({}, async () => {
+      const response = await netlifyHandler(
+        new Request("https://makeable.test/api/github/repos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "self-watering-plant",
+            description: "Self-watering plant",
+            private: false,
+            recoverySecret: RECOVERY_SECRET,
+          }),
+        }),
+      );
+      assert.equal(response.status, 201);
+      const created = await response.json();
+      assert.equal(
+        verifyPublishCapability(
+          created.publishCapability,
+          {
+            owner: "ray-builds",
+            repo: "self-watering-plant",
+            path: "code/makeable.ino",
+          },
+          "server-token",
+        ).ok,
+        true,
+      );
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal("recoverySecret" in upstreamBody, false);
+  assert.doesNotMatch(upstreamBody.description, new RegExp(RECOVERY_SECRET));
+  assert.match(upstreamBody.description, /\[makeable:v1:[a-f0-9]{64}\]/);
+});
+
+test("local and Netlify GitHub endpoints use the same capability and recovery helpers", async () => {
+  const [serverSource, netlifySource] = await Promise.all([
+    readFile(path.join(root, "server.mjs"), "utf8"),
+    readFile(path.join(root, "netlify/functions/api.mjs"), "utf8"),
+  ]);
+  for (const source of [serverSource, netlifySource]) {
+    assert.match(source, /repository-recovery/);
+    assert.match(source, /createPublishCapability/);
+    assert.match(source, /repositoryMatchesRecoverySecret/);
+    assert.match(source, /verifyPublishCapability/);
+    assert.doesNotMatch(source, /api\/github\/repository["'][\s\S]{0,80}GET/);
+  }
 });

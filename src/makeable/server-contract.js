@@ -1,3 +1,9 @@
+import {
+  createHash,
+  createHmac,
+  timingSafeEqual,
+} from "node:crypto";
+
 export const DEEPGRAM_GRANT_URL = "https://api.deepgram.com/v1/auth/grant";
 export const DEEPGRAM_TOKEN_TTL_SECONDS = 60;
 export const GITHUB_ARTIFACT_PATHS = Object.freeze([
@@ -9,6 +15,8 @@ export const GITHUB_ARTIFACT_PATHS = Object.freeze([
 ]);
 export const GITHUB_MAX_CONTENT_BYTES = 1024 * 1024;
 export const GITHUB_MAX_REQUEST_BYTES = GITHUB_MAX_CONTENT_BYTES + 32 * 1024;
+export const PUBLISH_CAPABILITY_TTL_MS = 5 * 60 * 1000;
+export const GITHUB_RECOVERY_MARKER_PREFIX = "[makeable:v1:";
 
 export function createPublicConfig(env, extras = {}) {
   return {
@@ -82,7 +90,12 @@ export function validateGitHubRepositoryRequest(body, configuredOwner) {
   if (!isPlainObject(body)) {
     return invalidGitHubRequest("A JSON object is required.");
   }
-  const unexpected = unexpectedKeys(body, ["name", "description", "private"]);
+  const unexpected = unexpectedKeys(body, [
+    "name",
+    "description",
+    "private",
+    "recoverySecret",
+  ]);
   if (unexpected.length) {
     return invalidGitHubRequest(`Unsupported field: ${unexpected[0]}.`);
   }
@@ -98,15 +111,21 @@ export function validateGitHubRepositoryRequest(body, configuredOwner) {
   ) {
     return invalidGitHubRequest("Repository description is invalid.");
   }
+  if (!validateRecoverySecret(body.recoverySecret)) {
+    return invalidGitHubRequest("A valid project recovery secret is required.");
+  }
   return {
     ok: true,
     value: {
       owner,
       name: repo,
-      description:
+      description: createGitHubRepositoryDescription(
         String(body.description || "").trim() ||
-        "Hardware project built with Makeable",
+          "Hardware project built with Makeable",
+        body.recoverySecret,
+      ),
       private: body.private,
+      recoverySecret: body.recoverySecret,
     },
   };
 }
@@ -123,6 +142,7 @@ export function validateGitHubUploadRequest(body, configuredOwner) {
     "path",
     "content",
     "message",
+    "capability",
   ]);
   if (unexpected.length) {
     return invalidGitHubRequest(`Unsupported field: ${unexpected[0]}.`);
@@ -154,6 +174,13 @@ export function validateGitHubUploadRequest(body, configuredOwner) {
   ) {
     return invalidGitHubRequest("The commit message is invalid.");
   }
+  if (
+    typeof body.capability !== "string" ||
+    !body.capability ||
+    body.capability.length > 4096
+  ) {
+    return invalidGitHubRequest("A publish capability is required.");
+  }
   return {
     ok: true,
     value: {
@@ -161,16 +188,30 @@ export function validateGitHubUploadRequest(body, configuredOwner) {
       repo,
       path: body.path,
       content: body.content,
+      capability: body.capability,
     },
   };
 }
 
-export function validateGitHubLookupRequest(repoName, configuredOwner) {
+export function validateGitHubRecoveryRequest(body, configuredOwner) {
   const owner = validateGitHubOwner(configuredOwner);
   if (!owner) return invalidGitHubRequest("GITHUB_OWNER is not configured.", 503);
-  const repo = validateGitHubRepositoryName(repoName);
+  if (!isPlainObject(body)) {
+    return invalidGitHubRequest("A JSON object is required.");
+  }
+  const unexpected = unexpectedKeys(body, ["repo", "recoverySecret"]);
+  if (unexpected.length) {
+    return invalidGitHubRequest(`Unsupported field: ${unexpected[0]}.`);
+  }
+  const repo = validateGitHubRepositoryName(body.repo);
   if (!repo) return invalidGitHubRequest("Invalid repository name.");
-  return { ok: true, value: { owner, repo } };
+  if (!validateRecoverySecret(body.recoverySecret)) {
+    return invalidGitHubRequest("A valid project recovery secret is required.");
+  }
+  return {
+    ok: true,
+    value: { owner, repo, recoverySecret: body.recoverySecret },
+  };
 }
 
 export function safeGitHubRepositoryMetadata(
@@ -199,6 +240,141 @@ export function safeGitHubRepositoryMetadata(
     html_url: `https://github.com/${owner}/${upstreamName}`,
     private: raw.private,
   };
+}
+
+export function createGitHubRecoveryProof(recoverySecret) {
+  if (!validateRecoverySecret(recoverySecret)) {
+    throw new TypeError("A 256-bit hexadecimal recovery secret is required.");
+  }
+  return createHash("sha256").update(recoverySecret, "utf8").digest("hex");
+}
+
+export function createGitHubRepositoryDescription(
+  description,
+  recoverySecret,
+) {
+  const clean = String(description || "Hardware project built with Makeable")
+    .replace(/\s*\[makeable:v1:[a-f0-9]{64}\]\s*/gi, " ")
+    .trim()
+    .slice(0, 240);
+  return `${clean} ${GITHUB_RECOVERY_MARKER_PREFIX}${createGitHubRecoveryProof(
+    recoverySecret,
+  )}]`;
+}
+
+export function repositoryMatchesRecoverySecret(description, recoverySecret) {
+  if (
+    typeof description !== "string" ||
+    !validateRecoverySecret(recoverySecret)
+  ) {
+    return false;
+  }
+  const expected = `${GITHUB_RECOVERY_MARKER_PREFIX}${createGitHubRecoveryProof(
+    recoverySecret,
+  )}]`;
+  const expectedBytes = Buffer.from(expected, "utf8");
+  const marker = description.match(/\[makeable:v1:[a-f0-9]{64}\]/i)?.[0] || "";
+  const markerBytes = Buffer.from(marker.toLowerCase(), "utf8");
+  return (
+    markerBytes.length === expectedBytes.length &&
+    timingSafeEqual(markerBytes, expectedBytes)
+  );
+}
+
+export function createPublishCapability(
+  { owner, repo },
+  githubToken,
+  options = {},
+) {
+  const validatedOwner = validateGitHubOwner(owner);
+  const validatedRepo = validateGitHubRepositoryName(repo);
+  if (!validatedOwner || !validatedRepo || !githubToken) {
+    throw new TypeError("A valid owner, repository, and server token are required.");
+  }
+  const now = Number(options.now ?? Date.now());
+  const payload = {
+    version: 1,
+    owner: validatedOwner,
+    repo: validatedRepo,
+    paths: [...GITHUB_ARTIFACT_PATHS],
+    issuedAt: now,
+    expiresAt: now + PUBLISH_CAPABILITY_TTL_MS,
+  };
+  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString(
+    "base64url",
+  );
+  const signature = signCapability(encoded, githubToken);
+  return {
+    capability: `${encoded}.${signature}`,
+    expiresAt: payload.expiresAt,
+  };
+}
+
+export function verifyPublishCapability(
+  capability,
+  { owner, repo, path },
+  githubToken,
+  options = {},
+) {
+  try {
+    if (typeof capability !== "string" || !githubToken) {
+      return invalidCapability();
+    }
+    const [encoded, signature, extra] = capability.split(".");
+    if (!encoded || !signature || extra) return invalidCapability();
+    const expected = Buffer.from(signCapability(encoded, githubToken), "utf8");
+    const received = Buffer.from(signature, "utf8");
+    if (
+      expected.length !== received.length ||
+      !timingSafeEqual(expected, received)
+    ) {
+      return invalidCapability();
+    }
+    const payload = JSON.parse(
+      Buffer.from(encoded, "base64url").toString("utf8"),
+    );
+    const now = Number(options.now ?? Date.now());
+    const validPaths =
+      Array.isArray(payload.paths) &&
+      payload.paths.length === GITHUB_ARTIFACT_PATHS.length &&
+      GITHUB_ARTIFACT_PATHS.every(
+        (candidate, index) => payload.paths[index] === candidate,
+      );
+    if (
+      payload.version !== 1 ||
+      payload.owner !== owner ||
+      payload.repo !== repo ||
+      !validPaths ||
+      !payload.paths.includes(path) ||
+      !Number.isFinite(payload.issuedAt) ||
+      !Number.isFinite(payload.expiresAt) ||
+      payload.issuedAt > now + 30_000 ||
+      payload.expiresAt <= now ||
+      payload.expiresAt - payload.issuedAt !== PUBLISH_CAPABILITY_TTL_MS
+    ) {
+      return invalidCapability();
+    }
+    return { ok: true, expiresAt: payload.expiresAt };
+  } catch {
+    return invalidCapability();
+  }
+}
+
+function signCapability(encodedPayload, githubToken) {
+  const key = createHmac("sha256", githubToken)
+    .update("makeable-publish-capability-key:v1", "utf8")
+    .digest();
+  return createHmac("sha256", key)
+    .update(encodedPayload, "utf8")
+    .digest("base64url");
+}
+
+function invalidCapability() {
+  return { ok: false, error: "Publish capability is invalid or expired." };
+}
+
+function validateRecoverySecret(value) {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 }
 
 function validateGitHubOwner(value) {

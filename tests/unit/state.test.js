@@ -14,6 +14,10 @@ const COMPLETE_PROJECT = {
   wiring: { connections: ["GPIO34 -> LDR"] },
   firmware: { source: "void setup() {}" },
   tests: { automatic: "passed", manual: "passed" },
+  publishAuthorization: {
+    repositoryName: "project",
+    recoverySecret: "ab".repeat(32),
+  },
   publish: { repositoryUrl: "https://example.test/project" },
   progress: {
     completedRoutes: [
@@ -72,6 +76,7 @@ test("project snapshots use the versioned Makeable state shape", () => {
     wiring: null,
     firmware: null,
     tests: null,
+    publishAuthorization: null,
     publish: null,
     progress: { completedRoutes: [] },
   });
@@ -120,6 +125,26 @@ test("review selection persists without invalidating generated downstream work",
   assert.deepEqual(updated.progress, COMPLETE_PROJECT.progress);
 });
 
+test("publish authorization persists independently and a fresh snapshot clears it", () => {
+  const authorization = {
+    repositoryName: "self-watering-plant",
+    recoverySecret: "ab".repeat(32),
+  };
+  const updated = state.updateProject(
+    COMPLETE_PROJECT,
+    "publishAuthorization",
+    authorization,
+    { now: () => "2026-07-16T12:00:00.000Z" },
+  );
+
+  assert.deepEqual(updated.publishAuthorization, authorization);
+  assert.equal(updated.idea, COMPLETE_PROJECT.idea);
+  assert.equal(updated.firmware, COMPLETE_PROJECT.firmware);
+  assert.equal(updated.tests, COMPLETE_PROJECT.tests);
+  assert.equal(updated.publish, COMPLETE_PROJECT.publish);
+  assert.equal(state.createProjectSnapshot().publishAuthorization, null);
+});
+
 test("unchanged values preserve downstream work", () => {
   assert.equal(typeof state.updateProject, "function", "updateProject should be exported");
   const unchanged = state.updateProject(
@@ -141,6 +166,7 @@ test("the invalidation chain covers idea, photo, parts, wiring, firmware, tests,
     wiring: ["firmware", "tests", "publish"],
     firmware: ["tests", "publish"],
     tests: ["publish"],
+    publishAuthorization: [],
     publish: [],
   });
 });

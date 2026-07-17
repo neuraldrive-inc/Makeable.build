@@ -86,7 +86,7 @@ test.beforeEach(async ({ page }) => {
       hasGithubToken: true,
       arduinoFqbn: "esp32:esp32:esp32",
     };
-    window.__task5 = { uploads: [], shares: [], copied: [] };
+    window.__task5 = { create: null, uploads: [], shares: [], copied: [] };
     Object.defineProperty(navigator, "share", {
       configurable: true,
       value: async (payload) => window.__task5.shares.push(payload),
@@ -100,8 +100,12 @@ test.beforeEach(async ({ page }) => {
       },
     });
   });
-  await page.route("**/api/github/repos", (route) =>
-    route.fulfill({
+  await page.route("**/api/github/repos", async (route) => {
+    const body = route.request().postDataJSON();
+    await page.evaluate((payload) => {
+      window.__task5.create = payload;
+    }, body);
+    await route.fulfill({
       status: 201,
       contentType: "application/json",
       body: JSON.stringify({
@@ -109,9 +113,10 @@ test.beforeEach(async ({ page }) => {
         name: "self-watering-plant",
         html_url: "https://github.com/ray-builds/self-watering-plant",
         private: true,
+        publishCapability: "server-issued-capability",
       }),
-    }),
-  );
+    });
+  });
   await page.route("**/api/github/upload-file", async (route) => {
     const body = route.request().postDataJSON();
     await page.evaluate((payload) => window.__task5.uploads.push(payload), body);
@@ -143,6 +148,8 @@ test("publish uploads all artifacts, Success actions work, and starting over pre
   await expect(page.getByText("ray-builds / self-watering-plant")).toBeVisible();
   await expect(page.getByText("Private", { exact: true })).toBeVisible();
   const uploads = await page.evaluate(() => window.__task5.uploads);
+  const create = await page.evaluate(() => window.__task5.create);
+  expect(create.recoverySecret).toMatch(/^[a-f0-9]{64}$/);
   expect(uploads.map(({ path }) => path)).toEqual([
     "README.md",
     "build-guide/README.md",
@@ -150,6 +157,9 @@ test("publish uploads all artifacts, Success actions work, and starting over pre
     "parts-list/README.md",
     "test-results/README.md",
   ]);
+  expect(uploads.every(({ capability }) => capability === "server-issued-capability")).toBe(
+    true,
+  );
 
   await page.getByRole("button", { name: "Share project" }).click();
   await expect(page.getByText("Share sheet opened.")).toBeVisible();
@@ -159,6 +169,11 @@ test("publish uploads all artifacts, Success actions work, and starting over pre
   await page.getByRole("button", { name: "Start another build" }).click();
   await expect(page).toHaveURL(/\/build\/new$/);
   expect(await page.evaluate(() => window.MAKEABLE_APP.getProject().idea)).toBeNull();
+  expect(
+    await page.evaluate(
+      () => window.MAKEABLE_APP.getProject().publishAuthorization,
+    ),
+  ).toBeNull();
   expect(await page.evaluate(() => window.MAKEABLE_CONFIG)).toEqual(configBefore);
 });
 

@@ -1,12 +1,15 @@
 import {
   createPublicConfig,
   createPublicConfigScript,
+  createPublishCapability,
   GITHUB_MAX_REQUEST_BYTES,
   grantDeepgramToken,
+  repositoryMatchesRecoverySecret,
   safeGitHubRepositoryMetadata,
-  validateGitHubLookupRequest,
+  validateGitHubRecoveryRequest,
   validateGitHubRepositoryRequest,
   validateGitHubUploadRequest,
+  verifyPublishCapability,
 } from "../../src/makeable/server-contract.js";
 
 export default async function handler(req) {
@@ -64,8 +67,11 @@ export default async function handler(req) {
       return createGitHubRepo(req, env);
     }
 
-    if (url.pathname === "/api/github/repository" && req.method === "GET") {
-      return getGitHubRepository(url, env);
+    if (
+      url.pathname === "/api/github/repository-recovery" &&
+      req.method === "POST"
+    ) {
+      return recoverGitHubRepository(req, env);
     }
 
     if (url.pathname === "/api/github/upload-file" && req.method === "POST") {
@@ -270,24 +276,48 @@ async function createGitHubRepo(req, env) {
       auto_init: false,
     }),
   });
-  return pipeJson(upstream);
+  if (!upstream.ok) return pipeJson(upstream);
+  const metadata = safeGitHubRepositoryMetadata(
+    await upstream.json(),
+    repository.owner,
+    repository.name,
+  );
+  if (!metadata) {
+    return jsonResponse(
+      { error: "GitHub returned unverified repository metadata." },
+      502,
+    );
+  }
+  const issued = createPublishCapability(
+    { owner: metadata.owner, repo: metadata.name },
+    env.GITHUB_TOKEN,
+  );
+  return jsonResponse(
+    {
+      ...metadata,
+      publishCapability: issued.capability,
+      capabilityExpiresAt: issued.expiresAt,
+    },
+    201,
+  );
 }
 
-async function getGitHubRepository(url, env) {
+async function recoverGitHubRepository(req, env) {
   if (!env.GITHUB_TOKEN) {
     return jsonResponse(
       { error: "GITHUB_TOKEN is missing in Netlify environment variables" },
       401,
     );
   }
-  const validation = validateGitHubLookupRequest(
-    url.searchParams.get("repo"),
+  const body = await readLimitedJsonRequest(req, GITHUB_MAX_REQUEST_BYTES);
+  const validation = validateGitHubRecoveryRequest(
+    body,
     env.GITHUB_OWNER,
   );
   if (!validation.ok) {
     return jsonResponse({ error: validation.error }, validation.status);
   }
-  const { owner, repo } = validation.value;
+  const { owner, repo, recoverySecret } = validation.value;
   const upstream = await fetch(
     `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
       repo,
@@ -305,14 +335,29 @@ async function getGitHubRepository(url, env) {
       upstream.status === 404 ? 404 : 502,
     );
   }
-  const metadata = safeGitHubRepositoryMetadata(
-    await upstream.json(),
-    owner,
-    repo,
+  const repository = await upstream.json();
+  const metadata = safeGitHubRepositoryMetadata(repository, owner, repo);
+  if (
+    !metadata ||
+    !repositoryMatchesRecoverySecret(repository.description, recoverySecret)
+  ) {
+    return jsonResponse(
+      {
+        error:
+          "This repository cannot be recovered safely. Choose a new repository name.",
+      },
+      403,
+    );
+  }
+  const issued = createPublishCapability(
+    { owner: metadata.owner, repo: metadata.name },
+    env.GITHUB_TOKEN,
   );
-  return metadata
-    ? jsonResponse(metadata)
-    : jsonResponse({ error: "Repository was not verified." }, 404);
+  return jsonResponse({
+    ...metadata,
+    publishCapability: issued.capability,
+    capabilityExpiresAt: issued.expiresAt,
+  });
 }
 
 async function uploadGitHubFile(req, env) {
@@ -329,7 +374,16 @@ async function uploadGitHubFile(req, env) {
     repo,
     path: filePath,
     content,
+    capability,
   } = validation.value;
+  const authorization = verifyPublishCapability(
+    capability,
+    { owner, repo, path: filePath },
+    env.GITHUB_TOKEN,
+  );
+  if (!authorization.ok) {
+    return jsonResponse({ error: authorization.error }, 403);
+  }
 
   const encodedPath = filePath.split("/").map(encodeURIComponent).join("/");
   let sha;

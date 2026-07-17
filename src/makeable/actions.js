@@ -301,6 +301,15 @@ export function validateRepositoryName(value) {
   return { valid: true, value: normalized, message: "" };
 }
 
+export function createRecoverySecret(cryptoLike = globalThis.crypto) {
+  if (typeof cryptoLike?.getRandomValues !== "function") {
+    throw new Error("Secure project recovery is unavailable in this browser.");
+  }
+  const bytes = new Uint8Array(32);
+  cryptoLike.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export function createProjectArtifacts(project = {}) {
   const title = cleanText(
     project.feasibility?.projectTitle,
@@ -432,6 +441,7 @@ export async function publishProjectArtifacts({
   repositoryName,
   isPrivate = false,
   configuredOwner = "",
+  recoverySecret = "",
   fetchImpl = globalThis.fetch,
 } = {}) {
   const validation = validateRepositoryName(repositoryName);
@@ -442,6 +452,9 @@ export async function publishProjectArtifacts({
     throw new Error(
       "Set GITHUB_OWNER on the Makeable server before publishing.",
     );
+  }
+  if (!/^[a-f0-9]{64}$/.test(recoverySecret)) {
+    throw new Error("A valid project recovery secret is required.");
   }
   let repository;
   let recoveredExisting = false;
@@ -456,6 +469,7 @@ export async function publishProjectArtifacts({
         "Hardware project",
       )} — built with Makeable`,
       private: Boolean(isPrivate),
+      recoverySecret,
     }),
   });
   const created = await safeResponseJson(createResponse);
@@ -470,10 +484,14 @@ export async function publishProjectArtifacts({
     }
   } else if (createResponse.status === 422) {
     const lookupResponse = await fetchImpl(
-      `/api/github/repository?repo=${encodeURIComponent(validation.value)}`,
+      "/api/github/repository-recovery",
       {
-        method: "GET",
-        headers: { Accept: "application/json" },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repo: validation.value,
+          recoverySecret,
+        }),
       },
     );
     const existing = await safeResponseJson(lookupResponse);
@@ -513,6 +531,7 @@ export async function publishProjectArtifacts({
         path: artifact.path,
         content: artifact.content,
         message: `Update ${artifact.path} from Makeable`,
+        capability: repository.publishCapability,
       }),
     });
     if (!uploadResponse.ok) {
@@ -1757,7 +1776,9 @@ function verifiedRepositoryMetadata(raw, configuredOwner, expectedName) {
   if (
     owner.toLowerCase() !== String(configuredOwner).toLowerCase() ||
     name.toLowerCase() !== String(expectedName).toLowerCase() ||
-    typeof raw?.private !== "boolean"
+    typeof raw?.private !== "boolean" ||
+    typeof raw?.publishCapability !== "string" ||
+    !raw.publishCapability
   ) {
     return null;
   }
@@ -1766,6 +1787,7 @@ function verifiedRepositoryMetadata(raw, configuredOwner, expectedName) {
     name,
     private: raw.private,
     html_url: `https://github.com/${owner}/${name}`,
+    publishCapability: raw.publishCapability,
   };
 }
 

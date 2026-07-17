@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  createRecoverySecret,
   createProjectArtifacts,
   createProjectZip,
   publishProjectArtifacts,
   sharePublishedProject,
   validateRepositoryName,
 } from "../../src/makeable/actions.js";
+
+const RECOVERY_SECRET = "ab".repeat(32);
+const PUBLISH_CAPABILITY = "server-issued-capability";
 
 const PROJECT = {
   idea: { text: "Build a self-watering plant" },
@@ -78,6 +82,17 @@ test("repository names are normalized only when valid and unsafe names are rejec
   assert.equal(validateRepositoryName("x".repeat(101)).valid, false);
 });
 
+test("a 256-bit recovery secret is generated from browser crypto", () => {
+  const secret = createRecoverySecret({
+    getRandomValues(bytes) {
+      bytes.fill(0xab);
+      return bytes;
+    },
+  });
+  assert.equal(secret, RECOVERY_SECRET);
+  assert.match(secret, /^[a-f0-9]{64}$/);
+});
+
 test("artifact generation produces the five visible, identical publish/export files", () => {
   const artifacts = createProjectArtifacts(PROJECT);
   assert.deepEqual(
@@ -108,23 +123,27 @@ test("GitHub publishing verifies an existing repository before upload and uses i
     repositoryName: "self-watering-plant",
     isPrivate: false,
     configuredOwner: "ray-builds",
+    recoverySecret: RECOVERY_SECRET,
     fetchImpl: async (url, options) => {
       requests.push({
         url,
         body: options?.body ? JSON.parse(options.body) : null,
       });
       if (url === "/api/github/repos") {
+        assert.equal(requests.at(-1).body.recoverySecret, RECOVERY_SECRET);
         return response({ message: "name already exists" }, 422);
       }
-      if (
-        url ===
-        "/api/github/repository?repo=self-watering-plant"
-      ) {
+      if (url === "/api/github/repository-recovery") {
+        assert.deepEqual(requests.at(-1).body, {
+          repo: "self-watering-plant",
+          recoverySecret: RECOVERY_SECRET,
+        });
         return response({
           owner: "ray-builds",
           name: "self-watering-plant",
           html_url: "https://github.com/ray-builds/self-watering-plant",
           private: true,
+          publishCapability: PUBLISH_CAPABILITY,
         });
       }
       return response({ content: { sha: `sha-${requests.length}` } });
@@ -143,6 +162,10 @@ test("GitHub publishing verifies an existing repository before upload and uses i
     requests.slice(2).map(({ body }) => body.content),
     artifacts.map(({ content }) => content),
   );
+  assert.equal(
+    requests.slice(2).every(({ body }) => body.capability === PUBLISH_CAPABILITY),
+    true,
+  );
 });
 
 test("an arbitrary GitHub 422 never becomes existing-repository recovery", async () => {
@@ -152,6 +175,7 @@ test("an arbitrary GitHub 422 never becomes existing-repository recovery", async
       project: PROJECT,
       repositoryName: "self-watering-plant",
       configuredOwner: "ray-builds",
+      recoverySecret: RECOVERY_SECRET,
       fetchImpl: async (url) => {
         calls.push(url);
         if (url === "/api/github/repos") {
@@ -164,7 +188,7 @@ test("an arbitrary GitHub 422 never becomes existing-repository recovery", async
   );
   assert.deepEqual(calls, [
     "/api/github/repos",
-    "/api/github/repository?repo=self-watering-plant",
+    "/api/github/repository-recovery",
   ]);
 });
 
@@ -174,6 +198,7 @@ test("GitHub create and upload failures are surfaced without claiming success", 
       project: PROJECT,
       repositoryName: "self-watering-plant",
       configuredOwner: "ray-builds",
+      recoverySecret: RECOVERY_SECRET,
       fetchImpl: async () => response({ message: "Forbidden" }, 403),
     }),
     /Forbidden/,
@@ -185,6 +210,7 @@ test("GitHub create and upload failures are surfaced without claiming success", 
       project: PROJECT,
       repositoryName: "self-watering-plant",
       configuredOwner: "ray-builds",
+      recoverySecret: RECOVERY_SECRET,
       fetchImpl: async (url) => {
         if (url === "/api/github/repos") {
           return response({
@@ -192,6 +218,7 @@ test("GitHub create and upload failures are surfaced without claiming success", 
             name: "self-watering-plant",
             html_url: "https://github.com/ray-builds/self-watering-plant",
             private: false,
+            publishCapability: PUBLISH_CAPABILITY,
           });
         }
         uploads += 1;
@@ -218,15 +245,17 @@ test("retry after a partial upload verifies the existing repo and safely re-uplo
             name: "self-watering-plant",
             html_url: "https://github.com/ray-builds/self-watering-plant",
             private: false,
+            publishCapability: PUBLISH_CAPABILITY,
           })
         : response({ message: "already exists" }, 422);
     }
-    if (url.startsWith("/api/github/repository?")) {
+    if (url === "/api/github/repository-recovery") {
       return response({
         owner: "ray-builds",
         name: "self-watering-plant",
         html_url: "https://github.com/ray-builds/self-watering-plant",
         private: false,
+        publishCapability: PUBLISH_CAPABILITY,
       });
     }
     const path = JSON.parse(options.body).path;
@@ -242,6 +271,7 @@ test("retry after a partial upload verifies the existing repo and safely re-uplo
       project: PROJECT,
       repositoryName: "self-watering-plant",
       configuredOwner: "ray-builds",
+      recoverySecret: RECOVERY_SECRET,
       fetchImpl,
     }),
     /temporary failure/,
@@ -250,6 +280,7 @@ test("retry after a partial upload verifies the existing repo and safely re-uplo
     project: PROJECT,
     repositoryName: "self-watering-plant",
     configuredOwner: "ray-builds",
+    recoverySecret: RECOVERY_SECRET,
     fetchImpl,
   });
 

@@ -9,12 +9,15 @@ import { promisify } from "node:util";
 import {
   createPublicConfig,
   createPublicConfigScript,
+  createPublishCapability,
   GITHUB_MAX_REQUEST_BYTES,
   grantDeepgramToken,
+  repositoryMatchesRecoverySecret,
   safeGitHubRepositoryMetadata,
-  validateGitHubLookupRequest,
+  validateGitHubRecoveryRequest,
   validateGitHubRepositoryRequest,
   validateGitHubUploadRequest,
+  verifyPublishCapability,
 } from "./src/makeable/server-contract.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -81,8 +84,11 @@ const server = createServer(async (req, res) => {
       return createGitHubRepo(req, res, env);
     }
 
-    if (url.pathname === "/api/github/repository" && req.method === "GET") {
-      return getGitHubRepository(url, res, env);
+    if (
+      url.pathname === "/api/github/repository-recovery" &&
+      req.method === "POST"
+    ) {
+      return recoverGitHubRepository(req, res, env);
     }
 
     if (url.pathname === "/api/github/upload-file" && req.method === "POST") {
@@ -453,21 +459,43 @@ async function createGitHubRepo(req, res, env) {
       auto_init: false,
     }),
   });
-  return pipeJson(upstream, res);
+  if (!upstream.ok) return pipeJson(upstream, res);
+  const metadata = safeGitHubRepositoryMetadata(
+    await upstream.json(),
+    repository.owner,
+    repository.name,
+  );
+  if (!metadata) {
+    return sendJson(res, { error: "GitHub returned unverified repository metadata." }, 502);
+  }
+  const issued = createPublishCapability(
+    { owner: metadata.owner, repo: metadata.name },
+    env.GITHUB_TOKEN,
+  );
+  return sendJson(
+    res,
+    {
+      ...metadata,
+      publishCapability: issued.capability,
+      capabilityExpiresAt: issued.expiresAt,
+    },
+    201,
+  );
 }
 
-async function getGitHubRepository(url, res, env) {
+async function recoverGitHubRepository(req, res, env) {
   if (!env.GITHUB_TOKEN) {
     return sendJson(res, { error: "GITHUB_TOKEN is missing in .env" }, 401);
   }
-  const validation = validateGitHubLookupRequest(
-    url.searchParams.get("repo"),
+  const body = await readJsonBody(req, GITHUB_MAX_REQUEST_BYTES);
+  const validation = validateGitHubRecoveryRequest(
+    body,
     env.GITHUB_OWNER,
   );
   if (!validation.ok) {
     return sendJson(res, { error: validation.error }, validation.status);
   }
-  const { owner, repo } = validation.value;
+  const { owner, repo, recoverySecret } = validation.value;
   const upstream = await fetch(
     `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
       repo,
@@ -486,15 +514,30 @@ async function getGitHubRepository(url, res, env) {
       upstream.status === 404 ? 404 : 502,
     );
   }
-  const metadata = safeGitHubRepositoryMetadata(
-    await upstream.json(),
-    owner,
-    repo,
-  );
-  if (!metadata) {
-    return sendJson(res, { error: "Repository was not verified." }, 404);
+  const repository = await upstream.json();
+  const metadata = safeGitHubRepositoryMetadata(repository, owner, repo);
+  if (
+    !metadata ||
+    !repositoryMatchesRecoverySecret(repository.description, recoverySecret)
+  ) {
+    return sendJson(
+      res,
+      {
+        error:
+          "This repository cannot be recovered safely. Choose a new repository name.",
+      },
+      403,
+    );
   }
-  return sendJson(res, metadata);
+  const issued = createPublishCapability(
+    { owner: metadata.owner, repo: metadata.name },
+    env.GITHUB_TOKEN,
+  );
+  return sendJson(res, {
+    ...metadata,
+    publishCapability: issued.capability,
+    capabilityExpiresAt: issued.expiresAt,
+  });
 }
 
 async function uploadGitHubFile(req, res, env) {
@@ -511,7 +554,16 @@ async function uploadGitHubFile(req, res, env) {
     repo,
     path: filePath,
     content,
+    capability,
   } = validation.value;
+  const authorization = verifyPublishCapability(
+    capability,
+    { owner, repo, path: filePath },
+    env.GITHUB_TOKEN,
+  );
+  if (!authorization.ok) {
+    return sendJson(res, { error: authorization.error }, 403);
+  }
 
   const encodedPath = filePath.split("/").map(encodeURIComponent).join("/");
   let sha;

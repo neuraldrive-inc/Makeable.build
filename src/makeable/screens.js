@@ -7,6 +7,7 @@ import {
   compileAndFlashFirmware,
   createProjectArtifacts,
   createProjectZip,
+  createRecoverySecret,
   createDiagnosticSession,
   createObjectUrlRegistry,
   createPartSearchUrl,
@@ -1189,11 +1190,24 @@ async function publishFromScreen(context, route, form, validate) {
   button.textContent = "Packaging your project…";
   status.textContent = "Creating the repository and uploading five project files…";
   try {
+    const currentAuthorization = app.getProject().publishAuthorization;
+    const recoverySecret =
+      currentAuthorization?.repositoryName === validation.value &&
+      /^[a-f0-9]{64}$/.test(currentAuthorization?.recoverySecret || "")
+        ? currentAuthorization.recoverySecret
+        : createRecoverySecret(window.crypto);
+    if (recoverySecret !== currentAuthorization?.recoverySecret) {
+      await app.updateProject("publishAuthorization", {
+        repositoryName: validation.value,
+        recoverySecret,
+      });
+    }
     const result = await publishProjectArtifacts({
       project: app.getProject(),
       repositoryName: validation.value,
       isPrivate: visibility === "private",
       configuredOwner: window.MAKEABLE_CONFIG?.githubOwner,
+      recoverySecret,
       fetchImpl: window.fetch.bind(window),
     });
     await app.updateProject("publish", {
