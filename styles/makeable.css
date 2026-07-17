@@ -1399,6 +1399,25 @@ body {
   margin-top: 22px;
 }
 
+@media (min-width: 1024px) and (max-height: 1050px) {
+  .missing-screen .alternatives {
+    margin-top: 24px;
+    padding-top: 16px;
+  }
+
+  .missing-screen .alternatives > h2 {
+    margin-bottom: 8px;
+  }
+
+  .missing-screen .missing-primary-action {
+    margin-top: 0;
+  }
+
+  .missing-screen .missing-shopping-status:empty {
+    display: none;
+  }
+}
+
 .missing-shopping-status {
   min-height: 22px;
   margin: 0;

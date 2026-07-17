@@ -9,6 +9,20 @@ const completedThroughCode = [
   "/build/code",
 ];
 
+test("missing-parts primary action stays in the 1440 by 1024 desktop frame", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1024 });
+  await seed(page, missingPartsProject(), "/build/feasibility/missing");
+
+  const action = page.getByRole("button", { name: "Shop missing parts" });
+  await expect(action).toBeVisible();
+  const box = await action.boundingBox();
+
+  expect(box).not.toBeNull();
+  expect(box.y + box.height).toBeLessThanOrEqual(1024);
+});
+
 test("retry clears stale flash success and persists failure before Auto Test can open", async ({
   page,
 }) => {
@@ -199,6 +213,58 @@ function manualProject() {
     },
     progress: {
       completedRoutes: [...completedThroughCode, "/build/test/automatic"],
+    },
+  };
+}
+
+function missingPartsProject() {
+  return {
+    idea: { text: "Build a plant helper" },
+    confirmedParts: [
+      { id: "board", name: "ESP32 DevKit", confirmed: true },
+      { id: "power", name: "USB power", confirmed: true },
+      { id: "wires", name: "Jumper wires", confirmed: true },
+    ],
+    feasibility: {
+      status: "missing",
+      reasons: [
+        "You have the brain and wires. You still need the parts that sense and pump water.",
+      ],
+      missingParts: [
+        {
+          id: "sensor",
+          name: "Soil moisture sensor",
+          reason: "Reads how wet the soil is so your plant gets the water it needs.",
+          searchTerms: ["ESP32 soil moisture sensor"],
+        },
+        {
+          id: "pump",
+          name: "Mini water pump",
+          reason: "Pumps water to your plant when the soil is too dry.",
+          searchTerms: ["5V mini water pump ESP32"],
+        },
+      ],
+      alternatives: [
+        {
+          id: "mood-light",
+          title: "Blinking mood light",
+          summary: "Make an LED blink to set the mood on your desk.",
+          requiredPartIds: ["board", "wires"],
+        },
+        {
+          id: "desk-fan",
+          title: "Mini desk fan",
+          summary: "Spin a fan and feel the breeze.",
+          requiredPartIds: ["board", "wires"],
+        },
+      ],
+    },
+    progress: {
+      completedRoutes: [
+        "/build/new",
+        "/build/parts/upload",
+        "/build/parts/review",
+      ],
     },
   };
 }
