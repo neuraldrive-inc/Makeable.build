@@ -24,6 +24,8 @@ const mimeTypes = new Map([
   [".jpeg", "image/jpeg"],
   [".webp", "image/webp"],
   [".ico", "image/x-icon"],
+  [".woff", "font/woff"],
+  [".woff2", "font/woff2"],
 ]);
 
 const server = createServer(async (req, res) => {
@@ -85,7 +87,7 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(port, () => {
-  console.log(`GeckCo AI running at http://localhost:${port}`);
+  console.log(`Makeable running at http://localhost:${port}`);
 });
 
 function getEnv() {

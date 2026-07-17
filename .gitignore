@@ -6,3 +6,9 @@ node_modules/
 tmp/
 .circuitcodex/
 .netlify/
+Makeable-v1-developer-handoff.zip
+artifacts/
+test-results/
+playwright-report/
+design-qa-evidence/
+.superpowers/

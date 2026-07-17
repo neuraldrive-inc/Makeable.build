@@ -1,0 +1,21 @@
+{
+  "fileKey": "9venqrASomMyHA6E3OCRUJ",
+  "url": "https://www.figma.com/design/9venqrASomMyHA6E3OCRUJ",
+  "fileName": "Makeable v1 — Developer Source of Truth",
+  "accountPlan": "Starter",
+  "pages": {
+    "coverFoundations": "0:1",
+    "components": "3:4",
+    "screensPrototype": "3:5"
+  },
+  "nodes": {
+    "cover": "4:2",
+    "foundations": "4:20",
+    "componentsDocumentation": "5:2",
+    "buttonComponentSet": "5:18",
+    "stepRailComponentSet": "5:50"
+  },
+  "tokens": { "collections": 5, "variables": 43, "textStyles": 8, "effectStyles": 3 },
+  "approvedImages": 11,
+  "status": "Foundations and components created. Starter-plan MCP call cap prevented automated placement of the 11 image references on page 3; all images and placement specs are included locally."
+}

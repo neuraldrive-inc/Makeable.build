@@ -3,390 +3,60 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>GeckCo AI | Codex For Hardware</title>
+    <meta name="theme-color" content="#f7f0e4" />
+    <title>Makeable</title>
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23f8fafc'/%3E%3Ctext x='32' y='39' text-anchor='middle' font-family='Arial' font-size='20' font-weight='800' fill='%230f172a'%3EGC%3C/text%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23F15A44'/%3E%3Cpath d='M17 42V21l15 12 15-12v21' fill='none' stroke='%23FFFDF8' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
     />
-    <link rel="stylesheet" href="./styles.css?v=landing-redesign-20260605" />
-    <script src="./config.local.js"></script>
-    <script
-      type="module"
-      src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"
-    ></script>
+    <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body class="intro-active">
-    <section class="intro-page" id="introPage" aria-label="GeckCo AI landing page">
-      <div class="intro-frame">
-        <div class="intro-nav">
-          <a class="intro-brand" href="#introPage" aria-label="GeckCo AI introduction">
-            <span class="intro-brand-mark">GC</span>
-            <span>GeckCo AI</span>
-          </a>
-          <div class="intro-process" aria-label="Build flow">
-            <span>Photo</span>
-            <span>Wiring</span>
-            <span>Done</span>
-          </div>
-        </div>
-        <div class="intro-hero">
-          <div class="intro-copy">
-            <p class="intro-product-name">Codex For Hardware</p>
-            <h1>Build hardware without the scary parts.</h1>
-            <p class="intro-statement">
-              Snap a parts photo, say the idea, and GeckCo walks you from loose components to a working ESP32 build.
-            </p>
-            <p class="intro-promise">
-              No code. No debugging. No endless copy-pasting ChatGPT code and praying it works.
-            </p>
-            <div class="intro-actions">
-              <button class="intro-start" id="introStartButton" type="button">Start building</button>
-              <a class="intro-secondary" href="#landingFeatures">See the 3 features</a>
-            </div>
-          </div>
-          <figure class="intro-proof intro-hero-artifact">
-            <img
-              src="images/landing/photo-to-guide.png"
-              alt="GeckCo AI transforming a parts photo into a clean guided build plan"
-            />
-          </figure>
-        </div>
-        <section class="intro-features" id="landingFeatures" aria-label="Three main GeckCo AI features">
-          <article class="intro-feature">
-            <img
-              src="images/landing/photo-to-guide.png"
-              alt="Photo-to-guide AI feature artifact"
-            />
-            <div>
-              <p>Feature 01</p>
-              <h2>Photo-to-guide AI</h2>
-              <span>Upload one clear parts photo and GeckCo finds only what your build actually needs.</span>
-            </div>
-          </article>
-          <article class="intro-feature">
-            <img
-              src="images/landing/wire-by-wire.png"
-              alt="Wire-by-wire hardware guide feature artifact"
-            />
-            <div>
-              <p>Feature 02</p>
-              <h2>Wire-by-wire handholding</h2>
-              <span>Follow one calm step at a time on your own image, with clean labels and clear checks.</span>
-            </div>
-          </article>
-          <article class="intro-feature">
-            <img
-              src="images/landing/finish-without-code.png"
-              alt="Finish hardware build without code chaos feature artifact"
-            />
-            <div>
-              <p>Feature 03</p>
-              <h2>Finish without code chaos</h2>
-              <span>GeckCo prepares the firmware, helps upload it, checks the result, and packages the proof.</span>
-            </div>
-          </article>
-        </section>
-      </div>
-    </section>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to project builder</a>
 
-    <header class="topbar">
-      <a class="brand" id="homeBrandLink" href="#introPage" aria-label="GeckCo AI home">
-        <span class="brand-mark">GC</span>
-        <span>GeckCo AI</span>
+    <header class="app-header" data-makeable-shell>
+      <a class="makeable-brand" href="/" aria-label="Makeable home">
+        <span aria-hidden="true">Makeable</span>
+        <span class="visually-hidden">Makeable home</span>
+        <span class="brand-spark" aria-hidden="true"></span>
       </a>
-      <nav class="workflow-timeline" id="workflowTimeline" aria-label="Product build stages">
-        <button class="timeline-step is-active" data-workflow-stage="0" type="button">
-          <span>01</span>
-          <strong>Start</strong>
-          <em>Photo + idea</em>
-        </button>
-        <button class="timeline-step" data-workflow-stage="1" type="button">
-          <span>02</span>
-          <strong>Guide</strong>
-          <em>One step at a time</em>
-        </button>
-        <button class="timeline-step" data-workflow-stage="2" type="button">
-          <span>03</span>
-          <strong>Load</strong>
-          <em>Send to board</em>
-        </button>
-        <button class="timeline-step" data-workflow-stage="3" type="button">
-          <span>04</span>
-          <strong>Watch</strong>
-          <em>See it working</em>
-        </button>
-        <button class="timeline-step" data-workflow-stage="4" type="button">
-          <span>05</span>
-          <strong>Share</strong>
-          <em>Save the project</em>
-        </button>
+
+      <nav class="progress-rail" aria-label="Build progress">
+        <ol>
+          <li class="progress-step progress-step--describe" data-progress-step="describe" aria-current="step">
+            <span class="progress-number" aria-hidden="true">1</span>
+            <span>Describe</span>
+          </li>
+          <li class="progress-step progress-step--scan" data-progress-step="scan">
+            <span class="progress-number" aria-hidden="true">2</span>
+            <span>Scan Parts</span>
+          </li>
+          <li class="progress-step progress-step--build" data-progress-step="build">
+            <span class="progress-number" aria-hidden="true">3</span>
+            <span>Build + Code</span>
+          </li>
+          <li class="progress-step progress-step--test" data-progress-step="test">
+            <span class="progress-number" aria-hidden="true">4</span>
+            <span>Test</span>
+          </li>
+          <li class="progress-step progress-step--publish" data-progress-step="publish">
+            <span class="progress-number" aria-hidden="true">5</span>
+            <span>Publish</span>
+          </li>
+        </ol>
       </nav>
-      <div class="top-actions">
-        <button class="ghost-button" id="homeButton" type="button">Home</button>
-        <button class="ghost-button" id="settingsButton" type="button">Settings</button>
-      </div>
     </header>
 
-    <main class="shell">
-      <section class="panel capture-panel workflow-stage is-active" id="capture" data-stage-index="0">
-        <div class="section-heading">
-          <p class="section-number">01</p>
-          <div>
-            <h1>Start with what you have.</h1>
-            <p>Lay out your parts, take a clear photo, and describe the build. GeckCo turns it into a guided hardware path.</p>
-          </div>
-        </div>
-
-        <div class="capture-grid">
-          <div class="image-stage">
-            <canvas id="partsCanvas" aria-label="Annotated hardware photo"></canvas>
-            <div class="upload-row">
-              <label class="file-button">
-                <input id="partsPhotoInput" type="file" accept="image/*" />
-                Choose photo
-              </label>
-              <button class="secondary-button" id="clearPhotoButton" type="button">Clear</button>
-            </div>
-          </div>
-
-          <div class="idea-console">
-            <label class="field-label" for="ideaText">What should it do?</label>
-            <textarea
-              id="ideaText"
-              rows="8"
-              placeholder="Example: When someone moves nearby, turn on an LED."
-            ></textarea>
-            <div class="voice-row">
-              <button class="primary-button" id="startVoiceButton" type="button">Tell me</button>
-              <button class="secondary-button" id="stopVoiceButton" type="button" disabled>Stop</button>
-              <span class="status-pill" id="voiceStatus">Ready</span>
-            </div>
-            <div class="transcript-box" id="transcriptBox">I’ll write down what I hear here.</div>
-            <button class="wide-button" id="analyzeButton" type="button">Create my guide</button>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel workflow-stage" id="plan" data-stage-index="1">
-        <div class="section-heading">
-          <p class="section-number">02</p>
-          <div>
-            <h2>Build one step at a time.</h2>
-            <p>Your photo becomes the map: highlighted parts, clear connections, and one safe move at a time.</p>
-          </div>
-        </div>
-
-        <div class="sr-only" aria-live="polite">
-          <div id="partsList"></div>
-          <ol id="wiringList"></ol>
-          <div id="diagnosticsList"></div>
-        </div>
-
-        <div class="visual-guide-panel">
-          <div class="carousel-header">
-            <h3>Your next move</h3>
-            <span id="buildStepCounter">Step 0 of 0</span>
-          </div>
-          <div class="visual-step-list" id="visualStepList"></div>
-          <div class="carousel-controls">
-            <button class="secondary-button" id="prevBuildStepButton" type="button">Back</button>
-            <div class="carousel-dots" id="buildStepDots" aria-label="Build step progress"></div>
-            <button class="primary-button" id="nextBuildStepButton" type="button">I did this</button>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel workflow-stage" id="flash" data-stage-index="2">
-        <div class="section-heading">
-          <p class="section-number">03</p>
-          <div>
-            <h2>Put the code on your board.</h2>
-            <p>Plug in the ESP32. I’ll prepare the code and send it over when you press one button.</p>
-          </div>
-        </div>
-
-        <div class="flash-stage-grid">
-          <div class="web-flash-panel">
-            <div class="op-header">
-              <span>01</span>
-              <div>
-                <h3>Board setup</h3>
-                <p>Connect the ESP32 with USB. When your browser asks, pick the board from the list.</p>
-              </div>
-            </div>
-            <div class="button-row">
-              <button class="secondary-button" id="refreshArduinoStatusButton" type="button">Check setup</button>
-              <button class="primary-button" id="compileFlashButton" type="button">Put code on board</button>
-            </div>
-            <div class="flash-progress" aria-label="Flash progress">
-              <span id="flashProgressBar"></span>
-            </div>
-            <div class="status-strip" id="arduinoStatus">I’ll check that your computer is ready.</div>
-
-            <details class="advanced-flash">
-              <summary>Advanced board options</summary>
-              <div class="inline-form">
-                <label>
-                  Board profile
-                  <input id="boardFqbnInput" type="text" value="esp32:esp32:esp32" />
-                </label>
-                <label class="checkbox-row">
-                  <input id="eraseFlashInput" type="checkbox" checked />
-                  Start fresh before loading code
-                </label>
-              </div>
-              <div class="inline-form">
-                <input id="manifestUrlInput" type="url" placeholder="Optional firmware link" />
-                <button class="secondary-button" id="loadManifestButton" type="button">Use link</button>
-              </div>
-              <esp-web-install-button id="espInstallButton" manifest=""></esp-web-install-button>
-            </details>
-          </div>
-
-          <div class="code-panel">
-            <div class="code-panel-header">
-              <h3>The code I’ll send</h3>
-              <div class="button-row">
-                <button class="secondary-button" id="copyFirmwareButton" type="button">Copy</button>
-                <button class="secondary-button" id="downloadFirmwareButton" type="button">Download</button>
-              </div>
-            </div>
-            <pre id="firmwareOutput"><code>Your code will appear here after I make the guide.</code></pre>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel workflow-stage" id="verify" data-stage-index="3">
-        <div class="section-heading">
-          <p class="section-number">04</p>
-          <div>
-            <h2>Let’s make sure it works.</h2>
-            <p>I’ll listen to the board and look at the project with the camera so we can catch issues together.</p>
-          </div>
-        </div>
-
-        <div class="verify-command-grid">
-          <div class="serial-panel">
-            <div class="op-header">
-              <span>01</span>
-              <div>
-                <h3>Board messages</h3>
-                <p>This is where your board tells us what it is doing.</p>
-              </div>
-            </div>
-            <div class="inline-form">
-              <label>
-                Listening speed
-                <input id="baudRateInput" type="number" min="9600" step="1" value="115200" />
-              </label>
-              <button class="primary-button" id="connectSerialButton" type="button">Listen to board</button>
-              <button class="secondary-button" id="disconnectSerialButton" type="button" disabled>Stop listening</button>
-            </div>
-            <div class="inline-form">
-              <input id="serialCommandInput" type="text" placeholder="Optional message to the board" />
-              <button class="secondary-button" id="sendSerialButton" type="button" disabled>Send</button>
-              <button class="secondary-button" id="evaluateLogsButton" type="button">Check messages</button>
-            </div>
-            <pre class="terminal" id="serialLog">Board messages will appear here after you connect.</pre>
-            <div class="status-strip" id="logEvaluation">I’ll help read these messages once they appear.</div>
-          </div>
-
-          <div class="camera-panel">
-            <div class="op-header">
-              <span>02</span>
-              <div>
-                <h3>Visual check</h3>
-                <p>Point the camera at the project. I’ll compare what I see with what we expected.</p>
-              </div>
-            </div>
-            <video id="cameraPreview" playsinline muted></video>
-            <div class="button-row">
-              <button class="primary-button" id="startCameraButton" type="button">Open camera</button>
-              <button class="secondary-button" id="captureEvidenceButton" type="button" disabled>Take photo</button>
-              <button class="secondary-button" id="verifyBehaviorButton" type="button">Check behavior</button>
-            </div>
-            <div class="evidence-strip" id="evidenceStrip"></div>
-            <div class="status-strip" id="behaviorEvaluation">I’ll look at a photo when you are ready.</div>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel workflow-stage" id="document" data-stage-index="4">
-        <div class="section-heading">
-          <p class="section-number">05</p>
-          <div>
-            <h2>Save your project.</h2>
-            <p>I’ll turn the build into clean project notes and package the code so you can share it.</p>
-          </div>
-        </div>
-
-        <div class="doc-grid">
-          <div class="doc-actions">
-            <button class="primary-button" id="generateReadmeButton" type="button">Write project notes</button>
-            <button class="secondary-button" id="downloadReadmeButton" type="button">Download notes</button>
-            <label>
-              Project name
-              <input id="repoNameInput" type="text" value="geckco-ai-build" />
-            </label>
-            <label class="checkbox-row">
-              <input id="privateRepoInput" type="checkbox" />
-              Keep it private
-            </label>
-            <button class="wide-button" id="publishGithubButton" type="button">Save to GitHub</button>
-            <div class="status-strip" id="githubStatus">Nothing shared yet.</div>
-          </div>
-          <pre class="readme-preview" id="readmePreview">Your project notes will appear here.</pre>
-        </div>
+    <main class="app-main" id="main-content" tabindex="-1">
+      <section class="screen-outlet" data-screen-outlet aria-labelledby="makeable-heading">
+        <h1 class="visually-hidden" id="makeable-heading" data-app-heading>Makeable</h1>
+        <p class="app-status" id="appStatus" role="status" aria-live="polite">Loading Makeable…</p>
+        <noscript>
+          <p class="app-notice">Makeable needs JavaScript to guide your hardware build.</p>
+        </noscript>
       </section>
     </main>
 
-    <footer class="stage-controls" aria-label="Stage navigation">
-      <button class="secondary-button" id="stageBackButton" type="button">Back</button>
-      <div class="stage-control-copy" aria-live="polite">
-        <strong id="stageControlTitle">Step 1: Start</strong>
-        <span id="stageControlHint">Choose a photo and tell me what you want to make.</span>
-      </div>
-      <button class="primary-button" id="stageNextButton" type="button">Continue</button>
-    </footer>
-
-    <aside class="orientation-card" aria-label="Landscape mode needed">
-      <span class="brand-mark">GC</span>
-      <h2>Turn sideways to build.</h2>
-      <p>GeckCo AI works like a workbench: wide photo, clear next move, and one step at a time.</p>
-    </aside>
-
-    <dialog class="settings-dialog" id="settingsDialog">
-      <form method="dialog">
-        <div class="dialog-header">
-          <h2>Settings</h2>
-          <button class="ghost-button" value="close" aria-label="Close settings">Close</button>
-        </div>
-        <div class="settings-grid">
-          <label>
-            Deepgram browser key
-            <input id="deepgramKeyInput" type="password" autocomplete="off" />
-          </label>
-          <label>
-            GitHub owner
-            <input id="githubOwnerInput" type="text" autocomplete="off" />
-          </label>
-          <label>
-            OpenAI model
-            <input id="openaiModelInput" type="text" autocomplete="off" />
-          </label>
-          <label>
-            OpenAI reasoning model
-            <input id="openaiReasoningModelInput" type="text" autocomplete="off" />
-          </label>
-        </div>
-        <div class="settings-status" id="settingsStatus"></div>
-        <div class="button-row">
-          <button class="primary-button" id="saveSettingsButton" value="default" type="submit">Save</button>
-          <button class="secondary-button" id="clearSettingsButton" type="button">Clear local overrides</button>
-        </div>
-      </form>
-    </dialog>
-
-    <script type="module" src="./app.js?v=landing-redesign-20260605"></script>
+    <script type="module" src="./app.js"></script>
   </body>
 </html>
