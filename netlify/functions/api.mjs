@@ -239,7 +239,7 @@ async function createGitHubRepo(req, env) {
     headers: githubHeaders(env),
     body: JSON.stringify({
       name: body.name,
-      description: body.description || "Hardware project generated with GeckCo AI",
+      description: body.description || "Hardware project built with Makeable",
       private: Boolean(body.private),
       auto_init: false,
     }),

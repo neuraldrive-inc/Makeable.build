@@ -5,6 +5,8 @@ import {
   calculateContainedImageFrame,
   canConfirmParts,
   compileAndFlashFirmware,
+  createProjectArtifacts,
+  createProjectZip,
   createDiagnosticSession,
   createObjectUrlRegistry,
   createPartSearchUrl,
@@ -15,9 +17,12 @@ import {
   normalizeImageFile,
   requestHardwarePlan,
   runSequentialDiagnostics,
+  sharePublishedProject,
   selectAssemblyStep,
   transitionFirmwareFlash,
   updateDetectedPart,
+  publishProjectArtifacts,
+  validateRepositoryName,
 } from "./actions.js";
 import { APP_READY_MESSAGE, PRODUCT_NAME } from "./content.js";
 
@@ -31,6 +36,8 @@ const ROUTE_RENDERERS = Object.freeze({
   "/build/code": renderCode,
   "/build/test/automatic": renderAutomaticTest,
   "/build/test/manual": renderManualTest,
+  "/build/publish/connect": renderPublish,
+  "/build/publish/success": renderPublishSuccess,
 });
 
 export function createScreenRenderer({ root, app }) {
@@ -1036,6 +1043,274 @@ function renderManualTest(context, route) {
   );
 }
 
+function renderPublish(context, route) {
+  const { outlet, app } = context;
+  const project = app.getProject();
+  const title =
+    project.feasibility?.projectTitle || "Makeable Project";
+  const repositoryName =
+    project.publish?.repositoryName || repositoryNameFromTitle(title);
+  const artifacts = createProjectArtifacts(project);
+  const defaultVisibility =
+    project.publish?.visibility === "private" ? "private" : "public";
+  outlet.innerHTML = screenFrame(`
+    <article class="route-screen publish-screen">
+      <header class="screen-heading publish-heading">
+        <div>
+          <h1>You built it. Now share it.</h1>
+          <p>Makeable will package your guide, code, parts list, and test results.</p>
+        </div>
+      </header>
+
+      <section class="paper-panel publish-package">
+        <form class="publish-form" data-publish-form novalidate>
+          <div class="repository-row">
+            <div class="repository-field">
+              <label for="repository-name">Repository name</label>
+              <input
+                id="repository-name"
+                name="repositoryName"
+                type="text"
+                maxlength="100"
+                autocomplete="off"
+                spellcheck="false"
+                value="${escapeAttribute(repositoryName)}"
+                aria-describedby="repository-error"
+              />
+              <p class="field-error" id="repository-error" data-repository-error role="status"></p>
+            </div>
+            <fieldset class="visibility-options">
+              <legend class="visually-hidden">Repository visibility</legend>
+              <label>
+                <input type="radio" name="visibility" value="public" ${
+                  defaultVisibility === "public" ? "checked" : ""
+                } />
+                <span>${icon("share-2")} Public</span>
+              </label>
+              <label>
+                <input type="radio" name="visibility" value="private" ${
+                  defaultVisibility === "private" ? "checked" : ""
+                } />
+                <span>${icon("circle-alert")} Private</span>
+              </label>
+            </fieldset>
+          </div>
+
+          <div class="artifact-inventory">
+            <h2>This repository will include:</h2>
+            <ul>
+              ${artifacts
+                .map(
+                  ({ path }) => `
+                    <li>
+                      ${icon(path.endsWith(".ino") ? "code-xml" : path === "README.md" ? "paperclip" : "github")}
+                      <span>${escapeHtml(artifactDisplayName(path))}</span>
+                    </li>
+                  `,
+                )
+                .join("")}
+            </ul>
+          </div>
+        </form>
+
+        <div class="publish-preview">
+          <div class="publish-photo-frame">
+            <img data-source-photo alt="Your finished Makeable project" />
+          </div>
+          <h2>${escapeHtml(title)}</h2>
+          <span>Tested &amp; working</span>
+        </div>
+      </section>
+
+      <div class="publish-ready-row" aria-label="Package contents ready">
+        <span>${icon("check")} Build guide</span>
+        <span>${icon("check")} Code</span>
+        <span>${icon("check")} Parts list</span>
+        <span>${icon("check")} Test results</span>
+        <p>You can edit everything before it goes live.</p>
+      </div>
+
+      <div class="publish-actions">
+        <button class="publish-github-button" type="button" data-publish-github>
+          Connect GitHub &amp; publish
+        </button>
+        <button class="download-project-button" type="button" data-download-project>
+          Download project instead
+        </button>
+        <p class="publish-status" data-publish-status role="status" aria-live="polite"></p>
+      </div>
+    </article>
+  `);
+  hydrateStoredImage(
+    context,
+    project.tests?.manual?.evidenceImageId || project.photo?.imageId || "source",
+    outlet.querySelector("[data-source-photo]"),
+  );
+
+  const form = outlet.querySelector("[data-publish-form]");
+  const input = outlet.querySelector("#repository-name");
+  const error = outlet.querySelector("[data-repository-error]");
+  const validate = () => {
+    const result = validateRepositoryName(input.value);
+    error.textContent = result.message;
+    input.setAttribute("aria-invalid", String(!result.valid));
+    return result;
+  };
+  input.addEventListener("input", validate);
+  outlet.querySelector("[data-publish-github]").addEventListener("click", () =>
+    publishFromScreen(context, route, form, validate),
+  );
+  outlet.querySelector("[data-download-project]").addEventListener("click", () =>
+    downloadProjectArchive(context, repositoryNameFromTitle(input.value)),
+  );
+}
+
+async function publishFromScreen(context, route, form, validate) {
+  const { outlet, app, window } = context;
+  const validation = validate();
+  if (!validation.valid) {
+    outlet.querySelector("#repository-name").focus();
+    return;
+  }
+  const button = outlet.querySelector("[data-publish-github]");
+  const status = outlet.querySelector("[data-publish-status]");
+  if (!window.MAKEABLE_CONFIG?.hasGithubToken) {
+    status.textContent =
+      "GitHub publishing needs GITHUB_TOKEN on the Makeable server. You can still download the project.";
+    return;
+  }
+  const visibility = new FormData(form).get("visibility") || "public";
+  button.disabled = true;
+  button.textContent = "Packaging your project…";
+  status.textContent = "Creating the repository and uploading five project files…";
+  try {
+    const result = await publishProjectArtifacts({
+      project: app.getProject(),
+      repositoryName: validation.value,
+      isPrivate: visibility === "private",
+      configuredOwner: window.MAKEABLE_CONFIG?.githubOwner,
+      fetchImpl: window.fetch.bind(window),
+    });
+    await app.updateProject("publish", {
+      ...result,
+      publishedAt: new Date().toISOString(),
+    });
+    await app.completeRoute(route.path);
+    app.navigation.navigate("/build/publish/success");
+  } catch (error) {
+    status.textContent = `I couldn’t publish yet: ${error.message}`;
+    button.disabled = false;
+    button.textContent = "Connect GitHub & publish";
+  }
+}
+
+function downloadProjectArchive(context, repositoryName) {
+  const artifacts = createProjectArtifacts(context.app.getProject());
+  const blob = createProjectZip(artifacts);
+  const key = artifacts.map(({ path, content }) => `${path}:${content.length}`).join("|");
+  const url = context.runtime.objectUrls.replace("project-download", key, blob);
+  const link = context.root.createElement("a");
+  link.href = url;
+  link.download = `${repositoryName || "makeable-project"}.zip`;
+  link.click();
+  context.outlet.querySelector("[data-publish-status]").textContent =
+    "Your Makeable project ZIP is ready.";
+}
+
+function renderPublishSuccess(context) {
+  const { outlet, app } = context;
+  const project = app.getProject();
+  const published = project.publish || {};
+  const title = project.feasibility?.projectTitle || "Makeable Project";
+  const owner = published.owner || context.window.MAKEABLE_CONFIG?.githubOwner || "";
+  const repositoryName =
+    published.repositoryName || repositoryNameFromTitle(title);
+  const repositoryUrl =
+    published.repositoryUrl ||
+    `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(
+      repositoryName,
+    )}`;
+  const visibility =
+    published.visibility === "private" ? "Private" : "Public";
+  outlet.innerHTML = screenFrame(`
+    <article class="route-screen publish-success-screen">
+      <header class="screen-heading publish-success-heading">
+        <div>
+          <h1>It’s live — you made hardware!</h1>
+          <p>Your ${escapeHtml(title.toLowerCase())} is now a project you can share, remix, and improve.</p>
+        </div>
+      </header>
+
+      <section class="paper-panel success-package">
+        <div class="success-project-photo">
+          <img data-source-photo alt="Your published Makeable project" />
+          <span>Built with <strong>Makeable</strong></span>
+        </div>
+
+        <div class="success-project-details">
+          <h2>${escapeHtml(owner)} / ${escapeHtml(repositoryName)}</h2>
+          <span class="repository-visibility">${visibility}</span>
+          <div class="repository-url-row">
+            <a href="${escapeAttribute(repositoryUrl)}" target="_blank" rel="noreferrer">
+              ${escapeHtml(repositoryUrl.replace(/^https?:\/\//, ""))}
+            </a>
+            <button type="button" data-copy-repository aria-label="Copy repository URL">
+              ${icon("paperclip")}
+            </button>
+          </div>
+          <ul class="publish-results">
+            <li>${icon("check")} Guide uploaded</li>
+            <li>${icon("check")} Code uploaded</li>
+            <li>${icon("check")} Parts listed</li>
+            <li>${icon("check")} Tests included</li>
+          </ul>
+          <a class="view-project-button" href="${escapeAttribute(
+            repositoryUrl,
+          )}" target="_blank" rel="noreferrer">View my GitHub project</a>
+          <button class="share-project-button" type="button" data-share-project>
+            ${icon("share-2")} Share project
+          </button>
+          <button class="start-another-button" type="button" data-start-another>
+            Start another build
+          </button>
+          <p class="share-status" data-share-status role="status" aria-live="polite"></p>
+        </div>
+      </section>
+    </article>
+  `);
+  hydrateStoredImage(
+    context,
+    project.tests?.manual?.evidenceImageId || project.photo?.imageId || "source",
+    outlet.querySelector("[data-source-photo]"),
+  );
+  const status = outlet.querySelector("[data-share-status]");
+  outlet.querySelector("[data-copy-repository]").addEventListener("click", async () => {
+    try {
+      await context.window.navigator.clipboard.writeText(repositoryUrl);
+      status.textContent = "Repository link copied.";
+    } catch {
+      status.textContent = "Copy the repository link from the field above.";
+    }
+  });
+  outlet.querySelector("[data-share-project]").addEventListener("click", async () => {
+    try {
+      const mode = await sharePublishedProject({
+        repositoryUrl,
+        title,
+        navigatorLike: context.window.navigator,
+      });
+      status.textContent =
+        mode === "shared" ? "Share sheet opened." : "Repository link copied.";
+    } catch (error) {
+      status.textContent = error.message;
+    }
+  });
+  outlet.querySelector("[data-start-another]").addEventListener("click", async () => {
+    await app.resetProject();
+    app.navigation.navigate("/build/new", { replace: true });
+  });
+}
+
 function cleanupRouteResources(context) {
   context.runtime.operationAbort?.abort();
   context.runtime.operationAbort = null;
@@ -1714,6 +1989,24 @@ function feasibilityRecord(plan) {
     diagnostics: plan.diagnostics,
     firmwareSpec: plan.firmwareSpec,
   };
+}
+
+function repositoryNameFromTitle(value) {
+  return String(value || "makeable-project")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .replace(/\.{2,}/g, ".")
+    .slice(0, 100) || "makeable-project";
+}
+
+function artifactDisplayName(path) {
+  if (path === "build-guide/README.md") return "build-guide";
+  if (path === "code/makeable.ino") return "code";
+  if (path === "parts-list/README.md") return "parts-list";
+  if (path === "test-results/README.md") return "test-results";
+  return path;
 }
 
 function screenFrame(content) {

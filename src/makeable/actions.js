@@ -2,6 +2,13 @@ export const PLAN_SCHEMA_VERSION = 1;
 export const LOW_CONFIDENCE_THRESHOLD = 0.7;
 export const DEFAULT_IMAGE_MAX_SIDE = 1800;
 export const DEFAULT_IMAGE_QUALITY = 0.86;
+export const PROJECT_ARTIFACT_PATHS = Object.freeze([
+  "README.md",
+  "build-guide/README.md",
+  "code/makeable.ino",
+  "parts-list/README.md",
+  "test-results/README.md",
+]);
 
 const BOUNDS_SCHEMA = Object.freeze({
   type: "object",
@@ -269,6 +276,316 @@ export function normalizeHardwarePlan(raw = {}, options = {}) {
       ),
     },
   };
+}
+
+export function validateRepositoryName(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return {
+      valid: false,
+      value: "",
+      message: "Enter a repository name.",
+    };
+  }
+  if (
+    normalized.length > 100 ||
+    !/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$/.test(normalized) ||
+    normalized.includes("..")
+  ) {
+    return {
+      valid: false,
+      value: normalized,
+      message: "Use 1–100 letters, numbers, dots, dashes, or underscores.",
+    };
+  }
+  return { valid: true, value: normalized, message: "" };
+}
+
+export function createProjectArtifacts(project = {}) {
+  const title = cleanText(
+    project.feasibility?.projectTitle,
+    cleanText(ideaText(project.idea), "Makeable Project"),
+  );
+  const summary = cleanText(
+    project.feasibility?.summary,
+    "A beginner-friendly hardware project made with Makeable.",
+  );
+  const parts = array(project.confirmedParts);
+  const steps = array(project.wiring?.steps);
+  const automaticChecks = array(project.tests?.automatic?.checks);
+  const manual = project.tests?.manual || {};
+  const board = cleanText(
+    project.firmware?.flash?.boardName ||
+      project.feasibility?.firmwareSpec?.board,
+    "Configured board",
+  );
+  const sketch = String(project.firmware?.sketch || "");
+  const notes = cleanText(project.firmware?.notes, "");
+
+  const readme = `# ${title}
+
+${summary}
+
+## What it does
+
+${cleanText(project.feasibility?.firmwareSpec?.behavior, summary)}
+
+## Project package
+
+- [Build guide](build-guide/README.md)
+- [Makeable firmware](code/makeable.ino)
+- [Parts list](parts-list/README.md)
+- [Test results](test-results/README.md)
+
+## Board
+
+${board}
+
+${notes ? `## Firmware note\n\n${notes}\n\n` : ""}---
+
+Built with Makeable.
+`;
+  const buildGuide = `# ${title} — Build Guide
+
+${summary}
+
+${steps.length
+    ? steps
+        .map(
+          (step, index) => `## Step ${Number(step.order) || index + 1}: ${cleanText(
+            step.title,
+            "Make the connection",
+          )}
+
+${cleanText(step.instruction, "")}
+
+**Quick check:** ${cleanText(step.check, "Confirm the connection is secure.")}
+`,
+        )
+        .join("\n")
+    : "No assembly steps were generated."}
+
+## Safety
+
+Disconnect power before changing wiring and keep electronics dry.
+`;
+  const partsList = `# ${title} — Parts List
+
+| Part | Role | Confirmed |
+| --- | --- | --- |
+${parts.length
+    ? parts
+        .map(
+          (part) =>
+            `| ${markdownCell(part.name)} | ${markdownCell(part.role || part.type)} | ${
+              part.confirmed === false ? "Needs review" : "Yes"
+            } |`,
+        )
+        .join("\n")
+    : "| No confirmed parts | — | — |"}
+`;
+  const testResults = `# ${title} — Test Results
+
+## Automatic hardware checks
+
+| Check | Result | Detail |
+| --- | --- | --- |
+${automaticChecks.length
+    ? automaticChecks
+        .map(
+          (check) =>
+            `| ${markdownCell(check.name || check.id)} | ${resultLabel(
+              check.status,
+            )} | ${markdownCell(check.detail)} |`,
+        )
+        .join("\n")
+    : "| No automatic results | Not run | — |"}
+
+## Real-world check
+
+- Action: ${cleanText(manual.action, "Not recorded")}
+- Result: ${manual.acknowledged ? "Acknowledged" : "Not confirmed"}
+- Evaluation: ${resultLabel(manual.evaluation?.status)}
+${array(manual.evaluation?.observations)
+    .map((observation) => `- Observation: ${cleanText(observation, "")}`)
+    .join("\n")}
+`;
+
+  const contents = [readme, buildGuide, sketch, partsList, testResults];
+  return PROJECT_ARTIFACT_PATHS.map((path, index) =>
+    Object.freeze({
+      path,
+      content: contents[index],
+      mimeType:
+        path.endsWith(".ino")
+          ? "text/x-arduino;charset=utf-8"
+          : "text/markdown;charset=utf-8",
+    }),
+  );
+}
+
+export async function publishProjectArtifacts({
+  project,
+  repositoryName,
+  isPrivate = false,
+  configuredOwner = "",
+  fetchImpl = globalThis.fetch,
+} = {}) {
+  const validation = validateRepositoryName(repositoryName);
+  if (!validation.valid) throw new Error(validation.message);
+  const artifacts = createProjectArtifacts(project);
+  let owner = String(configuredOwner || "").trim();
+  let repositoryUrl = "";
+  let recoveredExisting = false;
+
+  const createResponse = await fetchImpl("/api/github/repos", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: validation.value,
+      description: `${cleanText(
+        project?.feasibility?.projectTitle,
+        "Hardware project",
+      )} — built with Makeable`,
+      private: Boolean(isPrivate),
+    }),
+  });
+  const created = await safeResponseJson(createResponse);
+  if (createResponse.ok) {
+    owner = cleanText(created.owner?.login, owner);
+    repositoryUrl = cleanText(created.html_url, "");
+  } else if (createResponse.status === 422 && owner) {
+    recoveredExisting = true;
+  } else {
+    throw new Error(
+      cleanText(
+        created.error || created.message,
+        `GitHub could not create the repository (HTTP ${createResponse.status}).`,
+      ),
+    );
+  }
+  if (!owner) {
+    throw new Error(
+      "Set GITHUB_OWNER on the Makeable server before publishing.",
+    );
+  }
+
+  for (const artifact of artifacts) {
+    const uploadResponse = await fetchImpl("/api/github/upload-file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        owner,
+        repo: validation.value,
+        path: artifact.path,
+        content: artifact.content,
+        message: `Update ${artifact.path} from Makeable`,
+      }),
+    });
+    if (!uploadResponse.ok) {
+      const failure = await safeResponseJson(uploadResponse);
+      throw new Error(
+        cleanText(
+          failure.error || failure.message,
+          `GitHub could not upload ${artifact.path} (HTTP ${uploadResponse.status}).`,
+        ),
+      );
+    }
+  }
+
+  return {
+    owner,
+    repositoryName: validation.value,
+    repositoryUrl:
+      repositoryUrl ||
+      `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(
+        validation.value,
+      )}`,
+    visibility: isPrivate ? "private" : "public",
+    recoveredExisting,
+    uploadedPaths: artifacts.map(({ path }) => path),
+  };
+}
+
+export function createProjectZip(artifacts) {
+  const encoder = new TextEncoder();
+  const entries = array(artifacts).map((artifact) => {
+    const name = encoder.encode(String(artifact.path || ""));
+    const data = encoder.encode(String(artifact.content || ""));
+    return { name, data, crc: crc32(data) };
+  });
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+
+  for (const entry of entries) {
+    const local = new Uint8Array(30 + entry.name.length + entry.data.length);
+    const localView = new DataView(local.buffer);
+    localView.setUint32(0, 0x04034b50, true);
+    localView.setUint16(4, 20, true);
+    localView.setUint16(6, 0x0800, true);
+    localView.setUint16(8, 0, true);
+    localView.setUint32(14, entry.crc, true);
+    localView.setUint32(18, entry.data.length, true);
+    localView.setUint32(22, entry.data.length, true);
+    localView.setUint16(26, entry.name.length, true);
+    local.set(entry.name, 30);
+    local.set(entry.data, 30 + entry.name.length);
+    localParts.push(local);
+
+    const central = new Uint8Array(46 + entry.name.length);
+    const centralView = new DataView(central.buffer);
+    centralView.setUint32(0, 0x02014b50, true);
+    centralView.setUint16(4, 20, true);
+    centralView.setUint16(6, 20, true);
+    centralView.setUint16(8, 0x0800, true);
+    centralView.setUint16(10, 0, true);
+    centralView.setUint32(16, entry.crc, true);
+    centralView.setUint32(20, entry.data.length, true);
+    centralView.setUint32(24, entry.data.length, true);
+    centralView.setUint16(28, entry.name.length, true);
+    centralView.setUint32(42, offset, true);
+    central.set(entry.name, 46);
+    centralParts.push(central);
+    offset += local.length;
+  }
+
+  const centralSize = centralParts.reduce((size, part) => size + part.length, 0);
+  const end = new Uint8Array(22);
+  const endView = new DataView(end.buffer);
+  endView.setUint32(0, 0x06054b50, true);
+  endView.setUint16(8, entries.length, true);
+  endView.setUint16(10, entries.length, true);
+  endView.setUint32(12, centralSize, true);
+  endView.setUint32(16, offset, true);
+  return new Blob([...localParts, ...centralParts, end], {
+    type: "application/zip",
+  });
+}
+
+export async function sharePublishedProject({
+  repositoryUrl,
+  title = "Makeable project",
+  navigatorLike = globalThis.navigator,
+} = {}) {
+  if (!repositoryUrl) throw new Error("A repository URL is required.");
+  if (typeof navigatorLike?.share === "function") {
+    try {
+      await navigatorLike.share({
+        title,
+        text: `${title} — built with Makeable`,
+        url: repositoryUrl,
+      });
+      return "shared";
+    } catch {
+      // A denied or unavailable share sheet falls through to clipboard.
+    }
+  }
+  if (typeof navigatorLike?.clipboard?.writeText === "function") {
+    await navigatorLike.clipboard.writeText(repositoryUrl);
+    return "copied";
+  }
+  throw new Error("Sharing and clipboard access are unavailable.");
 }
 
 export function normalizeBounds(raw, options = {}) {
@@ -1382,6 +1699,43 @@ function slug(value) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 80);
+}
+
+function markdownCell(value) {
+  return cleanText(value, "—")
+    .replace(/\|/g, "\\|")
+    .replace(/\r?\n/g, " ");
+}
+
+function resultLabel(status) {
+  if (status === "pass") return "Pass";
+  if (status === "fail") return "Needs attention";
+  if (status === "stopped") return "Stopped";
+  return "Not run";
+}
+
+async function safeResponseJson(response) {
+  try {
+    if (typeof response?.json === "function") return await response.json();
+    if (typeof response?.text === "function") {
+      const text = await response.text();
+      return text ? JSON.parse(text) : {};
+    }
+  } catch {
+    return {};
+  }
+  return {};
+}
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 function cleanText(value, fallback) {
