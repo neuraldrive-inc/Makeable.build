@@ -118,6 +118,7 @@ function getEnv() {
     "OPENAI_MODEL",
     "OPENAI_REASONING_MODEL",
     "OPENAI_REASONING_EFFORT",
+    "OPENAI_SERVICE_TIER",
     "DEEPGRAM_API_KEY",
     "GITHUB_TOKEN",
     "GITHUB_OWNER",
@@ -151,8 +152,7 @@ async function proxyOpenAI(req, env) {
   const missing = missingOpenAIKey(env);
   if (missing) return missing;
 
-  const body = await req.json();
-  if (!body.model) body.model = env.OPENAI_MODEL || "gpt-5.5";
+  const body = withOpenAIConfig(await req.json(), env);
 
   return streamJsonUpstream(
     fetch("https://api.openai.com/v1/responses", {
@@ -167,10 +167,9 @@ async function createOpenAIBackgroundResponse(req, env) {
   const missing = missingOpenAIKey(env);
   if (missing) return missing;
 
-  const body = await req.json();
+  const body = withOpenAIConfig(await req.json(), env, env.OPENAI_REASONING_MODEL);
   const payload = {
     ...body,
-    model: body.model || env.OPENAI_MODEL || "gpt-5.5",
     background: true,
     store: body.store ?? true,
   };
@@ -206,6 +205,24 @@ function openAIHeaders(env) {
     Authorization: `Bearer ${env.OPENAI_API_KEY}`,
     "Content-Type": "application/json",
   };
+}
+
+function withOpenAIConfig(body, env, preferredModel = env.OPENAI_MODEL) {
+  const configuredEffort = env.OPENAI_REASONING_EFFORT;
+  const clientReasoning =
+    body?.reasoning && typeof body.reasoning === "object" && !Array.isArray(body.reasoning)
+      ? body.reasoning
+      : {};
+  const payload = {
+    ...body,
+    model: preferredModel || "gpt-5.6-terra",
+  };
+
+  if (configuredEffort) {
+    payload.reasoning = { ...clientReasoning, effort: configuredEffort };
+  }
+  if (env.OPENAI_SERVICE_TIER) payload.service_tier = env.OPENAI_SERVICE_TIER;
+  return payload;
 }
 
 function streamJsonUpstream(upstreamPromise) {

@@ -21,8 +21,8 @@ export const GITHUB_RECOVERY_MARKER_PREFIX = "[makeable:v1:";
 export function createPublicConfig(env, extras = {}) {
   return {
     githubOwner: env.GITHUB_OWNER || "",
-    openaiModel: env.OPENAI_MODEL || "gpt-5.5",
-    openaiReasoningModel: env.OPENAI_REASONING_MODEL || "gpt-5.5",
+    openaiModel: env.OPENAI_MODEL || "gpt-5.6-terra",
+    openaiReasoningModel: env.OPENAI_REASONING_MODEL || "gpt-5.6-terra",
     openaiReasoningEffort: env.OPENAI_REASONING_EFFORT || "high",
     arduinoFqbn: env.ARDUINO_FQBN || "esp32:esp32:esp32",
     hasOpenAIKey: Boolean(env.OPENAI_API_KEY),

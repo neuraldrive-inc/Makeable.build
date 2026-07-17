@@ -73,6 +73,72 @@ test("the public config script defines MAKEABLE_CONFIG and only aliases the lega
   });
 });
 
+test("the hosted OpenAI proxy enforces the configured model, reasoning effort, and service tier", async () => {
+  const originalFetch = globalThis.fetch;
+  const previous = {
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENAI_MODEL: process.env.OPENAI_MODEL,
+    OPENAI_REASONING_MODEL: process.env.OPENAI_REASONING_MODEL,
+    OPENAI_REASONING_EFFORT: process.env.OPENAI_REASONING_EFFORT,
+    OPENAI_SERVICE_TIER: process.env.OPENAI_SERVICE_TIER,
+  };
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ id: "resp_test", output: [] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  process.env.OPENAI_API_KEY = "server-only-secret";
+  process.env.OPENAI_MODEL = "gpt-5.6-terra";
+  process.env.OPENAI_REASONING_MODEL = "gpt-5.6-terra";
+  process.env.OPENAI_REASONING_EFFORT = "high";
+  process.env.OPENAI_SERVICE_TIER = "priority";
+
+  try {
+    const response = await netlifyHandler(
+      new Request("https://makeable.test/api/openai/responses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "browser-stale-model",
+          reasoning: { effort: "low", summary: "auto" },
+          input: "Reply with OK.",
+        }),
+      }),
+    );
+    assert.equal(response.status, 200);
+    await response.text();
+
+    const background = await netlifyHandler(
+      new Request("https://makeable.test/api/openai/background", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "browser-stale-model", input: "Reply with OK." }),
+      }),
+    );
+    assert.equal(background.status, 200);
+    await background.text();
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+
+  assert.equal(calls.length, 2);
+  const [responsePayload, backgroundPayload] = calls.map((call) => JSON.parse(call.options.body));
+  assert.equal(responsePayload.model, "gpt-5.6-terra");
+  assert.deepEqual(responsePayload.reasoning, { effort: "high", summary: "auto" });
+  assert.equal(responsePayload.service_tier, "priority");
+  assert.equal(backgroundPayload.model, "gpt-5.6-terra");
+  assert.deepEqual(backgroundPayload.reasoning, { effort: "high" });
+  assert.equal(backgroundPayload.service_tier, "priority");
+  assert.equal(backgroundPayload.background, true);
+});
+
 test("the Netlify token endpoint grants a short-lived token and returns only safe fields", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
@@ -184,6 +250,11 @@ test("the local server reads file-backed provider values once and lets them over
     /const localConfigKeys\s*=\s*new Set\([\s\S]*?"OPENAI_API_KEY"/,
   );
   assert.match(serverSource, /if \(localConfigKeys\.has\(key\) \|\| env\[key\] === undefined\) env\[key\] = value;/);
+  assert.match(serverSource, /withOpenAIConfig\(await readJsonBody\(req\), env\)/);
+  assert.match(
+    serverSource,
+    /withOpenAIConfig\(await readJsonBody\(req\), env, env\.OPENAI_REASONING_MODEL\)/,
+  );
   const getEnvSource = serverSource.match(/function getEnv\(\)\s*{[\s\S]*?\n}/)?.[0] || "";
   assert.doesNotMatch(getEnvSource, /readEnv\(/);
 });

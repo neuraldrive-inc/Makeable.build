@@ -39,9 +39,10 @@ Create an untracked `.env` file:
 
 ```dotenv
 OPENAI_API_KEY=
-OPENAI_MODEL=gpt-5.5
-OPENAI_REASONING_MODEL=gpt-5.5
+OPENAI_MODEL=gpt-5.6-terra
+OPENAI_REASONING_MODEL=gpt-5.6-terra
 OPENAI_REASONING_EFFORT=high
+OPENAI_SERVICE_TIER=priority
 
 DEEPGRAM_API_KEY=
 

@@ -884,7 +884,7 @@ export async function requestHardwarePlan({
   imageDataUrl,
   confirmedParts,
   fetchImpl = globalThis.fetch,
-  model = globalThis.MAKEABLE_CONFIG?.openaiModel || "gpt-5.5",
+  model = globalThis.MAKEABLE_CONFIG?.openaiModel || "gpt-5.6-terra",
   signal,
 }) {
   const confirmation = Array.isArray(confirmedParts);
@@ -919,6 +919,9 @@ export async function requestHardwarePlan({
       ];
   const payload = {
     model,
+    reasoning: {
+      effort: globalThis.MAKEABLE_CONFIG?.openaiReasoningEffort || "high",
+    },
     input: [
       {
         role: "system",
@@ -1503,12 +1506,15 @@ export async function evaluateManualTest({
   imageDataUrl,
   serialOutput,
   fetchImpl = globalThis.fetch,
-  model = globalThis.MAKEABLE_CONFIG?.openaiReasoningModel || "gpt-5.5",
+  model = globalThis.MAKEABLE_CONFIG?.openaiReasoningModel || "gpt-5.6-terra",
   signal,
 } = {}) {
   if (!imageDataUrl) throw new Error("Capture one camera frame first.");
   const payload = {
     model,
+    reasoning: {
+      effort: globalThis.MAKEABLE_CONFIG?.openaiReasoningEffort || "high",
+    },
     input: [
       {
         role: "system",
