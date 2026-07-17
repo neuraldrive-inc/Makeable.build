@@ -7,6 +7,16 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const photoPath = path.join(root, "test image.jpg");
 const visualOutput = path.join(root, "test-results", "task3-visual");
+const contractSketch = `
+void reportReset() { Serial.println("MAKEABLE|RESET|POWER_ON"); }
+void reportReady() { Serial.println("MAKEABLE|READY|ESP32"); }
+void reportCheck() { Serial.println("MAKEABLE|CHECK|motor|PASS|value=1"); }
+void handleCommand(String line) {
+  if (line.startsWith("MAKEABLE|RUN|")) reportCheck();
+}
+void setup() { Serial.begin(115200); reportReset(); reportReady(); }
+void loop() { if (Serial.available()) handleCommand(Serial.readStringUntil('\\n')); }
+`;
 
 const scanPlan = {
   projectTitle: "Mini desk fan",
@@ -86,7 +96,7 @@ const confirmedPlan = {
   ],
   firmware: {
     language: "Arduino C++",
-    sketch: "void setup() {}",
+    sketch: contractSketch,
     notes: "Use a motor driver.",
   },
   diagnostics: { requestId: "confirmed_1", warnings: [] },

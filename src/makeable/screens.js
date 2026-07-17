@@ -16,6 +16,7 @@ import {
   requestHardwarePlan,
   runSequentialDiagnostics,
   selectAssemblyStep,
+  transitionFirmwareFlash,
   updateDetectedPart,
 } from "./actions.js";
 import { APP_READY_MESSAGE, PRODUCT_NAME } from "./content.js";
@@ -42,6 +43,8 @@ export function createScreenRenderer({ root, app }) {
     evidence: null,
     operationAbort: null,
     serialSession: null,
+    cameraRequest: null,
+    routeGeneration: 0,
     hardware: windowLike.MAKEABLE_HARDWARE || {
       compileAndFlashFirmware,
       createDiagnosticSession,
@@ -62,6 +65,7 @@ export function createScreenRenderer({ root, app }) {
     runtime,
     render(route) {
       cleanupRouteResources(context);
+      runtime.routeGeneration += 1;
       runtime.currentRoute = route;
       for (const observer of runtime.imageObservers.values()) observer.disconnect();
       runtime.imageObservers.clear();
@@ -702,8 +706,9 @@ function renderCode(context, route) {
   const { outlet, app, window: windowLike } = context;
   const project = app.getProject();
   const firmware = project.firmware || {};
+  const detectedBoard =
+    firmware.flash?.status === "success" ? firmware.flash?.boardName : "";
   const configuredBoard =
-    firmware.flash?.boardName ||
     project.feasibility?.firmwareSpec?.board ||
     windowLike.MAKEABLE_CONFIG?.arduinoFqbn ||
     "esp32:esp32:esp32";
@@ -754,11 +759,21 @@ function renderCode(context, route) {
             <li><span>2</span>Plug the other end into your board.</li>
             <li><span>3</span>Your board should light up.</li>
           </ol>
-          <p class="board-found" data-board-found>
-            <span aria-hidden="true"></span>
-            Board found: ${escapeHtml(configuredBoard)}
-          </p>
-          <p class="configured-board">Configured board: <code>${escapeHtml(
+          ${
+            detectedBoard
+              ? `
+                <p class="board-found" data-board-found>
+                  <span aria-hidden="true"></span>
+                  Board found: ${escapeHtml(detectedBoard)}
+                </p>
+              `
+              : `
+                <p class="configured-board configured-board--status">
+                  Configured board: ${escapeHtml(configuredBoard)}
+                </p>
+              `
+          }
+          <p class="configured-board">Board target: <code>${escapeHtml(
             configuredFqbn,
           )}</code></p>
           <p class="hardware-status" data-hardware-status role="status" aria-live="polite">
@@ -1029,6 +1044,8 @@ function cleanupRouteResources(context) {
   session?.close?.().catch?.(() => {});
   context.runtime.cameraStream?.getTracks?.().forEach((track) => track.stop());
   context.runtime.cameraStream = null;
+  if (context.runtime.cameraRequest) context.runtime.cameraRequest.cancelled = true;
+  context.runtime.cameraRequest = null;
   context.runtime.evidence = null;
 }
 
@@ -1109,6 +1126,16 @@ async function flashCurrentFirmware(context, route, sketch, configuredFqbn) {
   statusNode.textContent =
     "Choose your ESP32 when the browser asks. Nothing is marked successful until the loader finishes.";
   try {
+    await app.updateProject(
+      "firmware",
+      transitionFirmwareFlash(
+        { ...(app.getProject().firmware || {}), sketch },
+        "pending",
+        {
+          fqbn: configuredFqbn || "esp32:esp32:esp32",
+        },
+      ),
+    );
     const result = await context.runtime.hardware.compileAndFlashFirmware({
       sketch,
       fqbn: configuredFqbn || "esp32:esp32:esp32",
@@ -1125,21 +1152,26 @@ async function flashCurrentFirmware(context, route, sketch, configuredFqbn) {
       },
     });
     if (controller.signal.aborted) return;
-    const firmware = app.getProject().firmware || {};
-    await app.updateProject("firmware", {
-      ...firmware,
-      sketch,
-      flash: {
-        status: "success",
+    await app.updateProject(
+      "firmware",
+      transitionFirmwareFlash(app.getProject().firmware, "success", {
         boardName: result.boardName,
         fqbn: result.fqbn,
         flashedAt: new Date().toISOString(),
-      },
-    });
+      }),
+    );
     await app.completeRoute(route.path);
     app.navigation.navigate("/build/test/automatic");
   } catch (error) {
     const cancelled = controller.signal.aborted || error?.name === "AbortError";
+    await app.updateProject(
+      "firmware",
+      transitionFirmwareFlash(
+        app.getProject().firmware,
+        cancelled ? "cancelled" : "failed",
+        { error: error.message },
+      ),
+    );
     statusNode.textContent = cancelled
       ? "Loading stopped. The board was not marked as ready; retry when you’re ready."
       : `I couldn’t finish loading the board: ${error.message}`;
@@ -1332,12 +1364,31 @@ async function startManualCamera(context) {
       "Camera access is unavailable in this browser. Use a browser with camera support.";
     return;
   }
+  if (context.runtime.cameraRequest) {
+    context.runtime.cameraRequest.cancelled = true;
+  }
+  const request = {
+    cancelled: false,
+    generation: context.runtime.routeGeneration,
+  };
+  context.runtime.cameraRequest = request;
   try {
     context.runtime.cameraStream?.getTracks?.().forEach((track) => track.stop());
     const stream = await context.window.navigator.mediaDevices.getUserMedia({
       video: { facingMode: "environment" },
       audio: false,
     });
+    if (
+      request.cancelled ||
+      request.generation !== context.runtime.routeGeneration ||
+      context.runtime.currentRoute?.path !== "/build/test/manual"
+    ) {
+      stream.getTracks?.().forEach((track) => track.stop());
+      return;
+    }
+    if (context.runtime.cameraRequest === request) {
+      context.runtime.cameraRequest = null;
+    }
     context.runtime.cameraStream = stream;
     video.srcObject = stream;
     await video.play();
@@ -1345,7 +1396,12 @@ async function startManualCamera(context) {
     status.textContent =
       "Camera ready. Keep the project in frame, perform the action, then capture evidence.";
   } catch (error) {
+    if (request.cancelled) return;
     status.textContent = `I couldn’t open the camera: ${error.message}`;
+  } finally {
+    if (context.runtime.cameraRequest === request) {
+      context.runtime.cameraRequest = null;
+    }
   }
 }
 

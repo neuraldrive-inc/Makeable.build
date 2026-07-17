@@ -125,7 +125,7 @@ test.beforeEach(async ({ page }) => {
             ].find(predicate);
           },
           async observePower() {
-            return [];
+            return { markers: [], sessionHealthy: true, observedMs: 2500 };
           },
           async close() {
             window.__task4.closes += 1;
@@ -216,7 +216,7 @@ test("assembly, flash, automatic test, and manual acknowledgement use real route
   await page.getByRole("button", { name: "I connected it" }).click();
 
   await expect(page).toHaveURL(/\/build\/code$/);
-  await expect(page.getByText("Board found: ESP32 DevKit")).toBeVisible();
+  await expect(page.getByText("Configured board: ESP32 DevKit")).toBeVisible();
   await page.getByRole("tab", { name: "Advanced view" }).click();
   const editor = page.getByLabel("Firmware code");
   await editor.fill(`${await editor.inputValue()}\n// adjusted`);

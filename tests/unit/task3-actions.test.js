@@ -87,6 +87,10 @@ test("AI plans normalize bounds, confidence, feasibility, missing parts, alterna
     warnings: ["Check the motor voltage."],
     partCount: 2,
     lowConfidencePartIds: ["motor"],
+    tests: [],
+    manualAction: "Perform the project’s real-world action and watch what happens.",
+    manualQuestion: "Did the project respond as expected?",
+    manualSuccessLabel: "Yes, it worked",
   });
 });
 
@@ -138,7 +142,13 @@ test("hardware requests derive diagnostics identity only from the outer OpenAI r
   assert.equal(plan.diagnostics.requestId, "resp_outer_456");
   assert.deepEqual(
     requestPayload.text.format.schema.properties.diagnostics.required,
-    ["warnings"],
+    [
+      "warnings",
+      "tests",
+      "manualAction",
+      "manualQuestion",
+      "manualSuccessLabel",
+    ],
   );
   assert.equal(
     "requestId" in requestPayload.text.format.schema.properties.diagnostics.properties,

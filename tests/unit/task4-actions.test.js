@@ -3,6 +3,17 @@ import test from "node:test";
 
 import * as actions from "../../src/makeable/actions.js";
 
+const CONTRACT_SKETCH = `
+void reportReset() { Serial.println("MAKEABLE|RESET|POWER_ON"); }
+void reportReady() { Serial.println("MAKEABLE|READY|ESP32"); }
+void reportCheck() { Serial.println("MAKEABLE|CHECK|sensor|PASS|value=1"); }
+void handleCommand(String line) {
+  if (line.startsWith("MAKEABLE|RUN|")) reportCheck();
+}
+void setup() { Serial.begin(115200); reportReset(); reportReady(); }
+void loop() { if (Serial.available()) handleCommand(Serial.readStringUntil('\\n')); }
+`;
+
 test("assembly progress persists one current connection and completes only the final step", () => {
   assert.equal(typeof actions.advanceAssembly, "function");
   const wiring = {
@@ -76,9 +87,19 @@ test("power stability is inferred only after observation and fails on reset evid
     "waiting",
   );
   assert.deepEqual(actions.inferPowerStatus([], true), {
+    status: "fail",
+    detail: "The power observation did not include serial session health evidence.",
+  });
+  assert.deepEqual(
+    actions.inferPowerStatus([], true, {
+      sessionHealthy: true,
+      observedMs: 2500,
+    }),
+    {
     status: "pass",
     detail: "No reset or brownout markers appeared during the observation window.",
-  });
+    },
+  );
   assert.deepEqual(
     actions.inferPowerStatus(
       [{ type: "reset", reason: "brownout", raw: "MAKEABLE|RESET|BROWNOUT" }],
@@ -109,7 +130,7 @@ test("sequential diagnostics publish waiting/running/pass states and always clos
       return markers.find(predicate);
     },
     async observePower() {
-      return [];
+      return { markers: [], sessionHealthy: true, observedMs: 2500 };
     },
     async close() {
       closed += 1;
@@ -198,7 +219,7 @@ test("local compile and Web Serial flash returns the detected board and disconne
   }
   const progress = [];
   const result = await actions.compileAndFlashFirmware({
-    sketch: "void setup() {}",
+    sketch: CONTRACT_SKETCH,
     fqbn: "esp32:esp32:esp32",
     erase: true,
     serial: {

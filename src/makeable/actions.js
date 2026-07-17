@@ -167,7 +167,13 @@ export const HARDWARE_PLAN_SCHEMA = Object.freeze({
         manualQuestion: { type: "string" },
         manualSuccessLabel: { type: "string" },
       },
-      required: ["warnings"],
+      required: [
+        "warnings",
+        "tests",
+        "manualAction",
+        "manualQuestion",
+        "manualSuccessLabel",
+      ],
     },
   },
   required: [
@@ -243,27 +249,24 @@ export function normalizeHardwarePlan(raw = {}, options = {}) {
       warnings: textArray(raw.diagnostics?.warnings || raw.warnings),
       partCount: parts.length,
       lowConfidencePartIds,
-      ...(Array.isArray(raw.diagnostics?.tests || raw.diagnosticTests)
-        ? {
-            tests: normalizeDiagnosticTests(
-              raw.diagnostics?.tests || raw.diagnosticTests,
-            ),
-          }
-        : {}),
-      ...(cleanText(raw.diagnostics?.manualAction, "")
-        ? { manualAction: cleanText(raw.diagnostics.manualAction, "") }
-        : {}),
-      ...(cleanText(raw.diagnostics?.manualQuestion, "")
-        ? { manualQuestion: cleanText(raw.diagnostics.manualQuestion, "") }
-        : {}),
-      ...(cleanText(raw.diagnostics?.manualSuccessLabel, "")
-        ? {
-            manualSuccessLabel: cleanText(
-              raw.diagnostics.manualSuccessLabel,
-              "",
-            ),
-          }
-        : {}),
+      tests: normalizeDiagnosticTests(
+        raw.diagnostics?.tests || raw.diagnosticTests,
+      ),
+      manualAction: cleanText(
+        raw.diagnostics?.manualAction,
+        cleanText(
+          raw.firmwareSpec?.behavior,
+          "Perform the project’s real-world action and watch what happens.",
+        ),
+      ),
+      manualQuestion: cleanText(
+        raw.diagnostics?.manualQuestion,
+        "Did the project respond as expected?",
+      ),
+      manualSuccessLabel: cleanText(
+        raw.diagnostics?.manualSuccessLabel,
+        "Yes, it worked",
+      ),
     },
   };
 }
@@ -511,6 +514,7 @@ export async function requestHardwarePlan({
             "Treat this as the confirmed inventory; do not re-identify or add photographed parts.",
             JSON.stringify(confirmedParts),
             "Return honest feasibility, missing parts, compatible alternatives, wiring, firmware, and stable diagnostics.",
+            firmwareDiagnosticRequirements(),
             "Never invent prices, sellers, stock, or checkout.",
           ].join("\n\n"),
         },
@@ -523,6 +527,7 @@ export async function requestHardwarePlan({
             "Identify only actual visible parts needed for the idea.",
             "Use tight 0-100 percentage bounds and conservative confidence.",
             "Return honest feasibility, missing parts, inventory-compatible alternatives, and stable diagnostics.",
+            firmwareDiagnosticRequirements(),
             "Do not invent prices, sellers, stock, or checkout.",
           ].join("\n\n"),
         },
@@ -559,9 +564,11 @@ export async function requestHardwarePlan({
       cleanText(data?.error?.message || data?.error || data?.message, "The plan could not be created."),
     );
   }
-  return normalizeHardwarePlan(parseResponsePayload(data), {
+  const plan = normalizeHardwarePlan(parseResponsePayload(data), {
     requestId: data?.id,
   });
+  if (confirmation) assertFirmwareDiagnosticContract(plan.firmware?.sketch);
+  return plan;
 }
 
 export function blobToDataUrl(blob) {
@@ -648,7 +655,7 @@ export function createSafeDiagnosticCommand(diagnostic = {}) {
   return `MAKEABLE|RUN|${id}|${pulseMs}\n`;
 }
 
-export function inferPowerStatus(markers, observationComplete) {
+export function inferPowerStatus(markers, observationComplete, evidence) {
   const reset = array(markers).find(
     (marker) =>
       marker?.type === "reset" &&
@@ -666,6 +673,18 @@ export function inferPowerStatus(markers, observationComplete) {
     return {
       status: "waiting",
       detail: "Watching for reset or brownout evidence.",
+    };
+  }
+  if (!evidence) {
+    return {
+      status: "fail",
+      detail: "The power observation did not include serial session health evidence.",
+    };
+  }
+  if (!evidence.sessionHealthy) {
+    return {
+      status: "fail",
+      detail: "The serial connection ended during the power observation.",
     };
   }
   return {
@@ -699,11 +718,17 @@ export async function runSequentialDiagnostics({
       publish();
 
       if (check.kind === "power") {
-        const markers = await session.observePower?.({
+        const observation = await session.observePower?.({
           durationMs: 2500,
           signal,
         });
-        Object.assign(check, inferPowerStatus(markers, true));
+        const markers = Array.isArray(observation)
+          ? observation
+          : observation?.markers;
+        Object.assign(
+          check,
+          inferPowerStatus(markers, true, Array.isArray(observation) ? null : observation),
+        );
       } else {
         if (check.kind !== "board") {
           await session.write(createSafeDiagnosticCommand(check));
@@ -775,6 +800,8 @@ export async function createDiagnosticSession({
   const waiters = new Set();
   let output = "";
   let closed = false;
+  let readEnded = false;
+  let readError = null;
 
   const notify = (marker) => {
     markers.push(marker);
@@ -791,7 +818,10 @@ export async function createDiagnosticSession({
     try {
       while (!closed) {
         const { value, done } = await reader.read();
-        if (done) break;
+        if (done) {
+          if (!closed) readEnded = true;
+          break;
+        }
         if (!value) continue;
         const text = decoder.decode(value, { stream: true });
         output = `${output}${text}`.slice(-25_000);
@@ -799,7 +829,10 @@ export async function createDiagnosticSession({
         parser.push(text).forEach(notify);
       }
     } catch (error) {
-      if (!closed) onText(`\n[serial read stopped] ${error.message}\n`);
+      if (!closed) {
+        readError = error;
+        onText(`\n[serial read stopped] ${error.message}\n`);
+      }
     }
   })();
 
@@ -849,8 +882,14 @@ export async function createDiagnosticSession({
     },
     async observePower({ durationMs = 2500, signal } = {}) {
       const startingIndex = markers.length;
+      const startedAt = Date.now();
       await abortableDelay(durationMs, signal);
-      return markers.slice(startingIndex);
+      return {
+        markers: markers.slice(startingIndex),
+        observedMs: Date.now() - startedAt,
+        sessionHealthy: Boolean(reader) && !readEnded && !readError && !closed,
+        error: readError?.message || "",
+      };
     },
     async close() {
       if (closed) return;
@@ -885,6 +924,7 @@ export async function compileAndFlashFirmware({
   if (!String(sketch || "").trim()) {
     throw new Error("There isn’t code to load yet.");
   }
+  assertFirmwareDiagnosticContract(sketch);
   const statusResponse = await fetchImpl("/api/arduino/status", { signal });
   const status = await safeJson(statusResponse);
   if (!statusResponse.ok || status.hostedMode) {
@@ -925,6 +965,12 @@ export async function compileAndFlashFirmware({
 
   const esptool = await loadEsptool();
   const transport = new esptool.Transport(port, true);
+  let disconnected = false;
+  const disconnectTransport = async () => {
+    if (disconnected) return;
+    disconnected = true;
+    await transport.disconnect();
+  };
   let boardName = "";
   try {
     const loader = new esptool.ESPLoader({
@@ -938,9 +984,20 @@ export async function compileAndFlashFirmware({
       debugLogging: false,
     });
     throwIfAborted(signal);
-    boardName = cleanText(await loader.main("default_reset"), "");
+    boardName = cleanText(
+      await runAbortableHardwareOperation(
+        loader.main("default_reset"),
+        signal,
+        disconnectTransport,
+      ),
+      "",
+    );
     const images = array(compiled.images);
-    await loader.writeFlash({
+    const imageWeights = images.map((image) =>
+      Math.max(1, Number(image.size) || 1),
+    );
+    const totalWeight = imageWeights.reduce((sum, value) => sum + value, 0);
+    await runAbortableHardwareOperation(loader.writeFlash({
       fileArray: images.map((image) => ({
         data: base64ToBinaryString(image.dataBase64),
         address: image.address,
@@ -951,7 +1008,16 @@ export async function compileAndFlashFirmware({
       eraseAll: Boolean(erase),
       compress: true,
       reportProgress(fileIndex, written, total) {
-        const percent = total ? Math.round((written / total) * 100) : 0;
+        const previousWeight = imageWeights
+          .slice(0, fileIndex)
+          .reduce((sum, value) => sum + value, 0);
+        const currentWeight = imageWeights[fileIndex] || 1;
+        const currentRatio = total
+          ? clamp(Number(written) / Number(total), 0, 1)
+          : 0;
+        const percent = Math.round(
+          ((previousWeight + currentWeight * currentRatio) / totalWeight) * 100,
+        );
         const image = images[fileIndex] || images[0];
         onProgress({
           phase: "flash",
@@ -959,18 +1025,65 @@ export async function compileAndFlashFirmware({
           label: `${image?.label || image?.name || "Firmware"} ${percent}%`,
         });
       },
-    });
+    }), signal, disconnectTransport);
     throwIfAborted(signal);
     await loader.after("hard_reset");
     onProgress({ phase: "complete", percent: 100, label: "Code loaded" });
   } finally {
-    await transport.disconnect();
+    await disconnectTransport();
   }
   return {
     boardName: boardName || cleanText(status.boardName, "ESP32"),
     fqbn: cleanText(compiled.fqbn, fqbn),
     compilerOutput: cleanText(compiled.stderr || compiled.stdout, ""),
   };
+}
+
+export function transitionFirmwareFlash(firmware = {}, status, details = {}) {
+  if (!["pending", "success", "failed", "cancelled"].includes(status)) {
+    throw new TypeError(`Unknown firmware flash status: ${status}`);
+  }
+  const flash = { status };
+  if (status === "pending" && cleanText(details.fqbn, "")) {
+    flash.fqbn = cleanText(details.fqbn, "");
+  }
+  if (status === "success") {
+    flash.boardName = cleanText(details.boardName, "ESP32");
+    flash.fqbn = cleanText(details.fqbn, "esp32:esp32:esp32");
+    flash.flashedAt = cleanText(details.flashedAt, new Date().toISOString());
+  }
+  if (["failed", "cancelled"].includes(status)) {
+    flash.error = cleanText(
+      details.error,
+      status === "cancelled" ? "Loading was cancelled." : "Loading failed.",
+    );
+  }
+  return { ...firmware, flash };
+}
+
+export function hasFirmwareDiagnosticContract(sketch) {
+  const source = stripCppComments(sketch);
+  const emits = (marker) =>
+    new RegExp(
+      `Serial\\s*\\.\\s*(?:print|println|printf)\\s*\\(\\s*["']MAKEABLE\\|${marker}\\|`,
+      "i",
+    ).test(source);
+  const handlesRun =
+    /(?:startsWith|indexOf)\s*\(\s*["']MAKEABLE\|RUN\|/i.test(source) ||
+    /strncmp\s*\([^,\n]+,\s*["']MAKEABLE\|RUN\|/i.test(source);
+  return (
+    emits("READY") &&
+    emits("CHECK") &&
+    emits("RESET") &&
+    handlesRun
+  );
+}
+
+export function assertFirmwareDiagnosticContract(sketch) {
+  if (hasFirmwareDiagnosticContract(sketch)) return true;
+  throw new Error(
+    "Firmware must emit MAKEABLE READY, CHECK, and RESET markers and handle the safe RUN command contract.",
+  );
 }
 
 export async function evaluateManualTest({
@@ -1101,21 +1214,37 @@ function normalizeDiagnosticTests(diagnostics) {
       id,
       name: cleanText(diagnostic?.name, `Hardware check ${index + 1}`),
       kind,
-      ...(kind === "actuator"
-        ? {
-            pulseMs: clamp(
+      pulseMs:
+        kind === "actuator"
+          ? clamp(
               Math.round(Number(diagnostic?.pulseMs) || 500),
               100,
               1000,
-            ),
-          }
-        : {}),
+            )
+          : 0,
       assemblyStep: Math.max(
         1,
         Math.round(Number(diagnostic?.assemblyStep) || 1),
       ),
     };
   });
+}
+
+function firmwareDiagnosticRequirements() {
+  return [
+    "The firmware sketch must implement Makeable’s complete serial diagnostic contract.",
+    'Emit `MAKEABLE|RESET|<reason>` from setup using the ESP32 reset reason, then emit `MAKEABLE|READY|<detected board>`.',
+    'Emit `MAKEABLE|CHECK|<id>|PASS|<detail>` or `MAKEABLE|CHECK|<id>|FAIL|<detail>` for every diagnostic.',
+    'Read newline-delimited serial input, handle only `MAKEABLE|RUN|<id>|<pulseMs>`, reject unknown IDs, and clamp actuator pulses to at most 1000 ms.',
+    "Do not place these markers only in comments; print them through Serial and parse the RUN prefix in executable code.",
+  ].join(" ");
+}
+
+function stripCppComments(source) {
+  return String(source || "").replace(
+    /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g,
+    (_match, literal) => literal || "",
+  );
 }
 
 function parseSerialMarker(line) {
@@ -1174,6 +1303,22 @@ function abortableDelay(durationMs, signal) {
       },
       { once: true },
     );
+  });
+}
+
+function runAbortableHardwareOperation(operation, signal, onAbort) {
+  if (!signal) return operation;
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const handleAbort = () => {
+      Promise.resolve()
+        .then(onAbort)
+        .finally(() => reject(abortError()));
+    };
+    signal.addEventListener("abort", handleAbort, { once: true });
+    Promise.resolve(operation).then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", handleAbort);
+    });
   });
 }
 
