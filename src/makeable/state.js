@@ -33,6 +33,7 @@ export const DOWNSTREAM_FIELDS = Object.freeze({
     "tests",
     "publish",
   ]),
+  review: Object.freeze([]),
   wiring: Object.freeze(["firmware", "tests", "publish"]),
   firmware: Object.freeze(["tests", "publish"]),
   tests: Object.freeze(["publish"]),
@@ -73,6 +74,7 @@ const ROUTES_INVALIDATED_BY_FIELD = Object.freeze({
     "/build/publish/connect",
     "/build/publish/success",
   ],
+  review: [],
   feasibility: [
     "/build/assemble",
     "/build/code",
@@ -114,6 +116,7 @@ export function createProjectSnapshot(overrides = {}) {
     idea: overrides.idea ?? null,
     photo: overrides.photo ?? null,
     confirmedParts: overrides.confirmedParts ?? null,
+    review: overrides.review ?? { selectedPartId: null },
     feasibility: overrides.feasibility ?? null,
     wiring: overrides.wiring ?? null,
     firmware: overrides.firmware ?? null,

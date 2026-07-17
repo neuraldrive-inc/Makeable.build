@@ -69,6 +69,7 @@ body {
   padding: 0;
   overflow: hidden;
   clip: rect(0 0 0 0);
+  clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
 }
@@ -383,6 +384,13 @@ body {
   font-size: 18px;
 }
 
+.tool-button:has(+ .file-input:focus),
+.camera-link:has(+ .file-input:focus),
+.upload-button:has(+ .file-input:focus) {
+  outline: 3px solid var(--makeable-color-blue);
+  outline-offset: 4px;
+}
+
 .idea-panel {
   position: relative;
   min-height: 430px;
@@ -639,6 +647,7 @@ body {
 }
 
 .parts-photo {
+  display: block;
   width: 100%;
   min-height: 420px;
   aspect-ratio: 16 / 8.4;
@@ -648,7 +657,10 @@ body {
 
 .annotation-layer {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
 }
 

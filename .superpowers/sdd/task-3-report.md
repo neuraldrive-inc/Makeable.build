@@ -122,3 +122,93 @@ directory. They are not production assets and are not committed.
 Live OpenAI and Deepgram provider calls were not exercised in browser automation.
 Their browser contracts were tested with deterministic mocks; the implementation uses
 the existing server endpoints for real runtime calls.
+
+## Review-fix addendum
+
+### Findings addressed
+
+1. Annotation layers now use the actual contained-image rectangle calculated from the
+   rendered box and intrinsic image dimensions. Wide and tall photos no longer place
+   annotations in letterbox space, and the frame recalculates after load and resize.
+2. Review selection is persisted as `review.selectedPartId`. Updating that field has
+   no downstream invalidation, and the selected inspector restores after direct reload.
+3. Rename, bounds, and confidence edits rerender Review from the persisted normalized
+   part. Chips, annotation labels, accessible names, clamped dimensions, and the
+   confirmation state therefore remain in sync.
+4. The existing sketch, upload, and camera labels remain the visible controls. Their
+   native file inputs stay in the keyboard order and now project a visible 3px focus
+   outline onto the corresponding unchanged label.
+5. `diagnostics.requestId` is derived only from the outer OpenAI response `id`.
+   Model-produced JSON no longer defines or overrides transport identity.
+6. Marking a missing part as obtained incorporates it into confirmed inventory. When
+   the final missing part is obtained, local feasibility becomes Ready, the empty
+   missing list is removed, generated wiring/firmware are preserved, and routing moves
+   to the Ready screen.
+7. Photo object URLs use a revision-aware registry. Replacing a photo revokes the old
+   URL; page teardown revokes all remaining URLs and disconnects image observers.
+8. Playwright now uses a bounded two-worker pool. The fresh aggregate suite exited
+   cleanly.
+
+### Review-fix TDD evidence
+
+RED was captured before production changes:
+
+- `node --test tests/unit/task3-actions.test.js tests/unit/state.test.js tests/unit/foundation.test.js`
+  - 20 passed, 9 failed
+  - Expected failures covered untrusted model request IDs, missing contained-image
+    geometry, missing acquisition and URL-lifecycle contracts, runtime-only selection,
+    downstream invalidation, and an unbounded worker configuration.
+- `npx playwright test tests/e2e/task3.spec.js --project=desktop --workers=1`
+  - 2 passed, 4 failed
+  - The visible file controls had no focus outline, the annotation layer was
+    misregistered by 145.17px on a wide image, and no object URLs were revoked.
+- `npx playwright test tests/e2e/task3.spec.js --project=desktop --workers=1 --grep "review selection|final required part"`
+  - Both targeted behaviors failed before implementation. The corrected selection
+    reproduction then failed because the inspector disappeared after direct reload;
+    final acquisition remained on `/build/feasibility/missing`.
+
+GREEN after implementation:
+
+- `node --test tests/unit/task3-actions.test.js tests/unit/state.test.js tests/unit/foundation.test.js`
+  - 29 passed
+- `npx playwright test tests/e2e/task3.spec.js --project=desktop --project=tablet --project=mobile`
+  - 24 passed
+- `MAKEABLE_VISUAL=1 npx playwright test tests/e2e/task3.spec.js --project=desktop --workers=1`
+  - 8 passed
+- `git diff --check && npm run build && npm test`
+  - whitespace check passed
+  - build passed
+  - 43 unit tests passed
+  - 48 browser tests passed
+  - command exited 0
+
+### Rendered verification and reference comparison
+
+The in-app Browser reloaded the implementation after the fixes and confirmed:
+
+- page identity: `/build/new`, title `Makeable`
+- meaningful semantic DOM with no framework error overlay
+- the sketch file input receives keyboard focus after Tab
+- the unchanged visible “Add a sketch” label shows a solid 3px focus outline
+- screenshot geometry remains consistent with the accepted Describe composition
+
+Browser console entries were extension-origin LavaMoat warnings and extension message
+channel shutdown messages; no application runtime or framework errors were observed.
+
+All five fresh 1440×1024 renders were compared again to references 01, 02a, 02b, 03a,
+and 03b:
+
+- Describe retains the approved headline, single voice subtitle trigger, taped paper
+  panel, CTA, and example row.
+- Upload retains the heading/privacy note, camera link, central upload panel, and
+  three-tip row.
+- Review retains its photo-first composition, count note, chips, and confirmation
+  action. The only dynamic correction controls still appear after selecting a part.
+- Ready retains its photo/annotation context, inventory strip, note, and “Show me how”
+  action.
+- Missing retains the two-column inventory/need composition and compatible alternative
+  area.
+
+No base screen element was added or removed. Existing intentional runtime deviations
+remain: uploaded imagery replaces reference illustration art, values and counts are
+data-driven, and fabricated prices/checkout controls are omitted.

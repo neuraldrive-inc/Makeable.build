@@ -67,6 +67,7 @@ test("project snapshots use the versioned Makeable state shape", () => {
     idea: null,
     photo: null,
     confirmedParts: null,
+    review: { selectedPartId: null },
     feasibility: null,
     wiring: null,
     firmware: null,
@@ -102,6 +103,23 @@ test("changing a value invalidates only its downstream state and completion", ()
   assert.notEqual(updated, COMPLETE_PROJECT);
 });
 
+test("review selection persists without invalidating generated downstream work", () => {
+  const updated = state.updateProject(
+    COMPLETE_PROJECT,
+    "review",
+    { selectedPartId: "ldr" },
+    { now: () => "2026-07-16T12:00:00.000Z" },
+  );
+
+  assert.deepEqual(updated.review, { selectedPartId: "ldr" });
+  assert.equal(updated.feasibility, COMPLETE_PROJECT.feasibility);
+  assert.equal(updated.wiring, COMPLETE_PROJECT.wiring);
+  assert.equal(updated.firmware, COMPLETE_PROJECT.firmware);
+  assert.equal(updated.tests, COMPLETE_PROJECT.tests);
+  assert.equal(updated.publish, COMPLETE_PROJECT.publish);
+  assert.deepEqual(updated.progress, COMPLETE_PROJECT.progress);
+});
+
 test("unchanged values preserve downstream work", () => {
   assert.equal(typeof state.updateProject, "function", "updateProject should be exported");
   const unchanged = state.updateProject(
@@ -119,6 +137,7 @@ test("the invalidation chain covers idea, photo, parts, wiring, firmware, tests,
     idea: ["photo", "confirmedParts", "feasibility", "wiring", "firmware", "tests", "publish"],
     photo: ["confirmedParts", "feasibility", "wiring", "firmware", "tests", "publish"],
     confirmedParts: ["feasibility", "wiring", "firmware", "tests", "publish"],
+    review: [],
     wiring: ["firmware", "tests", "publish"],
     firmware: ["tests", "publish"],
     tests: ["publish"],

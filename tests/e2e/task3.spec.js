@@ -99,6 +99,7 @@ async function mockPlanning(page) {
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
+        id: isConfirmation ? "resp_confirmed_1" : "resp_scan_1",
         status: "completed",
         output_text: JSON.stringify(isConfirmation ? confirmedPlan : scanPlan),
       }),
@@ -165,6 +166,7 @@ test("describe examples, sketch input, and secure voice subtitle are operational
   }
   await page.getByRole("button", { name: "A mini fan" }).click();
   await expect(page.getByLabel("Describe your idea")).toHaveValue(/mini fan/i);
+  await expectFileControlFocus(page, "Add a sketch");
   await page.getByLabel("Add a sketch").setInputFiles(photoPath);
   await expect(page.getByText("Sketch attached")).toBeVisible();
   const voiceTrigger = page.getByRole("button", { name: "Describe with your voice" });
@@ -184,6 +186,8 @@ test("upload, persistent annotation review, confirmation, and missing-part actio
       path: path.join(visualOutput, "upload-1440x1024.png"),
     });
   }
+  await expectFileControlFocus(page, "Upload my parts");
+  await expectFileControlFocus(page, "Use camera instead");
 
   await page.getByLabel("Upload my parts").setInputFiles(photoPath);
   await expect(page).toHaveURL(/\/build\/parts\/review$/);
@@ -196,8 +200,23 @@ test("upload, persistent annotation review, confirmation, and missing-part actio
     });
   }
   await page.getByRole("button", { name: /Possible DC motor annotation/ }).click();
+  await expect(page.getByLabel("Part name")).toHaveValue("Possible DC motor");
+  expect(
+    await page.evaluate(
+      () => window.MAKEABLE_APP.getProject().review?.selectedPartId,
+    ),
+  ).toBe("motor");
+  await page.reload();
+  await expect(page.getByLabel("Part name")).toHaveValue("Possible DC motor");
   await page.getByLabel("Part name").fill("DC motor");
-  await page.getByLabel("Left edge").fill("64");
+  await page.getByLabel("Part name").press("Tab");
+  await expect(page.locator(".part-chip").getByText("DC motor")).toBeVisible();
+  await page.getByLabel("Left edge").fill("92");
+  await page.getByLabel("Left edge").press("Tab");
+  await expect(page.getByLabel("Width")).toHaveValue("8");
+  await expect(
+    page.locator('.part-annotation[data-select-part="motor"]'),
+  ).toHaveAttribute("style", /left:92%;top:18%;width:8%;height:25%/);
   await page.getByLabel("Confirm DC motor despite low confidence").check();
   await page.getByRole("button", { name: "Confirm my parts" }).click();
 
@@ -215,16 +234,298 @@ test("upload, persistent annotation review, confirmation, and missing-part actio
     });
   }
   await page.getByRole("button", { name: "Mark Fan blade as obtained" }).click();
-  await expect(page.getByText("Obtained")).toBeVisible();
+  await expect(page).toHaveURL(/\/build\/feasibility\/ready$/);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Yep — you can build it!" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("list", { name: "Confirmed parts" }).getByText("Fan blade"),
+  ).toBeVisible();
 
   await page.reload();
-  await expect(page.getByText("Obtained")).toBeVisible();
+  await expect(page).toHaveURL(/\/build\/feasibility\/ready$/);
   const persisted = await page.evaluate(() => window.MAKEABLE_APP.getProject());
   expect(persisted.confirmedParts.find(({ id }) => id === "motor")).toMatchObject({
     name: "DC motor",
     confirmed: true,
-    bounds: { x: 64 },
+    bounds: { x: 92, width: 8 },
   });
+  expect(persisted.confirmedParts.find(({ id }) => id === "fan-blade")).toMatchObject({
+    name: "Fan blade",
+    confirmed: true,
+  });
+  expect(persisted.feasibility).toMatchObject({
+    status: "ready",
+    missingParts: [],
+  });
+  expect(persisted.wiring.steps).toHaveLength(1);
+  expect(persisted.firmware.sketch).toBe("void setup() {}");
+});
+
+test("annotations follow the contained image content for wide and tall photos", async ({
+  page,
+}) => {
+  await page.goto("/build/new");
+  await page.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 2000;
+    canvas.height = 500;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#f7f0e4";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const photo = await new Promise((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.8),
+    );
+    await window.MAKEABLE_APP.saveImage("source", photo);
+    await window.MAKEABLE_APP.replaceProject({
+      ...window.MAKEABLE_APP.getProject(),
+      idea: { text: "Make a mini desk fan" },
+      photo: {
+        imageId: "source",
+        width: 2000,
+        height: 500,
+        mimeType: "image/jpeg",
+        revision: "wide-photo",
+      },
+      confirmedParts: [
+        {
+          id: "board",
+          name: "Arduino Uno",
+          confidence: 0.98,
+          lowConfidence: false,
+          confirmed: true,
+          bounds: { x: 25, y: 20, width: 50, height: 60 },
+        },
+      ],
+      review: { selectedPartId: null },
+      progress: {
+        completedRoutes: ["/build/new", "/build/parts/upload"],
+      },
+    });
+    window.MAKEABLE_APP.navigation.navigate("/build/parts/review");
+  });
+  await page.waitForFunction(
+    () => document.querySelector("[data-source-photo]")?.naturalWidth === 2000,
+  );
+
+  const frame = await page.evaluate(() => {
+    const image = document.querySelector("[data-source-photo]");
+    const layer = document.querySelector(".annotation-layer");
+    const imageRect = image.getBoundingClientRect();
+    const layerRect = layer.getBoundingClientRect();
+    const expectedWidth = Math.min(
+      imageRect.width,
+      imageRect.height * (image.naturalWidth / image.naturalHeight),
+    );
+    const expectedHeight = expectedWidth / (image.naturalWidth / image.naturalHeight);
+    return {
+      actual: {
+        left: layerRect.left,
+        top: layerRect.top,
+        width: layerRect.width,
+        height: layerRect.height,
+      },
+      expected: {
+        left: imageRect.left + (imageRect.width - expectedWidth) / 2,
+        top: imageRect.top + (imageRect.height - expectedHeight) / 2,
+        width: expectedWidth,
+        height: expectedHeight,
+      },
+    };
+  });
+
+  for (const field of ["left", "top", "width", "height"]) {
+    expect(
+      Math.abs(frame.actual[field] - frame.expected[field]),
+      `${field} should match contained image content`,
+    ).toBeLessThanOrEqual(1.5);
+  }
+});
+
+test("review selection and normalized edits survive a direct reload", async ({ page }) => {
+  await page.goto("/build/new");
+  await page.waitForFunction(() => Boolean(window.MAKEABLE_APP));
+  await page.evaluate(async () => {
+    await window.MAKEABLE_APP.replaceProject({
+      ...window.MAKEABLE_APP.getProject(),
+      idea: { text: "Make a mini desk fan" },
+      photo: {
+        imageId: "source",
+        width: 1200,
+        height: 800,
+        mimeType: "image/jpeg",
+        revision: "review-edit",
+      },
+      confirmedParts: [
+        {
+          id: "motor",
+          name: "Possible DC motor",
+          type: "motor",
+          role: "Output",
+          confidence: 0.56,
+          lowConfidence: true,
+          confirmed: false,
+          bounds: { x: 67, y: 18, width: 18, height: 25 },
+        },
+      ],
+      review: { selectedPartId: null },
+      feasibility: { status: "ready", missingParts: [], alternatives: [] },
+      wiring: { steps: [{ title: "Preserve me" }] },
+      firmware: { sketch: "void setup() {}" },
+      progress: {
+        completedRoutes: ["/build/new", "/build/parts/upload"],
+      },
+    });
+    window.MAKEABLE_APP.navigation.navigate("/build/parts/review");
+  });
+
+  await page.getByRole("button", { name: /Possible DC motor annotation/ }).click();
+  await expect(page.getByLabel("Part name")).toHaveValue("Possible DC motor");
+  await page.reload();
+  await expect(page.getByLabel("Part name")).toHaveValue("Possible DC motor");
+  const selectedProject = await page.evaluate(() => window.MAKEABLE_APP.getProject());
+  expect(selectedProject.review).toEqual({ selectedPartId: "motor" });
+  expect(selectedProject.wiring.steps).toEqual([{ title: "Preserve me" }]);
+  expect(selectedProject.firmware.sketch).toBe("void setup() {}");
+  await page.getByLabel("Part name").fill("DC motor");
+  await page.getByLabel("Part name").press("Tab");
+  await expect(page.locator(".part-chip").getByText("DC motor")).toBeVisible();
+  await page.getByLabel("Left edge").fill("92");
+  await page.getByLabel("Left edge").press("Tab");
+  await expect(page.getByLabel("Width")).toHaveValue("8");
+  await expect(
+    page.locator('.part-annotation[data-select-part="motor"]'),
+  ).toHaveAttribute("style", /left:92%;top:18%;width:8%;height:25%/);
+
+  const persisted = await page.evaluate(() => window.MAKEABLE_APP.getProject());
+  expect(persisted.review).toEqual({ selectedPartId: "motor" });
+});
+
+test("obtaining the final required part transitions Missing to Ready", async ({ page }) => {
+  await page.goto("/build/new");
+  await page.waitForFunction(() => Boolean(window.MAKEABLE_APP));
+  await page.evaluate(async () => {
+    await window.MAKEABLE_APP.replaceProject({
+      ...window.MAKEABLE_APP.getProject(),
+      idea: { text: "Make a mini desk fan" },
+      photo: {
+        imageId: "source",
+        width: 1200,
+        height: 800,
+        mimeType: "image/jpeg",
+        revision: "missing-acquisition",
+      },
+      confirmedParts: [{ id: "motor", name: "DC motor", confirmed: true }],
+      feasibility: {
+        status: "missing",
+        reasons: ["A fan blade is still needed."],
+        missingParts: [
+          {
+            id: "fan-blade",
+            name: "Fan blade",
+            reason: "Moves air.",
+            compatibleWith: ["motor"],
+            obtained: false,
+          },
+        ],
+        alternatives: [],
+      },
+      wiring: { steps: [{ title: "Preserve me" }] },
+      firmware: { sketch: "void setup() {}" },
+      progress: {
+        completedRoutes: [
+          "/build/new",
+          "/build/parts/upload",
+          "/build/parts/review",
+        ],
+      },
+    });
+    window.MAKEABLE_APP.navigation.navigate("/build/feasibility/missing");
+  });
+
+  await page.getByRole("button", { name: "Mark Fan blade as obtained" }).click();
+  await expect(page).toHaveURL(/\/build\/feasibility\/ready$/);
+  await expect(
+    page.getByRole("list", { name: "Confirmed parts" }).getByText("Fan blade"),
+  ).toBeVisible();
+  const persisted = await page.evaluate(() => window.MAKEABLE_APP.getProject());
+  expect(persisted.feasibility.status).toBe("ready");
+  expect(persisted.feasibility.missingParts).toEqual([]);
+  expect(persisted.wiring.steps).toEqual([{ title: "Preserve me" }]);
+  expect(persisted.firmware.sketch).toBe("void setup() {}");
+});
+
+test("replaced and torn-down photo object URLs are revoked", async ({ page }) => {
+  await page.addInitScript(() => {
+    const create = URL.createObjectURL.bind(URL);
+    const revoke = URL.revokeObjectURL.bind(URL);
+    window.__makeableObjectUrls = { created: [], revoked: [] };
+    URL.createObjectURL = (blob) => {
+      const url = create(blob);
+      window.__makeableObjectUrls.created.push(url);
+      return url;
+    };
+    URL.revokeObjectURL = (url) => {
+      window.__makeableObjectUrls.revoked.push(url);
+      revoke(url);
+    };
+  });
+  await page.goto("/build/new");
+  await page.evaluate(async () => {
+    const photo = await fetch("/test%20image.jpg").then((response) => response.blob());
+    await window.MAKEABLE_APP.saveImage("source", photo);
+    await window.MAKEABLE_APP.replaceProject({
+      ...window.MAKEABLE_APP.getProject(),
+      idea: { text: "Make a mini desk fan" },
+      photo: {
+        imageId: "source",
+        width: 1200,
+        height: 800,
+        mimeType: "image/jpeg",
+        revision: "first",
+      },
+      confirmedParts: [
+        {
+          id: "board",
+          name: "Arduino Uno",
+          confidence: 0.98,
+          confirmed: true,
+          bounds: { x: 35, y: 25, width: 28, height: 42 },
+        },
+      ],
+      progress: {
+        completedRoutes: ["/build/new", "/build/parts/upload"],
+      },
+    });
+    window.MAKEABLE_APP.navigation.navigate("/build/parts/review");
+  });
+  await expect(page.getByAltText("Your uploaded parts")).toHaveAttribute("src", /^blob:/);
+
+  await page.evaluate(async () => {
+    const photo = await fetch("/test%20image.jpg").then((response) => response.blob());
+    await window.MAKEABLE_APP.saveImage("source", photo);
+    await window.MAKEABLE_APP.replaceProject({
+      ...window.MAKEABLE_APP.getProject(),
+      photo: {
+        ...window.MAKEABLE_APP.getProject().photo,
+        revision: "second",
+      },
+    });
+    window.MAKEABLE_APP.navigation.navigate("/build/parts/upload");
+    window.MAKEABLE_APP.navigation.navigate("/build/parts/review");
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__makeableObjectUrls.revoked.length),
+    )
+    .toBe(1);
+
+  await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__makeableObjectUrls.revoked.length),
+    )
+    .toBe(2);
 });
 
 test("ready feasibility renders the uploaded photo and confirmed inventory", async ({
@@ -407,4 +708,20 @@ async function expectAccessibleAndContained(page, label) {
     dimensions.scrollWidth,
     `${label} horizontal overflow`,
   ).toBeLessThanOrEqual(dimensions.clientWidth);
+}
+
+async function expectFileControlFocus(page, label) {
+  const input = page.getByLabel(label);
+  await input.focus();
+  await expect(input).toBeFocused();
+  const focusIndicator = await input.evaluate((element) => {
+    const visibleControl = element.labels?.[0];
+    const style = visibleControl ? getComputedStyle(visibleControl) : null;
+    return {
+      outlineStyle: style?.outlineStyle || "none",
+      outlineWidth: Number.parseFloat(style?.outlineWidth || "0"),
+    };
+  });
+  expect(focusIndicator.outlineStyle).not.toBe("none");
+  expect(focusIndicator.outlineWidth).toBeGreaterThanOrEqual(2);
 }

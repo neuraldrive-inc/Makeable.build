@@ -95,6 +95,12 @@ test("the package and local server identify the product as Makeable", async () =
   assert.doesNotMatch(server, /GeckCo AI running at/);
 });
 
+test("the browser regression matrix uses a bounded worker pool", async () => {
+  const config = (await import("../../playwright.config.js")).default;
+
+  assert.equal(config.workers, 2);
+});
+
 test("the favicon and brand accent use the licensed vendored icon", async () => {
   const html = await read("index.html");
   const makeableStyles = await read("styles", "makeable.css");

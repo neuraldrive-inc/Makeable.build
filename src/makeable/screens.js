@@ -1,6 +1,9 @@
 import {
+  acquireMissingPart,
   blobToDataUrl,
+  calculateContainedImageFrame,
   canConfirmParts,
+  createObjectUrlRegistry,
   createPartSearchUrl,
   ideaText,
   inventoryCompatibleAlternatives,
@@ -21,27 +24,43 @@ const ROUTE_RENDERERS = Object.freeze({
 export function createScreenRenderer({ root, app }) {
   const outlet = root.querySelector("[data-screen-outlet]");
   if (!outlet) return Object.freeze({ render() {} });
+  const windowLike = root.defaultView;
   const runtime = {
-    selectedPartId: null,
-    photoUrl: "",
-    sketchUrl: "",
     voice: null,
     currentRoute: null,
+    imageObservers: new Map(),
+    objectUrls: createObjectUrlRegistry({
+      createObjectURL: windowLike.URL.createObjectURL.bind(windowLike.URL),
+      revokeObjectURL: windowLike.URL.revokeObjectURL.bind(windowLike.URL),
+    }),
   };
+  let destroyed = false;
   const context = {
     root,
-    window: root.defaultView,
+    window: windowLike,
     outlet,
     app,
     runtime,
     render(route) {
       runtime.currentRoute = route;
+      for (const observer of runtime.imageObservers.values()) observer.disconnect();
+      runtime.imageObservers.clear();
       const renderer = ROUTE_RENDERERS[route.path];
       if (!renderer) return;
       renderer(context, route);
     },
   };
-  return Object.freeze({ render: context.render });
+  const destroy = () => {
+    if (destroyed) return;
+    destroyed = true;
+    stopVoice(context);
+    for (const observer of runtime.imageObservers.values()) observer.disconnect();
+    runtime.imageObservers.clear();
+    runtime.objectUrls.revokeAll();
+    windowLike.removeEventListener("pagehide", destroy);
+  };
+  windowLike.addEventListener("pagehide", destroy);
+  return Object.freeze({ render: context.render, destroy });
 }
 
 function renderDescribe(context, route) {
@@ -247,6 +266,9 @@ async function handlePartsPhoto(context, route, file) {
       height: normalized.height,
       mimeType: normalized.mimeType,
       originalName: normalized.originalName,
+      revision:
+        context.window.crypto?.randomUUID?.() ||
+        `${Date.now()}-${normalized.blob.size}`,
     });
     progress.textContent = "Looking closely at your parts…";
     const plan = await requestHardwarePlan({
@@ -266,10 +288,11 @@ async function handlePartsPhoto(context, route, file) {
 }
 
 function renderReview(context, route) {
-  const { outlet, app, runtime } = context;
-  const parts = app.getProject().confirmedParts || [];
-  const selected = parts.find(({ id }) => id === runtime.selectedPartId) || null;
-  runtime.selectedPartId = selected?.id || null;
+  const { outlet, app } = context;
+  const project = app.getProject();
+  const parts = project.confirmedParts || [];
+  const selectedId = project.review?.selectedPartId || null;
+  const selected = parts.find(({ id }) => id === selectedId) || null;
   outlet.innerHTML = screenFrame(`
     <article class="route-screen review-screen">
       <header class="screen-heading review-heading">
@@ -308,11 +331,16 @@ function renderReview(context, route) {
       </section>
     </article>
   `);
-  hydrateStoredImage(context, "source", outlet.querySelector("[data-source-photo]"));
+  hydrateStoredImage(
+    context,
+    "source",
+    outlet.querySelector("[data-source-photo]"),
+    outlet.querySelector(".annotation-layer"),
+  );
 
   for (const button of outlet.querySelectorAll("[data-select-part]")) {
-    button.addEventListener("click", () => {
-      runtime.selectedPartId = button.dataset.selectPart;
+    button.addEventListener("click", async () => {
+      await persistReviewSelection(context, button.dataset.selectPart);
       renderReview(context, route);
     });
   }
@@ -322,24 +350,14 @@ function renderReview(context, route) {
         ({ id }) => id !== button.dataset.deletePart,
       );
       await app.updateProject("confirmedParts", next);
-      runtime.selectedPartId = next.at(0)?.id || null;
+      await persistReviewSelection(context, next.at(0)?.id || null);
       renderReview(context, route);
     });
   }
   const nameInput = outlet.querySelector("[data-part-name]");
   nameInput?.addEventListener("change", async () => {
     await persistPartEdit(context, selected.id, { name: nameInput.value });
-    const annotationLabel = outlet.querySelector(
-      `[data-select-part="${escapeSelectorValue(selected.id)}"] strong`,
-    );
-    if (annotationLabel) annotationLabel.textContent = nameInput.value.trim();
-    const confidenceControl = outlet.querySelector("[data-confirm-confidence]");
-    confidenceControl?.setAttribute(
-      "aria-label",
-      `Confirm ${nameInput.value.trim()} despite low confidence`,
-    );
-    const confidenceText = outlet.querySelector(".confidence-check span");
-    if (confidenceText) confidenceText.textContent = `Yes, this is ${nameInput.value.trim()}`;
+    renderReview(context, route);
   });
   for (const input of outlet.querySelectorAll("[data-bound-field]")) {
     input.addEventListener("change", async () => {
@@ -352,26 +370,15 @@ function renderReview(context, route) {
           [input.dataset.boundField]: Number(input.value),
         },
       });
-      const annotation = outlet.querySelector(
-        `.part-annotation[data-select-part="${escapeSelectorValue(selected.id)}"]`,
-      );
-      if (annotation) {
-        const property = {
-          x: "left",
-          y: "top",
-          width: "width",
-          height: "height",
-        }[input.dataset.boundField];
-        annotation.style[property] = `${Number(input.value)}%`;
-      }
+      renderReview(context, route);
     });
   }
   const confidenceInput = outlet.querySelector("[data-confirm-confidence]");
   confidenceInput?.addEventListener("change", async () => {
-    const next = await persistPartEdit(context, selected.id, {
+    await persistPartEdit(context, selected.id, {
       confirmed: confidenceInput.checked,
     });
-    outlet.querySelector("[data-confirm-parts]").disabled = !canConfirmParts(next);
+    renderReview(context, route);
   });
   outlet
     .querySelector("[data-confirm-parts]")
@@ -418,7 +425,12 @@ function renderReady(context) {
       </div>
     </article>
   `);
-  hydrateStoredImage(context, "source", outlet.querySelector("[data-source-photo]"));
+  hydrateStoredImage(
+    context,
+    "source",
+    outlet.querySelector("[data-source-photo]"),
+    outlet.querySelector(".annotation-layer"),
+  );
 }
 
 function renderMissing(context) {
@@ -489,19 +501,19 @@ function renderMissing(context) {
   for (const button of outlet.querySelectorAll("[data-obtain-part]")) {
     button.addEventListener("click", async () => {
       const current = app.getProject();
-      const updatedMissing = (current.feasibility?.missingParts || []).map((part) =>
-        part.id === button.dataset.obtainPart ? { ...part, obtained: true } : part,
-      );
-      await app.replaceProject({
-        ...current,
-        feasibility: {
-          ...current.feasibility,
-          missingParts: updatedMissing,
-        },
-      });
-      renderMissing(context);
+      const updated = acquireMissingPart(current, button.dataset.obtainPart);
+      await app.replaceProject(updated);
+      if (updated.feasibility?.status === "ready") {
+        app.navigation.navigate("/build/feasibility/ready");
+      } else {
+        renderMissing(context);
+      }
     });
   }
+}
+
+async function persistReviewSelection(context, selectedPartId) {
+  await context.app.updateProject("review", { selectedPartId: selectedPartId || null });
 }
 
 async function persistPartEdit(context, partId, patch) {
@@ -540,18 +552,58 @@ async function confirmParts(context, route) {
   }
 }
 
-async function hydrateStoredImage(context, imageId, image) {
+async function hydrateStoredImage(context, imageId, image, annotationLayer = null) {
   if (!image) return;
   try {
-    if (!context.runtime.photoUrl) {
+    const cacheKey = photoCacheKey(context.app.getProject(), imageId);
+    let photoUrl = context.runtime.objectUrls.get("photo", cacheKey);
+    if (!photoUrl) {
       const blob = await context.app.loadImage(imageId);
       if (!blob) return;
-      context.runtime.photoUrl = URL.createObjectURL(blob);
+      if (cacheKey !== photoCacheKey(context.app.getProject(), imageId)) return;
+      photoUrl = context.runtime.objectUrls.replace("photo", cacheKey, blob);
     }
-    image.src = context.runtime.photoUrl;
+    image.src = photoUrl;
+    if (annotationLayer) {
+      const align = () => alignAnnotationLayer(context, image, annotationLayer);
+      if (image.complete && image.naturalWidth) align();
+      else image.addEventListener("load", align, { once: true });
+      context.runtime.imageObservers.get("photo")?.disconnect();
+      if (typeof context.window.ResizeObserver === "function") {
+        const observer = new context.window.ResizeObserver(align);
+        observer.observe(image);
+        context.runtime.imageObservers.set("photo", observer);
+      }
+    }
   } catch {
     image.removeAttribute("src");
   }
+}
+
+function photoCacheKey(project, imageId) {
+  const photo = project.photo || {};
+  return [
+    imageId,
+    photo.revision || "",
+    photo.width || "",
+    photo.height || "",
+    photo.originalName || "",
+  ].join(":");
+}
+
+function alignAnnotationLayer(context, image, annotationLayer) {
+  const photo = context.app.getProject().photo || {};
+  const frame = calculateContainedImageFrame(
+    { width: image.clientWidth, height: image.clientHeight },
+    {
+      width: image.naturalWidth || photo.width,
+      height: image.naturalHeight || photo.height,
+    },
+  );
+  annotationLayer.style.left = `${image.offsetLeft + frame.left}px`;
+  annotationLayer.style.top = `${image.offsetTop + frame.top}px`;
+  annotationLayer.style.width = `${frame.width}px`;
+  annotationLayer.style.height = `${frame.height}px`;
 }
 
 async function toggleVoice(context, textarea) {
@@ -826,8 +878,4 @@ function escapeHtml(value) {
 
 function escapeAttribute(value) {
   return escapeHtml(value).replaceAll("`", "&#096;");
-}
-
-function escapeSelectorValue(value) {
-  return String(value ?? "").replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }

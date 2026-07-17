@@ -10,53 +10,56 @@ test("AI plans normalize bounds, confidence, feasibility, missing parts, alterna
     "normalizeHardwarePlan should be exported",
   );
 
-  const plan = actions.normalizeHardwarePlan({
-    projectTitle: "Desk fan",
-    summary: "A small fan for a desk",
-    parts: [
-      {
-        id: " board ",
-        name: "Arduino Uno",
-        type: "controller",
-        role: "Controller",
-        confidence: 96,
-        bbox: { x: 120, y: 150, width: 420, height: 500 },
+  const plan = actions.normalizeHardwarePlan(
+    {
+      projectTitle: "Desk fan",
+      summary: "A small fan for a desk",
+      parts: [
+        {
+          id: " board ",
+          name: "Arduino Uno",
+          type: "controller",
+          role: "Controller",
+          confidence: 96,
+          bbox: { x: 120, y: 150, width: 420, height: 500 },
+        },
+        {
+          id: "motor",
+          name: "Possible DC motor",
+          type: "motor",
+          role: "Output",
+          confidence: 0.54,
+          bounds: { x: -10, y: 85, width: 30, height: 30 },
+        },
+      ],
+      feasibility: {
+        status: "missing_parts",
+        reasons: ["A fan blade is still needed."],
       },
-      {
-        id: "motor",
-        name: "Possible DC motor",
-        type: "motor",
-        role: "Output",
-        confidence: 0.54,
-        bounds: { x: -10, y: 85, width: 30, height: 30 },
+      missingParts: [
+        {
+          id: "fan-blade",
+          name: "Fan blade",
+          reason: "Moves the air",
+          searchTerms: ["3V motor fan blade", "2mm shaft"],
+          compatibleWith: ["motor"],
+        },
+      ],
+      alternatives: [
+        {
+          id: "motor-spinner",
+          title: "Paper spinner",
+          summary: "Use the motor without a fan blade.",
+          requiredPartIds: ["motor"],
+        },
+      ],
+      diagnostics: {
+        requestId: "model_must_not_control_transport_identity",
+        warnings: ["Check the motor voltage."],
       },
-    ],
-    feasibility: {
-      status: "missing_parts",
-      reasons: ["A fan blade is still needed."],
     },
-    missingParts: [
-      {
-        id: "fan-blade",
-        name: "Fan blade",
-        reason: "Moves the air",
-        searchTerms: ["3V motor fan blade", "2mm shaft"],
-        compatibleWith: ["motor"],
-      },
-    ],
-    alternatives: [
-      {
-        id: "motor-spinner",
-        title: "Paper spinner",
-        summary: "Use the motor without a fan blade.",
-        requiredPartIds: ["motor"],
-      },
-    ],
-    diagnostics: {
-      requestId: "resp_123",
-      warnings: ["Check the motor voltage."],
-    },
-  });
+    { requestId: "resp_123" },
+  );
 
   assert.deepEqual(plan.parts[0].bounds, {
     x: 12,
@@ -85,6 +88,143 @@ test("AI plans normalize bounds, confidence, feasibility, missing parts, alterna
     partCount: 2,
     lowConfidencePartIds: ["motor"],
   });
+});
+
+test("hardware requests derive diagnostics identity only from the outer OpenAI response", async () => {
+  let requestPayload;
+  const modelPlan = {
+    projectTitle: "Desk fan",
+    summary: "A small fan",
+    parts: [],
+    feasibility: { status: "ready", reasons: [] },
+    missingParts: [],
+    alternatives: [],
+    wiringSteps: [],
+    firmwareSpec: {
+      board: "",
+      behavior: "",
+      libraries: [],
+      pinAssignments: [],
+      serialProtocol: [],
+    },
+    firmware: {
+      language: "Arduino C++",
+      sketch: "",
+      notes: "",
+    },
+    diagnostics: {
+      requestId: "model_forged_id",
+      warnings: [],
+    },
+  };
+
+  const plan = await actions.requestHardwarePlan({
+    idea: "Make a fan",
+    imageDataUrl: "data:image/jpeg;base64,AA==",
+    fetchImpl: async (_url, init) => {
+      requestPayload = JSON.parse(init.body);
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify({
+            id: "resp_outer_456",
+            output_text: JSON.stringify(modelPlan),
+          });
+        },
+      };
+    },
+  });
+
+  assert.equal(plan.diagnostics.requestId, "resp_outer_456");
+  assert.deepEqual(
+    requestPayload.text.format.schema.properties.diagnostics.required,
+    ["warnings"],
+  );
+  assert.equal(
+    "requestId" in requestPayload.text.format.schema.properties.diagnostics.properties,
+    false,
+  );
+});
+
+test("annotation frames align percentage coordinates to contained image content", () => {
+  assert.equal(typeof actions.calculateContainedImageFrame, "function");
+  assert.deepEqual(
+    actions.calculateContainedImageFrame(
+      { width: 1000, height: 1000 },
+      { width: 2000, height: 500 },
+    ),
+    { left: 0, top: 375, width: 1000, height: 250 },
+  );
+  assert.deepEqual(
+    actions.calculateContainedImageFrame(
+      { width: 1000, height: 500 },
+      { width: 500, height: 1000 },
+    ),
+    { left: 375, top: 0, width: 250, height: 500 },
+  );
+});
+
+test("obtaining the final missing part adds it to inventory and makes feasibility ready", () => {
+  assert.equal(typeof actions.acquireMissingPart, "function");
+  const project = {
+    confirmedParts: [{ id: "board", name: "Arduino Uno" }],
+    feasibility: {
+      status: "missing",
+      reasons: ["A fan blade is still needed."],
+      missingParts: [
+        {
+          id: "fan-blade",
+          name: "Fan blade",
+          reason: "Moves air",
+          obtained: false,
+        },
+      ],
+      alternatives: [{ id: "spinner" }],
+    },
+    wiring: { steps: [{ title: "Connect motor" }] },
+    firmware: { sketch: "void setup() {}" },
+  };
+
+  const updated = actions.acquireMissingPart(project, "fan-blade");
+
+  assert.equal(updated.feasibility.status, "ready");
+  assert.deepEqual(updated.feasibility.reasons, []);
+  assert.deepEqual(updated.feasibility.missingParts, []);
+  assert.deepEqual(updated.confirmedParts.at(-1), {
+    id: "fan-blade",
+    name: "Fan blade",
+    type: "acquired-part",
+    role: "Required project part",
+    confidence: 1,
+    lowConfidence: false,
+    confirmed: true,
+    bounds: null,
+  });
+  assert.equal(updated.wiring, project.wiring);
+  assert.equal(updated.firmware, project.firmware);
+});
+
+test("object URL registry revokes replaced and torn-down URLs", () => {
+  assert.equal(typeof actions.createObjectUrlRegistry, "function");
+  const revoked = [];
+  let sequence = 0;
+  const registry = actions.createObjectUrlRegistry({
+    createObjectURL() {
+      sequence += 1;
+      return `blob:makeable-${sequence}`;
+    },
+    revokeObjectURL(url) {
+      revoked.push(url);
+    },
+  });
+
+  assert.equal(registry.replace("photo", "revision-1", new Blob()), "blob:makeable-1");
+  assert.equal(registry.replace("photo", "revision-1", new Blob()), "blob:makeable-1");
+  assert.deepEqual(revoked, []);
+  assert.equal(registry.replace("photo", "revision-2", new Blob()), "blob:makeable-2");
+  assert.deepEqual(revoked, ["blob:makeable-1"]);
+  registry.revokeAll();
+  assert.deepEqual(revoked, ["blob:makeable-1", "blob:makeable-2"]);
 });
 
 test("annotation edits are immutable, bounded, and require explicit low-confidence confirmation", () => {

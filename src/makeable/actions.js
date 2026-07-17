@@ -145,10 +145,9 @@ export const HARDWARE_PLAN_SCHEMA = Object.freeze({
       type: "object",
       additionalProperties: false,
       properties: {
-        requestId: { type: "string" },
         warnings: { type: "array", items: { type: "string" } },
       },
-      required: ["requestId", "warnings"],
+      required: ["warnings"],
     },
   },
   required: [
@@ -165,7 +164,7 @@ export const HARDWARE_PLAN_SCHEMA = Object.freeze({
   ],
 });
 
-export function normalizeHardwarePlan(raw = {}) {
+export function normalizeHardwarePlan(raw = {}, options = {}) {
   const usedIds = new Set();
   const parts = array(raw.parts).map((part, index) => {
     const id = uniqueId(part?.id || part?.name || `part-${index + 1}`, usedIds);
@@ -190,10 +189,7 @@ export function normalizeHardwarePlan(raw = {}) {
   const lowConfidencePartIds = parts
     .filter(({ lowConfidence, confirmed }) => lowConfidence && !confirmed)
     .map(({ id }) => id);
-  const requestId = cleanText(
-    raw.diagnostics?.requestId || raw.responseId || raw.requestId,
-    "",
-  );
+  const requestId = cleanText(options.requestId, "");
 
   return {
     schemaVersion: PLAN_SCHEMA_VERSION,
@@ -280,6 +276,98 @@ export function canConfirmParts(parts) {
       ({ lowConfidence, confirmed }) => !lowConfidence || Boolean(confirmed),
     )
   );
+}
+
+export function calculateContainedImageFrame(container, image) {
+  const containerWidth = Math.max(0, Number(container?.width) || 0);
+  const containerHeight = Math.max(0, Number(container?.height) || 0);
+  const imageWidth = Math.max(0, Number(image?.width) || 0);
+  const imageHeight = Math.max(0, Number(image?.height) || 0);
+  if (!containerWidth || !containerHeight || !imageWidth || !imageHeight) {
+    return { left: 0, top: 0, width: 0, height: 0 };
+  }
+  const scale = Math.min(containerWidth / imageWidth, containerHeight / imageHeight);
+  const width = imageWidth * scale;
+  const height = imageHeight * scale;
+  return {
+    left: (containerWidth - width) / 2,
+    top: (containerHeight - height) / 2,
+    width,
+    height,
+  };
+}
+
+export function acquireMissingPart(project, partId) {
+  const feasibility = project?.feasibility;
+  const missingParts = array(feasibility?.missingParts);
+  const acquired = missingParts.find((part) => part.id === partId);
+  if (!acquired) return project;
+
+  const updatedMissing = missingParts.map((part) =>
+    part.id === partId ? { ...part, obtained: true } : part,
+  );
+  const confirmedParts = array(project.confirmedParts);
+  const inventory = confirmedParts.some((part) => part.id === acquired.id)
+    ? confirmedParts
+    : [
+        ...confirmedParts,
+        {
+          id: acquired.id,
+          name: cleanText(acquired.name, "Acquired part"),
+          type: "acquired-part",
+          role: "Required project part",
+          confidence: 1,
+          lowConfidence: false,
+          confirmed: true,
+          bounds: null,
+        },
+      ];
+  const ready = updatedMissing.every(({ obtained }) => obtained);
+
+  return {
+    ...project,
+    confirmedParts: inventory,
+    feasibility: {
+      ...feasibility,
+      status: ready ? "ready" : "missing",
+      reasons: ready ? [] : array(feasibility?.reasons),
+      missingParts: ready ? [] : updatedMissing,
+    },
+  };
+}
+
+export function createObjectUrlRegistry({
+  createObjectURL = globalThis.URL?.createObjectURL?.bind(globalThis.URL),
+  revokeObjectURL = globalThis.URL?.revokeObjectURL?.bind(globalThis.URL),
+} = {}) {
+  if (!createObjectURL || !revokeObjectURL) {
+    throw new TypeError("Object URL support is unavailable.");
+  }
+  const entries = new Map();
+  const revoke = (role) => {
+    const current = entries.get(role);
+    if (!current) return;
+    revokeObjectURL(current.url);
+    entries.delete(role);
+  };
+  return Object.freeze({
+    get(role, key) {
+      const current = entries.get(role);
+      return current?.key === key ? current.url : "";
+    },
+    replace(role, key, blob) {
+      const current = entries.get(role);
+      if (current?.key === key) return current.url;
+      revoke(role);
+      const url = createObjectURL(blob);
+      entries.set(role, { key, url });
+      return url;
+    },
+    revoke,
+    revokeAll() {
+      for (const role of [...entries.keys()]) revoke(role);
+    },
+  });
 }
 
 export async function normalizeImageFile(file, options = {}) {
@@ -430,7 +518,9 @@ export async function requestHardwarePlan({
       cleanText(data?.error?.message || data?.error || data?.message, "The plan could not be created."),
     );
   }
-  return normalizeHardwarePlan(parseResponsePayload(data));
+  return normalizeHardwarePlan(parseResponsePayload(data), {
+    requestId: data?.id,
+  });
 }
 
 export function blobToDataUrl(blob) {
