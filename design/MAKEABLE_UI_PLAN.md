@@ -33,10 +33,10 @@ All eleven supplied references were inspected at their original resolution. They
 | `image-4.jpg` | Describe | Friend-like prompt, oversized paper input, sketch attachment, example idea scraps, vivid pink CTA |
 | `image-5.jpg` | Missing parts | “You have / Still need” comparison, compatible-part explanation, alternate projects, shopping CTA |
 | `image-6.jpg` | Wiring instruction | Step counter, exact pin mapping, zoomed detail, why-note, optional motion proof, confirmation CTA |
-| `image-7.jpg` | Code and load | Simple/advanced code view, USB connection checklist, board presence, upload progress and safety note |
+| `image-7.jpg` | Connect and load | USB connection checklist, board presence, upload progress and safety note |
 | `image-8.jpg` | Automatic test | Two-part test tracker, live checklist, bounded hardware pulse, progress and stop control |
 | `image-9.jpg` | Manual test | Three illustrated physical actions, explicit expected result, pass/recovery choice |
-| `image-10.jpg` | Publish setup | Repository name/privacy, package contents, project proof card, GitHub and download paths |
+| `image-10.jpg` | Publish setup | Repository name/privacy, project notes, proof card, and GitHub publishing path |
 | `image-11.jpg` | Publish success | Completion celebration, finished-build photo, repository receipt, share/restart actions |
 
 ## 4. Experience architecture
@@ -69,9 +69,9 @@ Required states:
 - Missing-parts recovery
 - Planning error with retry
 
-### Stage 3 — Build + Code
+### Stage 3 — Build + Load
 
-The route is `#flash`. This is one stage with two explicit modes: Wiring and Code + load. The wiring mode turns the returned plan into a stepper. The code mode generates an ESP32 sketch, exposes board settings, compiles through Arduino CLI, and loads through Web Serial.
+The route is `#flash`. This is one stage with two explicit modes: Wiring and Connect + load. The wiring mode turns the returned plan into a stepper. The load mode generates ESP32 firmware behind the scenes, compiles it on the hosted backend, and loads it through Web Serial. Source code, compiler settings, and board-target settings are not exposed to the user.
 
 Required states:
 
@@ -79,7 +79,7 @@ Required states:
 - Why this connection exists
 - Previous/next/confirm movement
 - Firmware generation
-- Editable sketch
+- Automatic ESP32 firmware preparation
 - Compile in progress/success/error
 - Board connect and flash progress
 - Flash success/recovery
@@ -100,7 +100,7 @@ Required states:
 
 ### Stage 5 — Publish
 
-The route is `#document`. Makeable generates a README and publishes it with firmware through the GitHub API when credentials are configured. Download remains the local fallback.
+The route is `#document`. Makeable generates project notes and publishes the README through the GitHub API when credentials are configured. Firmware source and binary downloads are not offered.
 
 Required states:
 
@@ -110,7 +110,6 @@ Required states:
 - Publish in progress
 - Published receipt and link
 - Authentication/configuration error
-- Local project download
 
 ## 5. Visual system
 
@@ -200,10 +199,10 @@ The SVGs provide crisp UI marks and may be recolored by state. The generated PNG
 The visual rewrite does not replace the existing behavior. These contracts remain in scope:
 
 - `/api/config` returns public runtime configuration and model names.
-- `/api/health` reports API-key and Arduino CLI readiness without returning secrets.
+- `/api/health` reports API-key and hosted ESP32 compiler readiness without returning secrets.
 - OpenAI Responses API calls produce structured project plans, firmware, and verification summaries.
 - Deepgram powers browser voice transcription.
-- `/api/arduino/status` confirms CLI/core readiness.
+- `/api/esp32/status` confirms the hosted compiler and ESP32 core are ready.
 - Firmware compilation writes an isolated temporary sketch/build directory.
 - Web Serial owns user-approved board connection and flashing.
 - Camera capture stays local until the user initiates analysis.
@@ -255,14 +254,14 @@ Direct matches implemented:
 4. Stage-specific copy and actions that follow the eleven-image journey.
 5. Describe-stage oversized idea sheet, sketch attachment, example scraps, and plant doodle.
 6. Scan-stage taped upload area, camera alternative, privacy note, and photo tips.
-7. Build-stage wiring/code split with step navigation, board settings, editor, compile, and load controls.
+7. Build-stage wiring/load split with step navigation and one automatic connect-and-load control.
 8. Test-stage automatic/manual structure with serial and camera evidence.
-9. Publish-stage repository/package controls and project download fallback.
+9. Publish-stage repository controls, project notes, and a published receipt.
 
 Intentional deviations:
 
 - Deepgram voice controls remain visible on Describe because voice input already exists in the backend and is useful to beginners.
-- The implementation uses ESP32 terminology and configuration where the references use Arduino Uno imagery, because the actual project target is `esp32:esp32:esp32`.
+- The implementation supports only the ESP32 family even where the supplied references use other board imagery.
 - Shop links and prices from the missing-parts reference are represented as planning/recovery information rather than commerce, because the backend has no purchasing contract.
 - Video proof in wiring is represented through the existing photo/camera and guide tools; no video-content service exists in the backend.
 - Narrow portrait mode asks the user to rotate the device so pin labels and hardware actions remain safe to read.
@@ -272,11 +271,11 @@ Intentional deviations:
 | Area | Check |
 | --- | --- |
 | Static quality | JavaScript syntax for browser, Node server, and Netlify function |
-| API readiness | `/api/health`, `/api/config`, `/api/arduino/status` |
+| API readiness | `/api/health`, `/api/config`, `/api/esp32/status` |
 | Model | Config reports the same best model for planning and reasoning |
 | Describe | Input accepts a real idea and Start advances to Scan Parts |
 | Scan | Empty-submit validation is clear; image/camera code paths remain wired |
-| Build | Stage route loads; Wiring and Code + load modes switch correctly |
+| Build | Stage route loads; Wiring and Connect + load modes switch correctly |
 | Test | Stage route loads with serial, camera, and manual verification controls |
 | Publish | Stage route loads with repo configuration and package preview |
 | Navigation | Hash routes update on stage change and direct deep links restore the correct state |

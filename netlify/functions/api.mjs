@@ -24,7 +24,7 @@ export default async function handler(req) {
       return retrieveOpenAIResponse(responseMatch[1], env);
     }
 
-    if (url.pathname === "/api/arduino/status") {
+    if (url.pathname === "/api/esp32/status") {
       return proxyMakeableApi(req, env);
     }
 
@@ -73,7 +73,6 @@ function getEnv() {
     "OPENAI_REASONING_EFFORT",
     "GITHUB_TOKEN",
     "GITHUB_OWNER",
-    "ARDUINO_FQBN",
     "MAKEABLE_API_BASE_URL",
   ];
   return Object.fromEntries(keys.map((key) => [key, envValue(key)]));
@@ -90,10 +89,9 @@ function publicConfig(env) {
     openaiModel: env.OPENAI_MODEL || "gpt-5.6-sol",
     openaiReasoningModel: env.OPENAI_REASONING_MODEL || "gpt-5.6-sol",
     openaiReasoningEffort: env.OPENAI_REASONING_EFFORT || "high",
-    arduinoFqbn: env.ARDUINO_FQBN || "esp32:esp32:esp32",
     hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
     hasGithubToken: Boolean(env.GITHUB_TOKEN),
-    hasArduinoCli: false,
+    hasEsp32Compiler: false,
     hostedMode: true,
     firmwareCompileSupported: Boolean(env.MAKEABLE_API_BASE_URL),
   };

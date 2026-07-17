@@ -119,7 +119,7 @@ const els = {
   behaviorEvaluation: $("#behaviorEvaluation"),
   compileFlashButton: $("#compileFlashButton"),
   flashProgressBar: $("#flashProgressBar"),
-  arduinoStatus: $("#arduinoStatus"),
+  esp32Status: $("#esp32Status"),
   generateReadmeButton: $("#generateReadmeButton"),
   repoNameInput: $("#repoNameInput"),
   privateRepoInput: $("#privateRepoInput"),
@@ -263,7 +263,7 @@ setActiveWorkflowStage(Math.max(initialStageIndex, 0), {
 });
 drawPartsCanvas();
 refreshServerConfig();
-refreshArduinoStatus();
+refreshEsp32Status();
 if (/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
   globalThis.__MAKEABLE_TEST_API__ = {
     loadPlan(plan) {
@@ -275,9 +275,9 @@ if (/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
     },
     getState() {
       return {
-        board: selectBoardProfile(state.plan).id,
+        board: selectBoardProfile(state.plan)?.id || null,
         compiled: Boolean(state.compiledFirmware),
-        status: els.arduinoStatus.textContent,
+        status: els.esp32Status.textContent,
       };
     },
   };
@@ -1148,7 +1148,7 @@ async function generateFirmwareForPlan(idea) {
       {
         role: "system",
         content:
-          "You are Makeable's firmware engineer. Generate a compact, compile-ready Arduino .ino sketch for ESP32 from the provided hardware plan. Output only schema-valid JSON. Do not include markdown fences. Keep the sketch under 180 lines unless absolutely required.",
+          "You are Makeable's ESP32 firmware engineer. Generate a compact, compile-ready ESP32 Arduino-core C++ sketch from the provided hardware plan. Support ESP32-family targets only. Output only schema-valid JSON. Do not include markdown fences. Keep the sketch under 180 lines unless absolutely required.",
       },
       {
         role: "user",
@@ -1210,7 +1210,7 @@ function buildFirmwarePrompt(idea, plan) {
     ),
     "",
     "Requirements:",
-    "- Generate one complete Arduino C++ sketch for ESP32.",
+    "- Generate one complete ESP32 Arduino-core C++ sketch.",
     "- Include Serial.begin(115200).",
     "- Print CIRCUITCODEX_DIAGNOSTIC_READY in setup().",
     "- Print clear diagnostic markers matching the diagnostic tests.",
@@ -1222,7 +1222,7 @@ function buildFirmwarePrompt(idea, plan) {
 
 function normalizeFirmware(firmware) {
   return {
-    language: firmware?.language || "Arduino C++",
+    language: firmware?.language || "ESP32 C++",
     sketch: String(firmware?.sketch || "").trim(),
     notes: firmware?.notes || "",
   };
@@ -1446,7 +1446,7 @@ function renderVisualSteps() {
   if (els.prevBuildStepButton) els.prevBuildStepButton.disabled = activeIndex === 0;
   if (els.nextBuildStepButton) {
     els.nextBuildStepButton.disabled = false;
-    els.nextBuildStepButton.textContent = activeIndex === steps.length - 1 ? "See the code" : "I connected it";
+    els.nextBuildStepButton.textContent = activeIndex === steps.length - 1 ? "Connect & load" : "I connected it";
   }
 
   requestAnimationFrame(() => drawVisualStep(canvas, step, activeIndex));
@@ -2062,33 +2062,39 @@ function friendlyBehaviorStatus(status) {
   return "I’m not fully sure yet.";
 }
 
-async function refreshArduinoStatus() {
+async function refreshEsp32Status() {
   try {
-    const status = await apiJson("/api/arduino/status");
-    const tone = status.hasArduinoCli && status.hasEsp32Core ? "ok" : "warn";
+    const status = await apiJson("/api/esp32/status");
+    const tone = status.hasEsp32Compiler && status.hasEsp32Core ? "ok" : "warn";
     setStatus(
-      els.arduinoStatus,
-      status.hasArduinoCli && status.hasEsp32Core
-        ? "Makeable’s online compiler is ready. Connect your ESP32 when you’re ready."
-        : "The online compiler is warming up. Try again in a moment.",
+      els.esp32Status,
+      status.hasEsp32Compiler && status.hasEsp32Core
+        ? "Makeable’s ESP32 compiler is ready. Connect your board when you’re ready."
+        : "The ESP32 compiler is warming up. Try again in a moment.",
       tone,
     );
-    els.compileFlashButton.disabled = !(status.hasArduinoCli && status.hasEsp32Core);
+    els.compileFlashButton.disabled = !(status.hasEsp32Compiler && status.hasEsp32Core);
   } catch (error) {
-    setStatus(els.arduinoStatus, `The online compiler is not ready yet: ${error.message}`, "danger");
+    setStatus(els.esp32Status, `The ESP32 compiler is not ready yet: ${error.message}`, "danger");
     els.compileFlashButton.disabled = true;
   }
 }
 
 async function compileAndFlashFirmware() {
-  if (!("serial" in navigator)) {
-    setStatus(els.arduinoStatus, "This browser can’t talk to the board. Use Chrome or Edge on desktop.", "danger");
+  const sketch = state.plan?.firmware?.sketch || "";
+  if (!sketch) {
+    setStatus(els.esp32Status, "Create the guide first, then I’ll have firmware to send.", "warn");
     return;
   }
 
-  const sketch = state.plan?.firmware?.sketch || "";
-  if (!sketch) {
-    setStatus(els.arduinoStatus, "Create the guide first, then I’ll have code to send.", "warn");
+  const profile = selectBoardProfile(state.plan);
+  if (!profile) {
+    setStatus(els.esp32Status, "Makeable supports ESP32-family boards only. Add an ESP32 to this build.", "danger");
+    return;
+  }
+
+  if (!("serial" in navigator)) {
+    setStatus(els.esp32Status, "This browser can’t talk to the ESP32. Use Chrome or Edge on desktop.", "danger");
     return;
   }
 
@@ -2103,15 +2109,14 @@ async function compileAndFlashFirmware() {
   } catch (error) {
     els.compileFlashButton.disabled = false;
     els.compileFlashButton.textContent = "Connect & load automatically";
-    setStatus(els.arduinoStatus, `No problem. Choose the board again when you’re ready. ${error.message}`, "warn");
+    setStatus(els.esp32Status, `No problem. Choose the ESP32 again when you’re ready. ${error.message}`, "warn");
     setFlashProgress(0, "");
     return;
   }
 
   try {
-    const profile = selectBoardProfile(state.plan);
     els.compileFlashButton.textContent = "Preparing code...";
-    setStatus(els.arduinoStatus, "I’m preparing the code for your board.", "warn");
+    setStatus(els.esp32Status, "I’m preparing firmware for your ESP32.", "warn");
     appendSerial("\nMakeable: Preparing the code for your board.\n");
 
     const compiled = await apiJson("/api/firmware/compile", {
@@ -2126,12 +2131,12 @@ async function compileAndFlashFirmware() {
     const testAdapter = globalThis.__MAKEABLE_FLASH_TEST_ADAPTER__;
     if (typeof testAdapter === "function") await testAdapter({ port, images: compiled.images, profile });
     else await flashFirmwareImages(port, compiled.images);
-    setStatus(els.arduinoStatus, "Done. The code is on the board. Continue when you’re ready to watch it work.", "ok");
+    setStatus(els.esp32Status, "Done. The firmware is on your ESP32. Continue when you’re ready to watch it work.", "ok");
     setFlashProgress(100, "Done");
   } catch (error) {
     console.error(error);
     appendSerial(`\nMakeable: I couldn’t finish loading the board. ${error.message}\n`);
-    setStatus(els.arduinoStatus, `I couldn’t finish loading the board: ${error.message}`, "danger");
+    setStatus(els.esp32Status, `I couldn’t finish loading the ESP32: ${error.message}`, "danger");
     setFlashProgress(0, "Needs retry");
   } finally {
     els.compileFlashButton.disabled = false;

@@ -12,4 +12,5 @@ test("board profile is inferred from the recognized hardware", () => {
   assert.equal(selectBoardProfile({ parts: [{ name: "ESP32-S3 DevKitC" }] }).id, "esp32s3");
   assert.equal(selectBoardProfile({ parts: [{ name: "ESP32 C6 board" }] }).id, "esp32c6");
   assert.equal(selectBoardProfile({ parts: [{ name: "ESP32 development board" }] }).id, "esp32");
+  assert.equal(selectBoardProfile({ parts: [{ name: "Arduino Uno" }] }), null);
 });

@@ -42,13 +42,12 @@ Docs:
 - https://developer.chrome.com/docs/capabilities/serial
 - https://developer.mozilla.org/en-US/docs/Web/API/Web_Serial_API
 
-## ESP Flashing
+## ESP32 Flashing
 
-- Arduino CLI compiles generated `.ino` sketches through `POST /api/firmware/compile`.
-- The app auto-detects Arduino IDE's bundled CLI at `/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli`.
-- The default board FQBN is `esp32:esp32:esp32`; override it with `ARDUINO_FQBN`.
+- The hosted backend compiles generated ESP32 Arduino-core `.ino` sketches through `POST /api/firmware/compile`.
+- The production container bundles the compiler, ESP32 core, and supported libraries; users do not install Arduino IDE, VS Code, ESP-IDF, or a compiler toolchain.
+- The backend selects an allowlisted ESP32-family target from recognized hardware. Clients cannot submit an arbitrary FQBN.
 - esptool-js flashes the compiled binary images directly from the browser via Web Serial.
-- ESP Web Tools is still loaded for manifest-based flashing as an advanced fallback.
 
 Docs:
 

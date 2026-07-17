@@ -3,6 +3,8 @@
 **Prepared:** July 17, 2026  
 **Scope:** the current Makeable prototype, a server-owned OpenAI/Deepgram setup, hosted firmware compilation and browser flashing, user accounts, ten welcome credits, per-user usage tracking, and an affordable production deployment.
 
+**Product scope decision:** Makeable supports the ESP32 family only: ESP32, ESP32-S2, ESP32-S3, ESP32-C3, and ESP32-C6. Arduino Uno, Nano, Mega, AVR, RP2040, STM32, and other board families are explicitly out of scope. Arduino CLI remains an invisible build engine for the ESP32 Arduino core; it is not an end-user dependency.
+
 > **Implementation update (July 17, 2026):** Hosted ESP32 compilation is now implemented as a pinned Docker/Render service. The browser UI no longer exposes firmware source, downloads, provider settings, FQBN fields, or a local-app fallback. The service allowlists ESP32, S2, S3, C3, and C6 profiles; caps bodies, source size, time, and concurrency; deletes build workspaces; and returns merged flash images. Deepgram now uses temporary tokens and OpenAI model choice is server-owned. Physical Web Serial flashing still requires the browser's one-time native USB permission and must be verified on real target boards before a production claim.
 
 > **Deployment validation:** `makeable-api-preview.onrender.com` is live on Render Free and passed health plus a real Dockerized ESP32 compilation, returning one 4,194,304-byte merged image at address `0x0` with no compiler logs exposed. The agentic test loop found and fixed parallel-build memory pressure and a missing `python3` runtime. The successful free-tier compile took a little over three minutes, so the public site was intentionally not pointed at it. Creating the recommended always-on Starter service returned Render HTTP 402 because the workspace has no payment method. Paid provider secrets were removed from the unauthenticated preview after testing; restore them only after auth, rate limits, and the credit ledger are enforced. Add billing, promote the same image to Starter, rerun the live compile, then set Netlify `MAKEABLE_API_BASE_URL` before production cutover.
@@ -17,7 +19,7 @@ Use **one paid Render web service plus paid Render Postgres**, keep all provider
 - A “generation” should mean one complete Makeable build package: parts plan + wiring guide + firmware. It costs one product credit even if Makeable makes two OpenAI calls internally.
 - Do not expose a generic OpenAI proxy. The server, not the browser, must choose the model, prompt, reasoning effort, tools, output schema, and output limits.
 - Use OpenAI background responses and signed webhooks. The browser polls Makeable job IDs, never OpenAI response IDs.
-- Run hosted Arduino compilation from the pinned Docker image in this repository. At scale, split the compiler into a private worker without provider or database secrets.
+- Run hosted ESP32 compilation from the pinned Docker image in this repository. At scale, split the compiler into a private worker without provider or database secrets.
 
 Render is the better fit than Railway for this particular launch because its lowest paid Postgres offering is managed and includes point-in-time recovery. Railway is cheaper and pleasant for experimentation, but its standard Postgres template is explicitly described as unmanaged, putting backup, monitoring, tuning, and disaster recovery on Makeable.
 

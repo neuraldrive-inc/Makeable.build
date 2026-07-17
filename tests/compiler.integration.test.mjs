@@ -27,7 +27,7 @@ test("hosted compiler produces a merged ESP32 image and blocks arbitrary targets
   const base = `http://127.0.0.1:${port}`;
   await waitForServer(`${base}/api/health`);
 
-  const statusResponse = await fetch(`${base}/api/arduino/status`);
+  const statusResponse = await fetch(`${base}/api/esp32/status`);
   const status = await statusResponse.json();
   assert.equal(statusResponse.status, 200);
   assert.equal(status.hasEsp32Core, true);

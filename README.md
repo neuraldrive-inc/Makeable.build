@@ -8,6 +8,8 @@ Building with ESP32s can feel scary when you are new: sensors, wires, pin diagra
 
 Upload a photo. Say what you want to build. Let Makeable guide the rest. 🧩⚡
 
+Makeable deliberately supports the **ESP32 family only**: ESP32, S2, S3, C3, and C6. Arduino Uno/Nano/Mega and other microcontroller families are not accepted as build targets.
+
 ![Makeable workbench concept](design/makeable-ui-concept.png)
 
 ---
@@ -80,8 +82,6 @@ Each step is built around the photo, the selected parts, and a clear action. It 
 ### 5. Connect the Board 🔌
 
 Connect the ESP32 by USB. Makeable infers the supported board target from the recognized hardware; ordinary users do not see compiler settings or source code.
-
-![Selected ESP32 board settings](images/flashing%20selected%20board.jpg)
 
 ### 6. Flash the Code Into the Board 🚀
 

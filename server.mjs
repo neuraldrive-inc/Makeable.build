@@ -66,8 +66,8 @@ const server = createServer(async (req, res) => {
       return retrieveOpenAIResponse(responseMatch[1], res, env);
     }
 
-    if (url.pathname === "/api/arduino/status") {
-      return arduinoStatus(req, res, env);
+    if (url.pathname === "/api/esp32/status") {
+      return esp32Status(req, res, env);
     }
 
     if (url.pathname === "/api/firmware/compile" && req.method === "POST") {
@@ -87,7 +87,7 @@ const server = createServer(async (req, res) => {
         ok: true,
         hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
         hasGithubToken: Boolean(env.GITHUB_TOKEN),
-        hasArduinoCli: Boolean(findArduinoCli(env)),
+        hasEsp32Compiler: Boolean(findArduinoCli(env)),
         hostedMode: true,
         firmwareCompileSupported: Boolean(findArduinoCli(env)),
         supportedBoards: supportedBoardSummary(),
@@ -139,7 +139,7 @@ function publicConfig(env) {
     openaiReasoningEffort: env.OPENAI_REASONING_EFFORT || "high",
     hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
     hasGithubToken: Boolean(env.GITHUB_TOKEN),
-    hasArduinoCli: Boolean(findArduinoCli(env)),
+    hasEsp32Compiler: Boolean(findArduinoCli(env)),
     hasVoice: Boolean(env.DEEPGRAM_API_KEY),
     hostedMode: true,
     firmwareCompileSupported: Boolean(findArduinoCli(env)),
@@ -263,11 +263,11 @@ function openAIHeaders(env) {
   };
 }
 
-async function arduinoStatus(req, res, env) {
+async function esp32Status(req, res, env) {
   const cliPath = findArduinoCli(env);
   if (!cliPath) {
     return sendJson(res, {
-      hasArduinoCli: false,
+      hasEsp32Compiler: false,
       hasEsp32Core: false,
       hostedMode: true,
       firmwareCompileSupported: false,
@@ -281,7 +281,7 @@ async function arduinoStatus(req, res, env) {
       execFileAsync(cliPath, ["core", "list"], { timeout: 30000, maxBuffer: 4 * 1024 * 1024 }),
     ]);
     return sendJson(res, {
-      hasArduinoCli: true,
+      hasEsp32Compiler: true,
       hasEsp32Core: /\besp32:esp32\b/.test(coreResult.stdout),
       hostedMode: true,
       firmwareCompileSupported: true,
@@ -293,7 +293,7 @@ async function arduinoStatus(req, res, env) {
     return sendJson(
       res,
       {
-        hasArduinoCli: true,
+        hasEsp32Compiler: true,
         hasEsp32Core: false,
         error: error.message,
         stderr: error.stderr || "",

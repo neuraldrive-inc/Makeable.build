@@ -122,7 +122,7 @@
             <h1>Build it one<br />connection at a <span>time.</span></h1>
             <p>Your own photo becomes the map. When it’s wired, we’ll give it a brain.</p>
           </div>
-          <div class="build-mode-switch" role="tablist" aria-label="Build and code views">
+          <div class="build-mode-switch" role="tablist" aria-label="Build and load views">
             <button class="is-active" id="showWiringButton" type="button" role="tab">Wiring guide</button>
             <button id="showCodeButton" type="button" role="tab">Connect + load</button>
           </div>
@@ -148,13 +148,13 @@
           <div class="flash-stage-grid flash-stage-grid--automatic">
             <div class="web-flash-panel paper-sheet tape-blue">
               <h2>Your build is wired.<br />Let’s give it a brain.</h2>
-              <aside class="sticky-note sticky-note--white tape-grid-pink">Connect your board with a USB cable.</aside>
+              <aside class="sticky-note sticky-note--white tape-grid-pink">Connect your ESP32 with a USB cable.</aside>
               <div class="connection-steps">
                 <p><b>1</b> Plug the USB cable into your computer.</p><p><b>2</b> Click once to allow this board the first time.</p><p><b>3</b> Makeable prepares and loads everything automatically.</p>
               </div>
               <button class="torn-button torn-button--coral" id="compileFlashButton" type="button">Connect &amp; load automatically</button>
               <div class="flash-progress"><span id="flashProgressBar"></span></div>
-              <div class="status-strip" id="arduinoStatus">The compiler is online. Connect your ESP32 when you’re ready.</div>
+              <div class="status-strip" id="esp32Status">The ESP32 compiler is online. Connect your board when you’re ready.</div>
             </div>
           </div>
         </div>
