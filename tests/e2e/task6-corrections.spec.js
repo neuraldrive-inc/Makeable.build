@@ -112,6 +112,7 @@ test("SPA navigation announces and focuses each new screen", async ({ page }) =>
   await expect(heading).toBeFocused();
   await expect(page).toHaveTitle(/Your build is wired. Let’s give it a brain. · Makeable/);
   await expect(page.locator("#appStatus")).toContainText("screen loaded");
+  expect((await heading.boundingBox())?.y).toBeGreaterThan(20);
 });
 
 test("firmware tabs expose controlled panels and support arrow keys", async ({ page }) => {

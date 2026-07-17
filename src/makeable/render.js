@@ -134,7 +134,13 @@ function announceRoute(root, windowLike, { focus = true } = {}) {
   const status = root.querySelector("#appStatus");
   if (status) status.textContent = `${title} screen loaded.`;
   if (focus) {
-    windowLike.requestAnimationFrame?.(() => routeHeading.scrollIntoView({ block: "start" }));
+    windowLike.requestAnimationFrame?.(() => {
+      if (windowLike.matchMedia?.("(max-width: 900px)").matches) {
+        routeHeading.scrollIntoView({ block: "start" });
+        return;
+      }
+      windowLike.scrollTo?.({ top: 0, left: 0, behavior: "instant" });
+    });
   }
 }
 
