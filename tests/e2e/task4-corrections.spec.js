@@ -15,7 +15,10 @@ test("retry clears stale flash success and persists failure before Auto Test can
   await page.addInitScript(() => {
     window.MAKEABLE_HARDWARE = {
       async compileAndFlashFirmware() {
-        throw new Error("loader lost the serial port");
+        return new Promise((_resolve, reject) => {
+          window.__failFlash = () =>
+            reject(new Error("loader lost the serial port"));
+        });
       },
     };
   });
@@ -31,12 +34,18 @@ test("retry clears stale flash success and persists failure before Auto Test can
   );
   await seed(page, codeProject(), "/build/code");
 
+  await expect(page.getByText("Board found: ESP32-S3")).toBeVisible();
   await page.getByRole("button", { name: "Load code to my board" }).click();
-  await expect(page.getByRole("button", { name: "Try loading again" })).toBeVisible();
-  await page.reload();
-
-  await expect(page.getByText("Configured board: ESP32 DevKit")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => typeof window.__failFlash))
+    .toBe("function");
   await expect(page.getByText(/Board found:/)).toHaveCount(0);
+  await expect(page.getByText("Configured board: ESP32 DevKit")).toBeVisible();
+
+  await page.evaluate(() => window.__failFlash());
+  await expect(page.getByRole("button", { name: "Try loading again" })).toBeVisible();
+  await expect(page.getByText(/Board found:/)).toHaveCount(0);
+  await expect(page.getByText("Configured board: ESP32 DevKit")).toBeVisible();
   expect(
     await page.evaluate(() => window.MAKEABLE_APP.getProject().firmware.flash),
   ).toMatchObject({
@@ -47,6 +56,53 @@ test("retry clears stale flash success and persists failure before Auto Test can
     window.MAKEABLE_APP.navigation.navigate("/build/test/automatic"),
   );
   await expect(page).toHaveURL(/\/build\/code$/);
+});
+
+test("cancelling a retry keeps the live board success badge cleared", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.MAKEABLE_HARDWARE = {
+      async compileAndFlashFirmware({ signal }) {
+        return new Promise((_resolve, reject) => {
+          window.__flashPending = true;
+          signal.addEventListener(
+            "abort",
+            () => reject(new DOMException("Loading stopped.", "AbortError")),
+            { once: true },
+          );
+        });
+      },
+    };
+  });
+  await page.route("**/api/arduino/status", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        hasArduinoCli: true,
+        hasEsp32Core: true,
+        fqbn: "esp32:esp32:esp32",
+      }),
+    }),
+  );
+  await seed(page, codeProject(), "/build/code");
+
+  await expect(page.getByText("Board found: ESP32-S3")).toBeVisible();
+  await page.getByRole("button", { name: "Load code to my board" }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.__flashPending))
+    .toBe(true);
+  await expect(page.getByText(/Board found:/)).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Cancel loading" }).click();
+  await expect(page.getByRole("button", { name: "Try loading again" })).toBeVisible();
+  await expect(page.getByText(/Board found:/)).toHaveCount(0);
+  await expect(page.getByText("Configured board: ESP32 DevKit")).toBeVisible();
+  expect(
+    await page.evaluate(() => window.MAKEABLE_APP.getProject().firmware.flash),
+  ).toMatchObject({
+    status: "cancelled",
+  });
 });
 
 test("a camera permission result that arrives after navigation is stopped and ignored", async ({

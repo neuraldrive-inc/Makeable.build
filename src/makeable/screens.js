@@ -1125,6 +1125,16 @@ async function flashCurrentFirmware(context, route, sketch, configuredFqbn) {
   cancelButton.hidden = false;
   statusNode.textContent =
     "Choose your ESP32 when the browser asks. Nothing is marked successful until the loader finishes.";
+  const boardFound = outlet.querySelector("[data-board-found]");
+  if (boardFound) {
+    const configuredBoard =
+      app.getProject().feasibility?.firmwareSpec?.board ||
+      context.window.MAKEABLE_CONFIG?.arduinoFqbn ||
+      "esp32:esp32:esp32";
+    boardFound.removeAttribute("data-board-found");
+    boardFound.className = "configured-board configured-board--status";
+    boardFound.textContent = `Configured board: ${configuredBoard}`;
+  }
   try {
     await app.updateProject(
       "firmware",
