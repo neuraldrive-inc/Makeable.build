@@ -4,12 +4,14 @@ import { expect, test } from "@playwright/test";
 test("the Makeable shell loads with meaningful semantic content", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page).toHaveTitle("Makeable");
+  await expect(page).toHaveTitle("What do you want to make? · Makeable");
   await expect(page.getByRole("banner")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Build progress" })).toBeVisible();
   await expect(page.getByRole("main")).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Makeable" })).toBeAttached();
-  await expect(page.getByRole("status")).toHaveText("Makeable is ready.");
+  await expect(page.getByRole("status")).toHaveText(
+    "What do you want to make? screen loaded.",
+  );
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute(
     "href",
     "./assets/icons/lucide/sparkles.svg",
@@ -21,7 +23,9 @@ test("build routes load the SPA directly and guard unavailable progress", async 
   const directResponse = await page.goto("/build/new");
 
   expect(directResponse.ok()).toBe(true);
-  await expect(page.getByRole("status")).toHaveText("Makeable is ready.");
+  await expect(page.getByRole("status")).toHaveText(
+    "What do you want to make? screen loaded.",
+  );
   await page.goto("/build/code");
   await expect(page).toHaveURL(/\/build\/new$/);
 });

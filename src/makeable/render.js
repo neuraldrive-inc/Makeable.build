@@ -36,17 +36,33 @@ export async function initializeShell(root = document, options = {}) {
   const project = createProjectController({ store: projectStore });
   await project.load();
   let screenRenderer = null;
+  let hasRenderedRoute = false;
   const navigation = createRouter({
     window: windowLike,
     getProject: () => project.current,
     onRoute: (route) => {
       updateProgressRail(root, route.rail, project.current);
       screenRenderer?.render(route);
+      announceRoute(root, windowLike, { focus: hasRenderedRoute });
+      hasRenderedRoute = true;
     },
   });
   root.querySelector(".progress-rail")?.addEventListener("click", (event) => {
     const action = event.target.closest("[data-progress-action]");
-    if (!action || action.disabled || !action.dataset.route) return;
+    if (!action || action.getAttribute("aria-disabled") === "true" || !action.dataset.route) {
+      event.preventDefault();
+      return;
+    }
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    event.preventDefault();
     navigation.navigate(action.dataset.route);
   });
   const app = Object.freeze({
@@ -88,8 +104,16 @@ function updateProgressRail(root, activeRail, project = {}) {
     const target = latestRailRoute(step.dataset.progressStep, completedRoutes);
     step.classList.toggle("is-complete", complete);
     if (action) {
-      action.disabled = !complete || !target;
       action.dataset.route = target || "";
+      if (complete && target) {
+        action.href = target;
+        action.removeAttribute("aria-disabled");
+        action.removeAttribute("tabindex");
+      } else {
+        action.removeAttribute("href");
+        action.setAttribute("aria-disabled", "true");
+        action.setAttribute("tabindex", "-1");
+      }
       action.setAttribute(
         "aria-label",
         complete
@@ -97,6 +121,20 @@ function updateProgressRail(root, activeRail, project = {}) {
           : action.querySelector(".progress-label")?.textContent || "Build step",
       );
     }
+  }
+}
+
+function announceRoute(root, windowLike, { focus = true } = {}) {
+  const routeHeading = root.querySelector(".route-screen h1");
+  if (!routeHeading) return;
+  routeHeading.setAttribute("tabindex", "-1");
+  if (focus) routeHeading.focus({ preventScroll: true });
+  const title = routeHeading.textContent?.trim() || PRODUCT_NAME;
+  root.title = `${title} · ${PRODUCT_NAME}`;
+  const status = root.querySelector("#appStatus");
+  if (status) status.textContent = `${title} screen loaded.`;
+  if (focus) {
+    windowLike.requestAnimationFrame?.(() => routeHeading.scrollIntoView({ block: "start" }));
   }
 }
 

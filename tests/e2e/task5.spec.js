@@ -139,7 +139,7 @@ test("publish uploads all artifacts, Success actions work, and starting over pre
   await expect(page.getByText("Tested & working")).toBeVisible();
   await page.getByLabel("Repository name").fill("self-watering-plant");
   await page.getByLabel("Private").check();
-  await page.getByRole("button", { name: "Connect GitHub & publish" }).click();
+  await page.getByLabel("Repository name").press("Enter");
 
   await expect(page).toHaveURL(/\/build\/publish\/success$/);
   await expect(

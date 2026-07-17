@@ -257,6 +257,7 @@ test("assembly, flash, automatic test, and manual acknowledgement use real route
   expect(await page.evaluate(() => window.__task4.writes)).toEqual([
     "MAKEABLE|RUN|sensor|0\n",
     "MAKEABLE|RUN|pump|650\n",
+    "MAKEABLE|STOP|pump\n",
   ]);
   expect(await page.evaluate(() => window.__task4.manualEvidence)).toMatchObject({
     requestedAction:

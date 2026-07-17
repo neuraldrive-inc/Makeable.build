@@ -10,7 +10,7 @@ This file is a small, polished smoke test for the `Boba-and-Chaos` repository.
 
 ## Project Note
 
-CircuitCodex is a lightweight browser prototype for AI-guided hardware and IoT
+Makeable is a browser application for AI-guided hardware and IoT
 workflows. This test file keeps the repo tidy while making sure the GitHub
 update path is working.
 

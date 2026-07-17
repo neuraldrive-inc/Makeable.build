@@ -50,6 +50,7 @@ export function createScreenRenderer({ root, app }) {
     cameraStream: null,
     evidence: null,
     operationAbort: null,
+    requestAbort: null,
     serialSession: null,
     cameraRequest: null,
     routeGeneration: 0,
@@ -132,6 +133,7 @@ function renderDescribe(context, route) {
             <input
               class="file-input"
               id="sketch-file"
+              name="sketch"
               type="file"
               accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
               aria-label="Add a sketch"
@@ -241,6 +243,7 @@ function renderUpload(context, route) {
         <input
           class="file-input"
           id="parts-file"
+          name="partsPhoto"
           type="file"
           accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
           aria-label="Upload my parts"
@@ -266,6 +269,7 @@ function renderUpload(context, route) {
           <input
             class="file-input"
             id="camera-file"
+            name="cameraPhoto"
             type="file"
             accept="image/*"
             capture="environment"
@@ -303,6 +307,12 @@ function renderUpload(context, route) {
   outlet.querySelector("[data-capture-upload-photo]").addEventListener("click", () =>
     captureUploadPhoto(context, receive),
   );
+  const cameraDialog = outlet.querySelector("[data-upload-camera-dialog]");
+  cameraDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeUploadCamera(context);
+  });
+  cameraDialog.addEventListener("close", () => stopUploadCameraStream(context));
   zone.addEventListener("dragover", (event) => {
     event.preventDefault();
     zone.classList.add("is-dragging");
@@ -401,10 +411,19 @@ function closeUploadCamera(context) {
   context.runtime.cameraRequest &&
     (context.runtime.cameraRequest.cancelled = true);
   context.runtime.cameraRequest = null;
-  context.runtime.cameraStream?.getTracks?.().forEach((track) => track.stop());
-  context.runtime.cameraStream = null;
+  stopUploadCameraStream(context);
   const dialog = context.outlet.querySelector("[data-upload-camera-dialog]");
   if (dialog?.open) dialog.close();
+}
+
+function stopUploadCameraStream(context) {
+  context.runtime.cameraStream?.getTracks?.().forEach((track) => track.stop());
+  context.runtime.cameraStream = null;
+  const video = context.outlet.querySelector("[data-upload-camera-preview]");
+  if (video) {
+    video.srcObject = null;
+    video.hidden = true;
+  }
 }
 
 async function handlePartsPhoto(context, route, file) {
@@ -413,34 +432,52 @@ async function handlePartsPhoto(context, route, file) {
   const controls = outlet.querySelectorAll("input");
   controls.forEach((control) => (control.disabled = true));
   progress.textContent = "Preparing your photo…";
+  const request = beginScopedRequest(context);
   try {
     const normalized = await normalizeImageFile(file);
+    if (!isScopedRequestCurrent(context, request)) return;
     await app.saveImage("source", normalized.blob);
+    const photoRevision =
+      context.window.crypto?.randomUUID?.() ||
+      `${Date.now()}-${normalized.blob.size}`;
     await app.updateProject("photo", {
       imageId: "source",
       width: normalized.width,
       height: normalized.height,
       mimeType: normalized.mimeType,
       originalName: normalized.originalName,
-      revision:
-        context.window.crypto?.randomUUID?.() ||
-        `${Date.now()}-${normalized.blob.size}`,
+      revision: photoRevision,
     });
+    request.photoRevision = photoRevision;
+    if (!isScopedRequestCurrent(context, request, photoRevision)) return;
     progress.textContent = "Looking closely at your parts…";
     const plan = await requestHardwarePlan({
       idea: ideaText(app.getProject().idea),
       imageDataUrl: await blobToDataUrl(normalized.blob),
+      signal: request.controller.signal,
     });
+    if (!isScopedRequestCurrent(context, request, photoRevision)) return;
     await persistReviewSelection(context, null);
+    if (!isScopedRequestCurrent(context, request, photoRevision)) return;
     await app.updateProject("confirmedParts", plan.parts);
+    if (!isScopedRequestCurrent(context, request, photoRevision)) return;
     await app.updateProject("feasibility", feasibilityRecord(plan));
+    if (!isScopedRequestCurrent(context, request, photoRevision)) return;
     await app.updateProject("wiring", { steps: plan.wiringSteps });
+    if (!isScopedRequestCurrent(context, request, photoRevision)) return;
     if (plan.firmware) await app.updateProject("firmware", plan.firmware);
+    if (!isScopedRequestCurrent(context, request, photoRevision)) return;
     await app.completeRoute(route.path);
+    if (!isScopedRequestCurrent(context, request, photoRevision)) return;
     app.navigation.navigate("/build/parts/review");
   } catch (error) {
+    if (request.controller.signal.aborted || error?.name === "AbortError") return;
     progress.textContent = error.message;
     controls.forEach((control) => (control.disabled = false));
+  } finally {
+    if (context.runtime.requestAbort === request.controller) {
+      context.runtime.requestAbort = null;
+    }
   }
 }
 
@@ -460,7 +497,7 @@ function renderReview(context, route) {
       </header>
 
       <section class="paper-panel photo-review" aria-label="Detected parts in your uploaded photo">
-        <img class="parts-photo" data-source-photo alt="Your uploaded parts" />
+        <img class="parts-photo" data-source-photo alt="Your uploaded parts" ${imageSizeAttributes(project)} />
         <div class="annotation-layer">
           ${parts
             .map((part, index) => annotationButton(part, index, selected?.id))
@@ -504,6 +541,16 @@ function renderReview(context, route) {
   }
   for (const button of outlet.querySelectorAll("[data-delete-part]")) {
     button.addEventListener("click", async () => {
+      const part = (app.getProject().confirmedParts || []).find(
+        ({ id }) => id === button.dataset.deletePart,
+      );
+      if (
+        !context.window.confirm(
+          `Remove ${part?.name || "this detected part"} from your confirmed inventory?`,
+        )
+      ) {
+        return;
+      }
       const next = (app.getProject().confirmedParts || []).filter(
         ({ id }) => id !== button.dataset.deletePart,
       );
@@ -555,7 +602,7 @@ function renderReady(context) {
       </header>
 
       <section class="paper-panel ready-photo-panel" aria-label="Ready project inventory">
-        <img class="parts-photo" data-source-photo alt="Your uploaded parts" />
+        <img class="parts-photo" data-source-photo alt="Your uploaded parts" ${imageSizeAttributes(project)} />
         <div class="annotation-layer">
           ${parts.map((part, index) => readyAnnotation(part, index)).join("")}
         </div>
@@ -591,6 +638,7 @@ function renderReady(context) {
     outlet.querySelector(".annotation-layer"),
   );
   outlet.querySelector("[data-start-assembly]").addEventListener("click", async (event) => {
+    if (!shouldHandleSpaClick(event)) return;
     event.preventDefault();
     await app.completeRoute("/build/feasibility/ready");
     app.navigation.navigate("/build/assemble");
@@ -620,7 +668,7 @@ function renderMissing(context) {
       <div class="feasibility-columns">
         <section class="paper-panel inventory-panel" aria-labelledby="have-title">
           <h2 id="have-title">You have</h2>
-          <img class="inventory-photo" data-source-photo alt="Your uploaded parts" />
+          <img class="inventory-photo" data-source-photo alt="Your uploaded parts" ${imageSizeAttributes(project)} />
           <ul>
             ${parts
               .map(
@@ -687,7 +735,8 @@ function renderMissing(context) {
     const status = outlet.querySelector("[data-shopping-status]");
     status.textContent =
       "Your local shopping list is ready. Use Search for current options, then mark each part obtained.";
-    firstSearch?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const reducedMotion = context.window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    firstSearch?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
     firstSearch?.focus({ preventScroll: true });
   });
   for (const button of outlet.querySelectorAll("[data-start-alternative]")) {
@@ -708,6 +757,7 @@ async function startAlternativeProject(context, alternativeId) {
   const buttons = outlet.querySelectorAll("[data-start-alternative]");
   buttons.forEach((button) => (button.disabled = true));
   status.textContent = `Preparing ${alternative.title} with the parts you already confirmed…`;
+  const request = beginScopedRequest(context, project.photo?.revision);
   const previousIdea =
     typeof project.idea === "object" && project.idea
       ? project.idea
@@ -733,7 +783,9 @@ async function startAlternativeProject(context, alternativeId) {
     const plan = await requestHardwarePlan({
       idea: alternative.title,
       confirmedParts: project.confirmedParts || [],
+      signal: request.controller.signal,
     });
+    if (!isScopedRequestCurrent(context, request, project.photo?.revision)) return;
     await app.replaceProject({
       ...project,
       idea: nextIdea,
@@ -753,14 +805,20 @@ async function startAlternativeProject(context, alternativeId) {
       },
       updatedAt: new Date().toISOString(),
     });
+    if (!isScopedRequestCurrent(context, request, project.photo?.revision)) return;
     app.navigation.navigate(
       plan.feasibility.status === "missing"
         ? "/build/feasibility/missing"
         : "/build/feasibility/ready",
     );
   } catch (error) {
+    if (request.controller.signal.aborted || error?.name === "AbortError") return;
     status.textContent = `I couldn’t start that alternative yet: ${error.message}`;
     buttons.forEach((button) => (button.disabled = false));
+  } finally {
+    if (context.runtime.requestAbort === request.controller) {
+      context.runtime.requestAbort = null;
+    }
   }
 }
 
@@ -834,6 +892,7 @@ function renderAssemble(context, route) {
             class="parts-photo"
             data-source-photo
             alt="Your uploaded parts with this connection highlighted"
+            ${imageSizeAttributes(project)}
           />
           <div class="annotation-layer" data-connection-layer>
             ${connectionCanvas(fromPart, toPart, step.wireColor)}
@@ -911,14 +970,15 @@ function renderAssemble(context, route) {
   outlet.querySelector("[data-watch-connection]").addEventListener("click", (event) => {
     const panel = outlet.querySelector(".assembly-photo-panel");
     panel.classList.remove("is-animating");
-    void panel.offsetWidth;
-    panel.classList.add("is-animating");
-    animateConnectionPath(context, outlet.querySelector("[data-connection-layer]"));
     event.currentTarget.setAttribute("aria-pressed", "true");
-    context.window.setTimeout(() => {
-      panel.classList.remove("is-animating");
-      event.currentTarget?.setAttribute("aria-pressed", "false");
-    }, 900);
+    context.window.requestAnimationFrame(() => {
+      panel.classList.add("is-animating");
+      animateConnectionPath(context, outlet.querySelector("[data-connection-layer]"));
+      context.window.setTimeout(() => {
+        panel.classList.remove("is-animating");
+        event.currentTarget?.setAttribute("aria-pressed", "false");
+      }, 900);
+    });
   });
   outlet.querySelector("[data-assembly-back]").addEventListener("click", async () => {
     if (currentIndex === 0) {
@@ -966,21 +1026,23 @@ function renderCode(context, route) {
         <section class="paper-panel firmware-panel" aria-labelledby="firmware-title">
           <h2 class="visually-hidden" id="firmware-title">Generated firmware</h2>
           <div class="code-tabs" role="tablist" aria-label="Firmware view">
-            <button type="button" role="tab" aria-selected="true" data-code-view="simple">Simple view</button>
-            <button type="button" role="tab" aria-selected="false" data-code-view="advanced">Advanced view</button>
+            <button id="code-tab-simple" type="button" role="tab" aria-selected="true" aria-controls="code-panel-simple" tabindex="0" data-code-view="simple">Simple view</button>
+            <button id="code-tab-advanced" type="button" role="tab" aria-selected="false" aria-controls="code-panel-advanced" tabindex="-1" data-code-view="advanced">Advanced view</button>
           </div>
-          <pre class="firmware-code" data-simple-code><code>${escapeHtml(
+          <pre id="code-panel-simple" class="firmware-code" role="tabpanel" aria-labelledby="code-tab-simple" tabindex="0" data-simple-code><code>${escapeHtml(
             firmware.sketch || "Firmware generation is still pending.",
           )}</code></pre>
-          <label class="visually-hidden" for="firmware-editor">Firmware code</label>
-          <textarea
-            id="firmware-editor"
-            class="firmware-editor"
-            data-advanced-code
-            aria-label="Firmware code"
-            spellcheck="false"
-            hidden
-          >${escapeHtml(firmware.sketch || "")}</textarea>
+          <div id="code-panel-advanced" role="tabpanel" aria-labelledby="code-tab-advanced" data-advanced-panel hidden>
+            <label class="visually-hidden" for="firmware-editor">Firmware code</label>
+            <textarea
+              id="firmware-editor"
+              class="firmware-editor"
+              data-advanced-code
+              aria-label="Firmware code"
+              name="firmwareCode"
+              spellcheck="false"
+            >${escapeHtml(firmware.sketch || "")}</textarea>
+          </div>
           <div class="firmware-tools">
             <button class="tool-button" type="button" data-copy-code>${icon("paperclip")} Copy</button>
             <button class="tool-button" type="button" data-download-code>${icon("download")} Download</button>
@@ -1020,7 +1082,7 @@ function renderCode(context, route) {
             Checking the local Arduino setup…
           </p>
           <label class="erase-option">
-            <input type="checkbox" data-erase-flash />
+            <input type="checkbox" name="eraseFlash" data-erase-flash />
             Erase the board before loading
           </label>
           <button class="primary-button" type="button" data-flash-board>
@@ -1042,7 +1104,8 @@ function renderCode(context, route) {
             firmware.flash?.status === "success" ? "100%" : "0%"
           }</span>
         </div>
-        <progress data-flash-progress max="100" value="${
+        <label class="visually-hidden" for="firmware-load-progress">Firmware loading progress</label>
+        <progress id="firmware-load-progress" data-flash-progress max="100" value="${
           firmware.flash?.status === "success" ? "100" : "0"
         }">0%</progress>
       </section>
@@ -1050,19 +1113,36 @@ function renderCode(context, route) {
   `);
 
   const editor = outlet.querySelector("[data-advanced-code]");
+  const advancedPanel = outlet.querySelector("[data-advanced-panel]");
   const simple = outlet.querySelector("[data-simple-code]");
   for (const tab of outlet.querySelectorAll("[data-code-view]")) {
-    tab.addEventListener("click", () => {
+    const activateTab = () => {
       const advanced = tab.dataset.codeView === "advanced";
       simple.hidden = advanced;
-      editor.hidden = !advanced;
+      advancedPanel.hidden = !advanced;
       for (const candidate of outlet.querySelectorAll("[data-code-view]")) {
         candidate.setAttribute(
           "aria-selected",
           String(candidate === tab),
         );
+        candidate.tabIndex = candidate === tab ? 0 : -1;
       }
       if (advanced) editor.focus();
+    };
+    tab.addEventListener("click", activateTab);
+    tab.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const tabs = [...outlet.querySelectorAll("[data-code-view]")];
+      const current = tabs.indexOf(tab);
+      const next =
+        event.key === "Home"
+          ? tabs[0]
+          : event.key === "End"
+            ? tabs.at(-1)
+            : tabs[(current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length];
+      next.focus();
+      next.click();
     });
   }
   editor.addEventListener("change", async () => {
@@ -1125,7 +1205,7 @@ function renderAutomaticTest(context, route) {
 
       <div class="automatic-layout">
         <section class="paper-panel test-photo-panel" aria-label="Your assembled project">
-          <img class="parts-photo" data-source-photo alt="Your uploaded project ready for hardware checks" />
+          <img class="parts-photo" data-source-photo alt="Your uploaded project ready for hardware checks" ${imageSizeAttributes(project)} />
           <div class="annotation-layer">
             ${(project.confirmedParts || [])
               .filter(({ bounds }) => bounds)
@@ -1158,9 +1238,11 @@ function renderAutomaticTest(context, route) {
                 ? "Ready for the automatic check."
                 : "No stable diagnostic plan is available. Regenerate the guide before testing."
           }</p>
-          <progress data-test-progress max="${Math.max(1, checks.length)}" value="${
+          <label class="visually-hidden" for="automatic-test-progress">Automatic hardware check progress</label>
+          <progress id="automatic-test-progress" data-test-progress max="${Math.max(1, checks.length)}" value="${
             checks.filter(({ status }) => status === "pass").length
           }"></progress>
+          <p class="visually-hidden" data-diagnostic-update role="status" aria-live="polite"></p>
         </div>
         <button class="primary-button" type="button" data-start-test ${
           diagnostics.length && !passed ? "" : "disabled"
@@ -1230,7 +1312,7 @@ function renderManualTest(context, route) {
                     index === 0
                       ? `
                         <figure class="manual-instruction-media">
-                          <img data-manual-lift-photo alt="Your project photo for the lift-sensor step" />
+                          <img data-manual-lift-photo alt="Your project photo for the lift-sensor step" ${imageSizeAttributes(project)} />
                         </figure>
                       `
                       : index === 1
@@ -1243,7 +1325,7 @@ function renderManualTest(context, route) {
                         `
                         : `
                           <figure class="manual-instruction-media camera-evidence-frame" data-camera-frame>
-                            <img data-manual-watch-photo alt="Your project photo for watching the result" />
+                            <img data-manual-watch-photo alt="Your project photo for watching the result" ${imageSizeAttributes(project)} />
                             <video data-camera-preview playsinline muted hidden aria-label="Live camera preview"></video>
                           </figure>
                           <div class="camera-actions">
@@ -1324,7 +1406,7 @@ function renderPublish(context, route) {
       </header>
 
       <section class="paper-panel publish-package">
-        <form class="publish-form" data-publish-form novalidate>
+        <form id="publish-form" class="publish-form" data-publish-form novalidate>
           <div class="repository-row">
             <div class="repository-field">
               <label for="repository-name">Repository name</label>
@@ -1397,7 +1479,7 @@ function renderPublish(context, route) {
       </div>
 
       <div class="publish-actions">
-        <button class="publish-github-button" type="button" data-publish-github>
+        <button class="publish-github-button" type="submit" form="publish-form" data-publish-github>
           Connect GitHub &amp; publish
         </button>
         <button class="download-project-button" type="button" data-download-project>
@@ -1423,9 +1505,10 @@ function renderPublish(context, route) {
     return result;
   };
   input.addEventListener("input", validate);
-  outlet.querySelector("[data-publish-github]").addEventListener("click", () =>
-    publishFromScreen(context, route, form, validate),
-  );
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    publishFromScreen(context, route, form, validate);
+  });
   outlet.querySelector("[data-download-project]").addEventListener("click", () =>
     downloadProjectArchive(context, repositoryNameFromTitle(input.value)),
   );
@@ -1600,6 +1683,9 @@ function renderPublishSuccess(context) {
 }
 
 function cleanupRouteResources(context) {
+  stopVoice(context);
+  context.runtime.requestAbort?.abort();
+  context.runtime.requestAbort = null;
   context.runtime.operationAbort?.abort();
   context.runtime.operationAbort = null;
   const session = context.runtime.serialSession;
@@ -1610,6 +1696,28 @@ function cleanupRouteResources(context) {
   if (context.runtime.cameraRequest) context.runtime.cameraRequest.cancelled = true;
   context.runtime.cameraRequest = null;
   context.runtime.evidence = null;
+}
+
+function beginScopedRequest(context, photoRevision = null) {
+  context.runtime.requestAbort?.abort();
+  const controller = new context.window.AbortController();
+  context.runtime.requestAbort = controller;
+  return {
+    controller,
+    generation: context.runtime.routeGeneration,
+    photoRevision,
+  };
+}
+
+function isScopedRequestCurrent(context, request, photoRevision = request.photoRevision) {
+  if (
+    request.controller.signal.aborted ||
+    context.runtime.requestAbort !== request.controller ||
+    context.runtime.routeGeneration !== request.generation
+  ) {
+    return false;
+  }
+  return photoRevision == null || context.app.getProject().photo?.revision === photoRevision;
 }
 
 async function persistWiringProgress(app, wiring) {
@@ -1867,6 +1975,16 @@ function updateDiagnosticView(context, checks, message = "") {
   const progress = context.outlet.querySelector("[data-test-progress]");
   progress.max = Math.max(1, checks.length);
   progress.value = passed;
+  const running = checks.find(({ status }) => status === "running");
+  const failed = checks.find(({ status }) => status === "fail");
+  const update = context.outlet.querySelector("[data-diagnostic-update]");
+  if (update) {
+    update.textContent = failed
+      ? `${failed.name} failed. ${diagnosticStatusLabel(failed)}`
+      : running
+        ? `${running.name}: ${diagnosticStatusLabel(running)}`
+        : `${passed} of ${checks.length} checks passed.`;
+  }
   if (message) {
     context.outlet.querySelector("[data-automatic-message]").textContent = message;
   }
@@ -1876,6 +1994,7 @@ function updateDiagnosticView(context, checks, message = "") {
 function attachRepairLinks(context) {
   for (const link of context.outlet.querySelectorAll("[data-repair-step]")) {
     link.addEventListener("click", async (event) => {
+      if (!shouldHandleSpaClick(event)) return;
       event.preventDefault();
       const updated = selectAssemblyStep(
         context.app.getProject().wiring,
@@ -1885,6 +2004,16 @@ function attachRepairLinks(context) {
       context.app.navigation.navigate("/build/assemble");
     });
   }
+}
+
+function shouldHandleSpaClick(event) {
+  return (
+    event.button === 0 &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.shiftKey &&
+    !event.altKey
+  );
 }
 
 async function startAutomaticTest(context, route, diagnostics) {
@@ -2081,8 +2210,10 @@ async function acknowledgeManualTest(context, route, { action, acknowledged }) {
   notYetButton.disabled = true;
   guidance.textContent =
     "Comparing the requested action, camera evidence, and recent board output…";
+  const request = beginScopedRequest(context, app.getProject().photo?.revision);
   try {
     await evidence.savePromise;
+    if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
     const project = app.getProject();
     const evaluator =
       context.runtime.hardware.evaluateManualTest || evaluateManualTest;
@@ -2093,7 +2224,9 @@ async function acknowledgeManualTest(context, route, { action, acknowledged }) {
       imageDataUrl: evidence.dataUrl,
       serialOutput: project.tests?.automatic?.serialOutput || "",
       fetchImpl: context.window.fetch.bind(context.window),
+      signal: request.controller.signal,
     });
+    if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
     const tests = app.getProject().tests || {};
     await app.updateProject("tests", {
       ...tests,
@@ -2108,8 +2241,10 @@ async function acknowledgeManualTest(context, route, { action, acknowledged }) {
         evaluation,
       },
     });
+    if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
     if (acknowledged) {
       await app.completeRoute(route.path);
+      if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
       context.runtime.cameraStream?.getTracks?.().forEach((track) => track.stop());
       context.runtime.cameraStream = null;
       app.navigation.navigate("/build/publish/connect");
@@ -2134,10 +2269,14 @@ async function acknowledgeManualTest(context, route, { action, acknowledged }) {
     guidance.append(text, link, retry);
     attachRepairLinks(context);
   } catch (error) {
+    if (request.controller.signal.aborted || error?.name === "AbortError") return;
     guidance.textContent = `I couldn’t finish the evidence check: ${error.message}. Retry with the project in view.`;
   } finally {
-    yesButton.disabled = false;
-    notYetButton.disabled = false;
+    if (context.runtime.requestAbort === request.controller) {
+      context.runtime.requestAbort = null;
+      yesButton.disabled = false;
+      notYetButton.disabled = false;
+    }
   }
 }
 
@@ -2160,24 +2299,37 @@ async function confirmParts(context, route) {
   if (!canConfirmParts(confirmedParts)) return;
   button.disabled = true;
   status.textContent = "Regenerating your guide and firmware…";
+  const request = beginScopedRequest(context, app.getProject().photo?.revision);
   try {
     const plan = await requestHardwarePlan({
       idea: ideaText(app.getProject().idea),
       confirmedParts,
+      signal: request.controller.signal,
     });
+    if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
     await app.updateProject("confirmedParts", confirmedParts);
+    if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
     await app.updateProject("feasibility", feasibilityRecord(plan));
+    if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
     await app.updateProject("wiring", { steps: plan.wiringSteps });
+    if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
     await app.updateProject("firmware", plan.firmware);
+    if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
     await app.completeRoute(route.path);
+    if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
     app.navigation.navigate(
       plan.feasibility.status === "missing"
         ? "/build/feasibility/missing"
         : "/build/feasibility/ready",
     );
   } catch (error) {
+    if (request.controller.signal.aborted || error?.name === "AbortError") return;
     status.textContent = error.message;
     button.disabled = false;
+  } finally {
+    if (context.runtime.requestAbort === request.controller) {
+      context.runtime.requestAbort = null;
+    }
   }
 }
 
@@ -2311,9 +2463,22 @@ async function toggleVoice(context, textarea) {
   const button = context.outlet.querySelector("[data-voice-button]");
   status.textContent = "Getting ready…";
   button.disabled = true;
+  const voice = {
+    socket: null,
+    recorder: null,
+    stream: null,
+    tokenController: new context.window.AbortController(),
+    generation: context.runtime.routeGeneration,
+    stopped: false,
+  };
+  context.runtime.voice = voice;
   try {
-    const tokenResponse = await fetch("/api/deepgram/token", { method: "POST" });
+    const tokenResponse = await context.window.fetch("/api/deepgram/token", {
+      method: "POST",
+      signal: voice.tokenController.signal,
+    });
     const tokenPayload = await tokenResponse.json();
+    if (!isVoiceCurrent(context, voice)) return;
     if (!tokenResponse.ok || !tokenPayload.access_token) {
       throw new Error(tokenPayload.error || "Voice is unavailable.");
     }
@@ -2322,18 +2487,27 @@ async function toggleVoice(context, textarea) {
     url.searchParams.set("smart_format", "true");
     url.searchParams.set("interim_results", "true");
     url.searchParams.set("endpointing", "500");
-    const socket = new WebSocket(url, ["token", tokenPayload.access_token]);
-    const voice = { socket, recorder: null, stream: null };
-    context.runtime.voice = voice;
+    const socket = new context.window.WebSocket(url, ["token", tokenPayload.access_token]);
+    voice.socket = socket;
     socket.onopen = async () => {
+      if (!isVoiceCurrent(context, voice)) {
+        socket.close();
+        return;
+      }
       try {
-        voice.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        const stream = await context.window.navigator.mediaDevices.getUserMedia({ audio: true });
+        if (!isVoiceCurrent(context, voice)) {
+          stream.getTracks?.().forEach((track) => track.stop());
+          socket.close();
+          return;
+        }
+        voice.stream = stream;
+        const mimeType = context.window.MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
           ? "audio/webm;codecs=opus"
           : "audio/webm";
-        voice.recorder = new MediaRecorder(voice.stream, { mimeType });
+        voice.recorder = new context.window.MediaRecorder(voice.stream, { mimeType });
         voice.recorder.ondataavailable = async (event) => {
-          if (event.data.size && socket.readyState === 1) {
+          if (isVoiceCurrent(context, voice) && event.data.size && socket.readyState === 1) {
             socket.send(await event.data.arrayBuffer());
           }
         };
@@ -2341,11 +2515,12 @@ async function toggleVoice(context, textarea) {
         status.textContent = "Listening…";
         button.disabled = false;
       } catch (error) {
-        status.textContent = error.message;
+        if (isVoiceCurrent(context, voice)) status.textContent = error.message;
         stopVoice(context);
       }
     };
     socket.onmessage = (event) => {
+      if (!isVoiceCurrent(context, voice)) return;
       let message;
       try {
         message = JSON.parse(event.data);
@@ -2361,19 +2536,35 @@ async function toggleVoice(context, textarea) {
       }
     };
     socket.onerror = () => {
-      status.textContent = "Voice paused. Try again.";
-      button.disabled = false;
+      if (isVoiceCurrent(context, voice)) {
+        status.textContent = "Voice paused. Try again.";
+        button.disabled = false;
+        stopVoice(context);
+      }
     };
   } catch (error) {
-    status.textContent = error.message;
-    button.disabled = false;
-    context.runtime.voice = null;
+    if (context.runtime.voice === voice && error?.name !== "AbortError") {
+      status.textContent = error.message;
+      button.disabled = false;
+    }
+    stopVoice(context);
   }
+}
+
+function isVoiceCurrent(context, voice) {
+  return (
+    context.runtime.voice === voice &&
+    !voice.stopped &&
+    voice.generation === context.runtime.routeGeneration &&
+    context.runtime.currentRoute?.path === "/build/new"
+  );
 }
 
 function stopVoice(context) {
   const voice = context.runtime.voice;
   if (!voice) return;
+  voice.stopped = true;
+  voice.tokenController?.abort();
   try {
     if (voice.socket?.readyState === 1) {
       voice.socket.send(JSON.stringify({ type: "Finalize" }));
@@ -2382,7 +2573,7 @@ function stopVoice(context) {
   } catch {
     // Best-effort finalization.
   }
-  voice.recorder?.stop();
+  if (voice.recorder?.state && voice.recorder.state !== "inactive") voice.recorder.stop();
   voice.stream?.getTracks().forEach((track) => track.stop());
   voice.socket?.close();
   context.runtime.voice = null;
@@ -2417,6 +2608,12 @@ function artifactDisplayName(path) {
   if (path === "parts-list/README.md") return "parts-list";
   if (path === "test-results/README.md") return "test-results";
   return path;
+}
+
+function imageSizeAttributes(project) {
+  const width = Math.max(1, Number(project?.photo?.width) || 1200);
+  const height = Math.max(1, Number(project?.photo?.height) || 800);
+  return `width="${width}" height="${height}"`;
 }
 
 function screenFrame(content) {
@@ -2517,7 +2714,13 @@ function partInspector(part) {
       <legend>Edit selected part</legend>
       <label>
         <span>Part name</span>
-        <input data-part-name value="${escapeAttribute(part.name)}" />
+        <input
+          data-part-name
+          name="partName"
+          type="text"
+          autocomplete="off"
+          value="${escapeAttribute(part.name)}"
+        />
       </label>
       <div class="bounds-grid">
         ${boundInput("Left edge", "x", bounds.x)}
@@ -2531,6 +2734,7 @@ function partInspector(part) {
             <label class="confidence-check">
               <input
                 type="checkbox"
+                name="confirmLowConfidence"
                 data-confirm-confidence
                 ${part.confirmed ? "checked" : ""}
                 aria-label="Confirm ${escapeAttribute(part.name)} despite low confidence"
@@ -2555,6 +2759,8 @@ function boundInput(label, field, value) {
         min="0"
         max="100"
         step="1"
+        name="bounds-${field}"
+        inputmode="numeric"
         value="${value}"
         data-bound-field="${field}"
         aria-label="${label}"

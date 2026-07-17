@@ -88,10 +88,10 @@ test("completed rail stages are semantic navigation and keep labels on mobile", 
   page,
 }) => {
   await seed(page, baseProject, "/build/test/automatic");
-  const describe = page.getByRole("button", { name: /Describe/ });
-  const build = page.getByRole("button", { name: /Build \+ Code/ });
-  await expect(describe).toBeEnabled();
-  await expect(build).toBeEnabled();
+  const describe = page.getByRole("link", { name: /Describe/ });
+  const build = page.getByRole("link", { name: /Build \+ Code/ });
+  await expect(describe).toHaveAttribute("href", "/build/new");
+  await expect(build).toHaveAttribute("href", "/build/code");
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(describe).toBeVisible();
   expect(
@@ -101,6 +101,29 @@ test("completed rail stages are semantic navigation and keep labels on mobile", 
   ).toBeGreaterThanOrEqual(11);
   await build.click();
   await expect(page).toHaveURL(/\/build\/code$/);
+});
+
+test("SPA navigation announces and focuses each new screen", async ({ page }) => {
+  await seed(page, baseProject, "/build/test/automatic");
+  await page.getByRole("link", { name: /Build \+ Code/ }).click();
+  const heading = page.getByRole("heading", {
+    name: "Your build is wired. Let’s give it a brain.",
+  });
+  await expect(heading).toBeFocused();
+  await expect(page).toHaveTitle(/Your build is wired. Let’s give it a brain. · Makeable/);
+  await expect(page.locator("#appStatus")).toContainText("screen loaded");
+});
+
+test("firmware tabs expose controlled panels and support arrow keys", async ({ page }) => {
+  await seed(page, baseProject, "/build/code");
+  const simple = page.getByRole("tab", { name: "Simple view" });
+  const advanced = page.getByRole("tab", { name: "Advanced view" });
+  await simple.focus();
+  await simple.press("ArrowRight");
+  await expect(advanced).toHaveAttribute("aria-selected", "true");
+  await expect(advanced).toHaveAttribute("aria-controls", "code-panel-advanced");
+  await expect(page.locator("#code-panel-advanced")).toBeVisible();
+  await expect(page.locator("#firmware-editor")).toBeVisible();
 });
 
 test("missing parts exposes a local shop action and alternatives preserve idea history", async ({
@@ -218,6 +241,15 @@ test("desktop camera entry opens a live preview and shutter with file fallback",
   await expect(page.locator("[data-upload-camera-preview]")).toBeVisible();
   await expect(page.getByRole("button", { name: "Take photo" })).toBeEnabled();
   await expect(page.getByLabel("Choose a camera photo")).toBeAttached();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Photograph your parts" })).toBeHidden();
+  expect(
+    await page.evaluate(() =>
+      window.MAKEABLE_APP
+        ? document.querySelector("[data-upload-camera-preview]")?.srcObject
+        : null,
+    ),
+  ).toBeNull();
 });
 
 test("assembly shows a real canvas path, pin labels, mobile legend, and all eight steps", async ({
