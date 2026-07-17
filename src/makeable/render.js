@@ -1,5 +1,6 @@
 import { APP_READY_MESSAGE, PRODUCT_NAME } from "./content.js";
 import { createRouter } from "./router.js";
+import { createScreenRenderer } from "./screens.js";
 import {
   createIndexedDbAdapter,
   createProjectController,
@@ -33,12 +34,15 @@ export async function initializeShell(root = document, options = {}) {
     });
   const project = createProjectController({ store: projectStore });
   await project.load();
+  let screenRenderer = null;
   const navigation = createRouter({
     window: windowLike,
     getProject: () => project.current,
-    onRoute: (route) => updateProgressRail(root, route.rail),
+    onRoute: (route) => {
+      updateProgressRail(root, route.rail);
+      screenRenderer?.render(route);
+    },
   });
-  navigation.start();
   const app = Object.freeze({
     navigation,
     getProject: () => project.current,
@@ -50,6 +54,8 @@ export async function initializeShell(root = document, options = {}) {
     loadImage: (imageId) => project.loadImage(imageId),
     deleteImage: (imageId) => project.deleteImage(imageId),
   });
+  screenRenderer = createScreenRenderer({ root, app });
+  navigation.start();
   windowLike.MAKEABLE_APP = app;
   return app;
 }
