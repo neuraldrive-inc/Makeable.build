@@ -5,6 +5,7 @@ config.local.js
 node_modules/
 tmp/
 .circuitcodex/
+.geckco-ai/
 .netlify/
 Makeable-v1-developer-handoff.zip
 artifacts/

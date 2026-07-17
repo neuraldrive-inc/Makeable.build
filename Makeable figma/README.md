@@ -12,7 +12,7 @@ A polished workshop storybook: cream paper, torn color blocks, washi tape, bold 
 
 ## Screen flow
 
-The handoff-ready exports are normalized to 1440×1024 in `final-1440x1024/`. The original generator outputs remain in `ui-concepts/`.
+The handoff-ready exports are normalized to 1440×1024 in `final-1440x1024/`. Earlier generator outputs are not included in this repository copy.
 
 1. `final-1440x1024/01-describe.png` — describe the hardware idea.
 2. `final-1440x1024/02a-upload-parts.png` — upload or photograph available components.
@@ -32,13 +32,13 @@ The handoff-ready exports are normalized to 1440×1024 in `final-1440x1024/`. Th
 - Marker arrows draw themselves to reveal the next connection or action.
 - Hardware checks transition from waiting marks to green checks with short, restrained motion.
 
-## GitHub references downloaded
+## Design reference provenance
 
-- `references/github/tldraw-chat-template` — canvas and AI-chat interaction reference. Review tldraw licensing before production use.
-- `references/github/rough-notation` — hand-drawn annotation reference.
-- `references/github/lucide` — sparse checkout of icons and the React package.
+- tldraw chat template — canvas and AI-chat interaction reference.
+- Rough Notation — hand-drawn annotation reference.
+- Lucide — icon reference; the licensed runtime subset is vendored at `../assets/icons/lucide/`.
 
-The generated images use these repositories as implementation references only; no repository source code is embedded in the image assets.
+The tldraw and Rough Notation source checkouts used during handoff production are not included here. The generated images use those projects as implementation references only; no repository source code is embedded in the image assets.
 
 ## Developer files
 

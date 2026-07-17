@@ -10,6 +10,11 @@ test("the Makeable shell loads with meaningful semantic content", async ({ page 
   await expect(page.getByRole("main")).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Makeable" })).toBeAttached();
   await expect(page.getByRole("status")).toHaveText("Makeable is ready.");
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute(
+    "href",
+    "./assets/icons/lucide/sparkles.svg",
+  );
+  await expect(page.locator("img.brand-spark")).toBeVisible();
 });
 
 test("skip navigation moves keyboard focus to the application content", async ({ page }) => {

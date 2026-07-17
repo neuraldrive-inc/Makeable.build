@@ -94,3 +94,40 @@ test("the package and local server identify the product as Makeable", async () =
   assert.match(server, /Makeable running at/);
   assert.doesNotMatch(server, /GeckCo AI running at/);
 });
+
+test("the favicon and brand accent use the licensed vendored icon", async () => {
+  const html = await read("index.html");
+  const makeableStyles = await read("styles", "makeable.css");
+
+  assert.doesNotMatch(html, /data:image\/svg\+xml/);
+  assert.match(html, /rel="icon" href="\.\/assets\/icons\/lucide\/sparkles\.svg"/);
+  assert.match(
+    html,
+    /<img[^>]+class="brand-spark"[^>]+src="\.\/assets\/icons\/lucide\/sparkles\.svg"[^>]+alt=""/,
+  );
+  assert.doesNotMatch(makeableStyles, /\.brand-spark::(?:before|after)/);
+  await assertNonEmptyFile("assets", "icons", "lucide", "sparkles.svg");
+  await assertNonEmptyFile("assets", "icons", "lucide", "LICENSE");
+});
+
+test("the vendored asset inventory records the complete icon subset", async () => {
+  const assetReadme = await read("assets", "README.md");
+
+  assert.match(assetReadme, /16-icon Lucide SVG subset/);
+  assert.match(assetReadme, /lucide-static@0\.468\.0/);
+});
+
+test("generated local firmware work is ignored", async () => {
+  const gitignore = await read(".gitignore");
+
+  assert.match(gitignore, /^\.geckco-ai\/$/m);
+});
+
+test("the handoff README does not claim omitted source directories are present", async () => {
+  const handoffReadme = await read("Makeable figma", "README.md");
+
+  assert.doesNotMatch(handoffReadme, /outputs remain in `ui-concepts\//);
+  assert.doesNotMatch(handoffReadme, /## GitHub references downloaded/);
+  assert.doesNotMatch(handoffReadme, /`references\/github\//);
+  assert.match(handoffReadme, /not included in this repository copy/i);
+});

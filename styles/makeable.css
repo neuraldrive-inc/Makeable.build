@@ -96,33 +96,15 @@ body {
   text-decoration: none;
 }
 
-.brand-spark,
-.brand-spark::before,
-.brand-spark::after {
-  position: absolute;
-  width: 4px;
-  height: 13px;
-  border-radius: var(--makeable-radius-pill);
-  background: var(--makeable-step-scan);
-  content: "";
-}
-
 .brand-spark {
-  top: -7px;
-  right: -10px;
-  transform: rotate(25deg);
-}
-
-.brand-spark::before {
-  top: 7px;
-  left: 9px;
-  transform: rotate(39deg);
-}
-
-.brand-spark::after {
-  top: 18px;
-  left: 8px;
-  transform: rotate(78deg);
+  position: absolute;
+  top: -10px;
+  right: -20px;
+  width: 24px;
+  height: 24px;
+  filter: brightness(0) saturate(100%) invert(31%) sepia(93%) saturate(2970%) hue-rotate(315deg)
+    brightness(99%) contrast(94%);
+  transform: rotate(-8deg);
 }
 
 .progress-rail {
