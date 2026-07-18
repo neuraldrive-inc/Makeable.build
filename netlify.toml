@@ -1,7 +1,7 @@
 [build]
-  publish = "."
+  publish = "dist"
   functions = "netlify/functions"
-  command = "node --check app.js && node --check server.mjs && node --check netlify/functions/api.mjs"
+  command = "node --check app.js && node --check server.mjs && node --check netlify/functions/api.mjs && node scripts/build-static.mjs"
 
 [functions]
   node_bundler = "esbuild"
@@ -11,4 +11,3 @@
   [headers.values]
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
-
