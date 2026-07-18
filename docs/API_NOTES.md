@@ -21,9 +21,9 @@ Docs:
 ## Deepgram
 
 - Live speech-to-text uses `wss://api.deepgram.com/v1/listen`.
-- Browser WebSocket connections cannot send arbitrary custom headers, so this prototype uses the documented subprotocol style: `new WebSocket(url, ["token", apiKey])`.
+- The browser connects to Makeable with an authenticated WebSocket subprotocol. The ECS API opens the Deepgram connection and keeps the provider key server-side.
 - Audio capture uses `MediaRecorder` with `audio/webm;codecs=opus` when supported.
-- For hosted production, replace direct browser key exposure with a temporary token broker.
+- Production never sends the Deepgram key or a provider token to the browser.
 
 Docs:
 
@@ -54,14 +54,3 @@ Docs:
 - https://esphome.github.io/esp-web-tools/
 - https://github.com/espressif/esptool-js
 - https://espressif.github.io/esptool-js/docs/index.html
-
-## GitHub
-
-- The local server creates repos with `POST /user/repos`.
-- It writes files with `PUT /repos/{owner}/{repo}/contents/{path}` and base64-encoded content.
-- The server checks for an existing file SHA before updating, because GitHub requires `sha` for updates.
-
-Docs:
-
-- https://docs.github.com/en/rest/repos/repos
-- https://docs.github.com/en/rest/repos/contents

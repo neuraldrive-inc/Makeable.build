@@ -11,7 +11,10 @@ const AI_POLL_BASE_INTERVAL_MS = 2200;
 const AI_TRANSIENT_RETRY_ATTEMPTS = 2;
 const ANNOTATION_LABEL_PADDING = 12;
 const ANNOTATION_LABEL_GAP = 10;
+const AUTH_STORAGE_KEY = "makeable.auth.v1";
+const AUTH_FLOW_KEY = "makeable.auth.flow.v1";
 let serverConfig = window.MAKEABLE_CONFIG || window.CIRCUIT_CODEX_CONFIG || {};
+const initialAuthSearch = window.location.search;
 const WORKFLOW_STAGES = [
   {
     hash: "#capture",
@@ -35,8 +38,8 @@ const WORKFLOW_STAGES = [
   },
   {
     hash: "#document",
-    label: "Step 5: Publish",
-    hint: "Package the guide, code, parts, and test results.",
+    label: "Step 5: Finish",
+    hint: "Review the guide, parts, and test results.",
   },
 ];
 
@@ -67,6 +70,9 @@ const state = {
   compiledFirmware: null,
   activeBuildStepIndex: 0,
   activeWorkflowStageIndex: 0,
+  generationId: "",
+  auth: loadStoredAuth(),
+  account: null,
 };
 
 const els = {
@@ -126,6 +132,9 @@ const els = {
   publishGithubButton: $("#publishGithubButton"),
   githubStatus: $("#githubStatus"),
   readmePreview: $("#readmePreview"),
+  accountButton: $("#accountButton"),
+  creditBadge: $("#creditBadge"),
+  accountName: $("#accountName"),
 };
 
 const hardwarePlanSchema = {
@@ -262,7 +271,7 @@ setActiveWorkflowStage(Math.max(initialStageIndex, 0), {
   replace: true,
 });
 drawPartsCanvas();
-refreshServerConfig();
+refreshServerConfig().then(initializeAuth);
 refreshEsp32Status();
 if (/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
   globalThis.__MAKEABLE_TEST_API__ = {
@@ -329,7 +338,8 @@ function bindEvents() {
     state.readme = buildReadme();
     els.readmePreview.textContent = state.readme;
   });
-  els.publishGithubButton.addEventListener("click", publishToGitHub);
+  els.publishGithubButton?.addEventListener("click", publishToGitHub);
+  els.accountButton?.addEventListener("click", handleAccountButton);
 }
 
 function showIntro(event) {
@@ -338,7 +348,7 @@ function showIntro(event) {
   setActiveWorkflowStage(0, { updateHash: true, replace: true });
 }
 
-function advanceFromIdea() {
+async function advanceFromIdea() {
   const idea = els.ideaText.value.trim();
   if (!idea) {
     els.ideaText.focus();
@@ -347,6 +357,12 @@ function advanceFromIdea() {
     return;
   }
   els.ideaText.removeAttribute("aria-invalid");
+  if (serverConfig.hasAccounts && !(await getAccessToken({ interactive: false }))) {
+    sessionStorage.setItem("makeable.pendingIdea", idea);
+    sessionStorage.setItem("makeable.signInIntent", "plan");
+    await startSignIn();
+    return;
+  }
   setActiveWorkflowStage(1);
 }
 
@@ -412,6 +428,205 @@ async function refreshServerConfig() {
     console.error(error);
     return serverConfig;
   }
+}
+
+function loadStoredAuth() {
+  try {
+    return JSON.parse(sessionStorage.getItem(AUTH_STORAGE_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function saveAuth(auth) {
+  state.auth = auth;
+  if (auth) sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
+  else sessionStorage.removeItem(AUTH_STORAGE_KEY);
+  renderAccount();
+}
+
+async function initializeAuth() {
+  if (!serverConfig.hasAccounts) {
+    renderAccount();
+    return;
+  }
+  try {
+    const params = new URLSearchParams(initialAuthSearch);
+    if (params.has("error")) {
+      throw new Error(params.get("error_description") || params.get("error") || "Sign-in was cancelled.");
+    }
+    if (params.has("code")) await finishSignIn(params);
+    const token = await getAccessToken({ interactive: false });
+    if (token) {
+      await refreshAccount();
+      const pendingIdea = sessionStorage.getItem("makeable.pendingIdea");
+      if (pendingIdea && !els.ideaText.value.trim()) els.ideaText.value = pendingIdea;
+      if (sessionStorage.getItem("makeable.signInIntent") === "plan") setActiveWorkflowStage(1);
+      sessionStorage.removeItem("makeable.pendingIdea");
+      sessionStorage.removeItem("makeable.signInIntent");
+    }
+  } catch (error) {
+    console.error(error);
+    saveAuth(null);
+    if (els.accountName) els.accountName.textContent = error.message;
+  }
+  renderAccount();
+}
+
+function renderAccount() {
+  if (!els.accountButton) return;
+  const claims = decodeJwtPayload(state.auth?.idToken || state.auth?.accessToken || "");
+  const signedIn = Boolean(state.auth?.accessToken && claims);
+  els.accountButton.textContent = signedIn ? "Sign out" : "Sign in";
+  els.accountButton.disabled = !serverConfig.hasAccounts;
+  if (els.accountName) {
+    els.accountName.textContent = signedIn
+      ? String(claims?.email || claims?.["cognito:username"] || claims?.username || "Maker")
+      : "10 free generations";
+  }
+  if (els.creditBadge) {
+    els.creditBadge.hidden = !signedIn || !state.account;
+    els.creditBadge.textContent = `${state.account?.credits ?? 0} credit${state.account?.credits === 1 ? "" : "s"}`;
+  }
+}
+
+async function handleAccountButton() {
+  if (state.auth?.accessToken) signOut();
+  else await startSignIn();
+}
+
+async function startSignIn() {
+  if (!serverConfig.cognitoDomain || !serverConfig.cognitoClientId) {
+    throw new Error("Sign-in is not configured yet.");
+  }
+  const verifier = randomBase64Url(64);
+  const loginState = randomBase64Url(32);
+  const challengeBytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  const challenge = bytesToBase64Url(new Uint8Array(challengeBytes));
+  sessionStorage.setItem(AUTH_FLOW_KEY, JSON.stringify({ verifier, loginState }));
+  const authorizeUrl = new URL("/oauth2/authorize", normalizedCognitoDomain());
+  authorizeUrl.search = new URLSearchParams({
+    client_id: serverConfig.cognitoClientId,
+    response_type: "code",
+    scope: "openid email profile",
+    redirect_uri: authRedirectUri(),
+    state: loginState,
+    code_challenge_method: "S256",
+    code_challenge: challenge,
+  });
+  window.location.assign(authorizeUrl);
+}
+
+async function finishSignIn(params) {
+  const flow = JSON.parse(sessionStorage.getItem(AUTH_FLOW_KEY) || "null");
+  if (!flow?.verifier || !flow?.loginState || params.get("state") !== flow.loginState) {
+    throw new Error("The sign-in response could not be verified. Please try again.");
+  }
+  const response = await fetch(new URL("/oauth2/token", normalizedCognitoDomain()), {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: serverConfig.cognitoClientId,
+      code: params.get("code") || "",
+      redirect_uri: authRedirectUri(),
+      code_verifier: flow.verifier,
+    }),
+  });
+  const tokens = await response.json();
+  if (!response.ok) throw new Error(tokens.error_description || tokens.error || "Could not complete sign-in.");
+  saveAuth({
+    accessToken: tokens.access_token,
+    idToken: tokens.id_token,
+    refreshToken: tokens.refresh_token,
+    expiresAt: Date.now() + Number(tokens.expires_in || 3600) * 1000,
+  });
+  sessionStorage.removeItem(AUTH_FLOW_KEY);
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.hash || "#capture"}`);
+}
+
+async function getAccessToken({ interactive = true } = {}) {
+  if (state.auth?.accessToken && Number(state.auth.expiresAt || 0) > Date.now() + 30000) {
+    return state.auth.accessToken;
+  }
+  if (state.auth?.refreshToken) {
+    try {
+      const response = await fetch(new URL("/oauth2/token", normalizedCognitoDomain()), {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          client_id: serverConfig.cognitoClientId,
+          refresh_token: state.auth.refreshToken,
+        }),
+      });
+      const tokens = await response.json();
+      if (!response.ok) throw new Error(tokens.error_description || tokens.error);
+      saveAuth({
+        ...state.auth,
+        accessToken: tokens.access_token,
+        idToken: tokens.id_token || state.auth.idToken,
+        expiresAt: Date.now() + Number(tokens.expires_in || 3600) * 1000,
+      });
+      return state.auth.accessToken;
+    } catch (error) {
+      console.error("Token refresh failed", error);
+      saveAuth(null);
+    }
+  }
+  if (interactive) {
+    await startSignIn();
+    throw new Error("Opening sign-in…");
+  }
+  return "";
+}
+
+async function refreshAccount() {
+  const account = await apiJson("/api/account");
+  state.account = account;
+  renderAccount();
+  return account;
+}
+
+function signOut() {
+  saveAuth(null);
+  state.account = null;
+  const logoutUrl = new URL("/logout", normalizedCognitoDomain());
+  logoutUrl.search = new URLSearchParams({
+    client_id: serverConfig.cognitoClientId,
+    logout_uri: authRedirectUri(),
+  });
+  window.location.assign(logoutUrl);
+}
+
+function normalizedCognitoDomain() {
+  const value = String(serverConfig.cognitoDomain || "").trim();
+  return value.startsWith("http") ? value : `https://${value}`;
+}
+
+function authRedirectUri() {
+  return serverConfig.cognitoRedirectUri || `${window.location.origin}/`;
+}
+
+function decodeJwtPayload(token) {
+  try {
+    const payload = token.split(".")[1];
+    return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+  } catch {
+    return null;
+  }
+}
+
+function randomBase64Url(length) {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return bytesToBase64Url(bytes);
+}
+
+function bytesToBase64Url(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 function handlePhotoUpload(event) {
@@ -845,6 +1060,7 @@ async function analyzeHardware() {
 
   els.analyzeButton.disabled = true;
   els.analyzeButton.textContent = "Making your guide...";
+  state.generationId = crypto.randomUUID();
 
   try {
     if (!serverConfig.hasOpenAIKey) {
@@ -918,6 +1134,7 @@ async function analyzeHardware() {
     );
     try {
       await generateFirmwareForPlan(idea);
+      await refreshAccount();
       renderPlan();
       setStatus(
         els.transcriptBox,
@@ -1017,6 +1234,7 @@ async function openAiResponse(payload, options = {}) {
     try {
       const started = await apiJson("/api/openai/background", {
         method: "POST",
+        generationId: options.generationId || state.generationId,
         body: JSON.stringify(backgroundPayload),
       });
       return waitForOpenAiResponse(started, label, progress);
@@ -1046,6 +1264,7 @@ async function openAiResponse(payload, options = {}) {
   try {
     return await apiJson("/api/openai/responses", {
       method: "POST",
+      generationId: options.generationId || state.generationId,
       body: JSON.stringify(payload),
     });
   } catch (error) {
@@ -1738,9 +1957,10 @@ async function startVoiceCapture() {
   els.stopVoiceButton.disabled = false;
 
   try {
-    const grant = await apiJson("/api/deepgram/token", { method: "POST", body: "{}" });
-    if (!grant.access_token) throw new Error("Voice input is temporarily unavailable.");
-    const url = new URL("wss://api.deepgram.com/v1/listen");
+    const accessToken = await getAccessToken();
+    const apiBase = String(serverConfig.apiBaseUrl || window.location.origin).replace(/\/$/, "");
+    const url = new URL(`${apiBase}/api/deepgram/listen`);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     url.searchParams.set("model", "nova-3");
     url.searchParams.set("smart_format", "true");
     url.searchParams.set("interim_results", "true");
@@ -1748,7 +1968,7 @@ async function startVoiceCapture() {
     url.searchParams.set("utterance_end_ms", "1000");
     url.searchParams.set("vad_events", "true");
 
-    state.deepgramSocket = new WebSocket(url, ["bearer", grant.access_token]);
+    state.deepgramSocket = new WebSocket(url, ["makeable", accessToken]);
     state.deepgramSocket.onopen = async () => {
       state.voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
@@ -1993,6 +2213,7 @@ async function verifyBehavior() {
 
   els.verifyBehaviorButton.disabled = true;
   els.verifyBehaviorButton.textContent = "Checking...";
+  state.generationId = crypto.randomUUID();
   try {
     const payload = {
       model: settings.openaiReasoningModel,
@@ -2039,6 +2260,7 @@ async function verifyBehavior() {
         );
       },
     });
+    await refreshAccount();
     const result = JSON.parse(extractOutputText(data));
     const tone = result.status === "pass" ? "ok" : result.status === "fail" ? "danger" : "warn";
     setStatus(
@@ -2314,10 +2536,15 @@ async function publishToGitHub() {
 async function apiJson(path, options = {}) {
   const base = String(serverConfig.apiBaseUrl || "").replace(/\/$/, "");
   const requestUrl = base && path !== "/api/config" ? `${base}${path}` : path;
+  const requiresAuth = /^\/api\/(account|openai|firmware|github)(\/|$)/.test(path);
+  const accessToken = requiresAuth ? await getAccessToken() : await getAccessToken({ interactive: false });
+  const { generationId, ...fetchOptions } = options;
   const response = await fetch(requestUrl, {
-    ...options,
+    ...fetchOptions,
     headers: {
       "Content-Type": "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      ...(generationId ? { "X-Makeable-Generation-Id": generationId } : {}),
       ...(options.headers || {}),
     },
   });

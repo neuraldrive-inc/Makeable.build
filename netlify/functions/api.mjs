@@ -74,6 +74,9 @@ function getEnv() {
     "GITHUB_TOKEN",
     "GITHUB_OWNER",
     "MAKEABLE_API_BASE_URL",
+    "COGNITO_DOMAIN",
+    "COGNITO_CLIENT_ID",
+    "COGNITO_REDIRECT_URI",
   ];
   return Object.fromEntries(keys.map((key) => [key, envValue(key)]));
 }
@@ -91,6 +94,11 @@ function publicConfig(env) {
     openaiReasoningEffort: env.OPENAI_REASONING_EFFORT || "high",
     hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
     hasGithubToken: Boolean(env.GITHUB_TOKEN),
+    hasVoice: Boolean(env.MAKEABLE_API_BASE_URL),
+    hasAccounts: Boolean(env.COGNITO_DOMAIN && env.COGNITO_CLIENT_ID),
+    cognitoDomain: env.COGNITO_DOMAIN || "",
+    cognitoClientId: env.COGNITO_CLIENT_ID || "",
+    cognitoRedirectUri: env.COGNITO_REDIRECT_URI || "",
     hasEsp32Compiler: false,
     hostedMode: true,
     firmwareCompileSupported: Boolean(env.MAKEABLE_API_BASE_URL),

@@ -8,10 +8,24 @@ Parameters:
     Type: String
   InfrastructureRoleArn:
     Type: String
+  TaskRoleArn:
+    Type: String
   OpenAISecretArn:
     Type: String
   DeepgramSecretArn:
     Type: String
+  CognitoUserPoolId:
+    Type: String
+  CognitoClientId:
+    Type: String
+  CognitoDomain:
+    Type: String
+  CreditAccountsTable:
+    Type: String
+    Default: MakeableCreditAccounts
+  CreditLedgerTable:
+    Type: String
+    Default: MakeableCreditLedger
 
 Resources:
   CompilerCluster:
@@ -33,6 +47,7 @@ Resources:
       Cluster: !GetAtt CompilerCluster.Arn
       ExecutionRoleArn: !Ref ExecutionRoleArn
       InfrastructureRoleArn: !Ref InfrastructureRoleArn
+      TaskRoleArn: !Ref TaskRoleArn
       Cpu: "1024"
       Memory: "2048"
       HealthCheckPath: /api/health
@@ -61,6 +76,22 @@ Resources:
             Value: gpt-5.6-sol
           - Name: OPENAI_REASONING_EFFORT
             Value: high
+          - Name: AWS_REGION
+            Value: !Ref AWS::Region
+          - Name: COGNITO_USER_POOL_ID
+            Value: !Ref CognitoUserPoolId
+          - Name: COGNITO_CLIENT_ID
+            Value: !Ref CognitoClientId
+          - Name: COGNITO_DOMAIN
+            Value: !Ref CognitoDomain
+          - Name: COGNITO_REDIRECT_URI
+            Value: https://makeable.build/
+          - Name: CREDIT_ACCOUNTS_TABLE
+            Value: !Ref CreditAccountsTable
+          - Name: CREDIT_LEDGER_TABLE
+            Value: !Ref CreditLedgerTable
+          - Name: INITIAL_FREE_CREDITS
+            Value: "10"
         Secrets:
           - Name: OPENAI_API_KEY
             ValueFrom: !Ref OpenAISecretArn

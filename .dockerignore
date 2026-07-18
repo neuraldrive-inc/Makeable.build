@@ -1,9 +1,9 @@
 .git
-.env*
+.github
 .makeable
 .netlify
 node_modules
-docs
+.env
+.env.*
+npm-debug.log*
 tests
-*.log
-.DS_Store

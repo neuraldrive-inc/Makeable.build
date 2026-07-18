@@ -263,18 +263,56 @@ a {
 
 .rail-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 8px;
 }
 
 .rail-settings,
-.rail-home {
+.rail-home,
+.rail-account {
   padding: 7px 5px;
   border-bottom: 2px solid var(--ink);
   background: transparent;
   color: var(--ink);
   font-size: 0.84rem;
   font-weight: 700;
+}
+
+.account-panel {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px 8px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid rgba(17, 16, 15, 0.15);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.account-name {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: rgba(17, 16, 15, 0.75);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.credit-badge {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #dff5eb;
+  color: #187356;
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.rail-account {
+  padding-inline: 4px;
+  border-bottom-color: var(--pink);
+  color: var(--pink);
 }
 
 .rail-squiggle {

@@ -9,5 +9,10 @@
     "test": "node --test tests/*.test.mjs",
     "test:compiler": "MAKEABLE_TEST_ARDUINO_CLI=$PWD/.makeable/toolchain/bin/arduino-cli node --test tests/compiler.integration.test.mjs",
     "toolchain:install": "bash scripts/install-arduino-toolchain.sh"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.1090.0",
+    "jose": "6.2.3",
+    "ws": "8.21.1"
   }
 }

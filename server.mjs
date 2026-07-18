@@ -6,6 +6,14 @@ import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  QueryCommand,
+  TransactWriteItemsCommand,
+} from "@aws-sdk/client-dynamodb";
+import { createRemoteJWKSet, jwtVerify } from "jose";
+import { WebSocket, WebSocketServer } from "ws";
 import { getBoardProfile, supportedBoardSummary } from "./lib/board-profiles.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -17,7 +25,19 @@ const MAX_SKETCH_BYTES = 96 * 1024;
 const MAX_CONCURRENT_COMPILES = Math.max(1, Number(initialEnv.MAX_CONCURRENT_COMPILES || 2));
 const ARDUINO_COMPILE_JOBS = Math.max(1, Number(initialEnv.ARDUINO_COMPILE_JOBS || 1));
 const COMPILE_TIMEOUT_MS = Math.max(30000, Number(initialEnv.COMPILE_TIMEOUT_MS || 240000));
+const MAX_VOICE_SESSION_MS = Math.max(30000, Number(initialEnv.MAX_VOICE_SESSION_MS || 120000));
+const INITIAL_FREE_CREDITS = Math.max(0, Number(initialEnv.INITIAL_FREE_CREDITS || 10));
+const dynamodb = new DynamoDBClient({ region: initialEnv.AWS_REGION || "us-east-1" });
+const jwksByIssuer = new Map();
 let activeCompiles = 0;
+const deepgramWebSocketServer = new WebSocketServer({
+  noServer: true,
+  maxPayload: 2 * 1024 * 1024,
+  perMessageDeflate: false,
+  handleProtocols(protocols) {
+    return protocols.has("makeable") ? "makeable" : false;
+  },
+});
 
 const mimeTypes = new Map([
   [".html", "text/html; charset=utf-8"],
@@ -49,20 +69,34 @@ const server = createServer(async (req, res) => {
       return sendJson(res, publicConfig(env));
     }
 
+    if (url.pathname === "/api/account" && req.method === "GET") {
+      const user = await requireUser(req, res, env);
+      if (!user) return;
+      return sendJson(res, await accountSummary(user, env));
+    }
+
     if (url.pathname === "/api/deepgram/token" && req.method === "POST") {
+      const user = await requireUser(req, res, env);
+      if (!user) return;
       return createDeepgramToken(res, env);
     }
 
     if (url.pathname === "/api/openai/responses" && req.method === "POST") {
+      const user = await requireUser(req, res, env);
+      if (!user || !(await authorizeGeneration(req, res, user, env))) return;
       return proxyOpenAI(req, res, env);
     }
 
     if (url.pathname === "/api/openai/background" && req.method === "POST") {
+      const user = await requireUser(req, res, env);
+      if (!user || !(await authorizeGeneration(req, res, user, env))) return;
       return createOpenAIBackgroundResponse(req, res, env);
     }
 
     const responseMatch = url.pathname.match(/^\/api\/openai\/responses\/([^/]+)$/);
     if (responseMatch && req.method === "GET") {
+      const user = await requireUser(req, res, env);
+      if (!user) return;
       return retrieveOpenAIResponse(responseMatch[1], res, env);
     }
 
@@ -71,14 +105,20 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === "/api/firmware/compile" && req.method === "POST") {
+      const user = await requireUser(req, res, env);
+      if (!user) return;
       return compileFirmware(req, res, env);
     }
 
     if (url.pathname === "/api/github/repos" && req.method === "POST") {
+      const user = await requireUser(req, res, env);
+      if (!user) return;
       return createGitHubRepo(req, res, env);
     }
 
     if (url.pathname === "/api/github/upload-file" && req.method === "POST") {
+      const user = await requireUser(req, res, env);
+      if (!user) return;
       return uploadGitHubFile(req, res, env);
     }
 
@@ -87,7 +127,9 @@ const server = createServer(async (req, res) => {
         ok: true,
         hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
         hasGithubToken: Boolean(env.GITHUB_TOKEN),
+        hasVoice: Boolean(env.DEEPGRAM_API_KEY),
         hasEsp32Compiler: Boolean(findArduinoCli(env)),
+        hasAccounts: hasAccountConfig(env),
         hostedMode: true,
         firmwareCompileSupported: Boolean(findArduinoCli(env)),
         supportedBoards: supportedBoardSummary(),
@@ -101,9 +143,114 @@ const server = createServer(async (req, res) => {
   }
 });
 
+server.on("upgrade", handleDeepgramUpgrade);
+
 server.listen(port, () => {
   console.log(`Makeable running at http://localhost:${port}`);
 });
+
+function handleDeepgramUpgrade(req, socket, head) {
+  try {
+    const env = getEnv();
+    const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    if (url.pathname !== "/api/deepgram/listen") return rejectUpgrade(socket, 404, "Not found");
+    if (!env.DEEPGRAM_API_KEY) return rejectUpgrade(socket, 503, "Voice input is not configured");
+    if (!isAllowedBrowserOrigin(String(req.headers.origin || ""), env)) {
+      return rejectUpgrade(socket, 403, "Origin not allowed");
+    }
+    verifyWebSocketUser(req, env)
+      .then((user) => {
+        if (!user) return rejectUpgrade(socket, 401, "Sign in required");
+        deepgramWebSocketServer.handleUpgrade(req, socket, head, (client) => {
+          proxyDeepgramWebSocket(client, url, env);
+        });
+      })
+      .catch((error) => {
+        console.error("Voice authentication failed", error.message);
+        rejectUpgrade(socket, 401, "Sign in required");
+      });
+  } catch (error) {
+    console.error("Deepgram WebSocket upgrade failed", error);
+    rejectUpgrade(socket, 500, "Voice connection failed");
+  }
+}
+
+function proxyDeepgramWebSocket(client, requestUrl, env) {
+  const upstreamUrl = new URL("wss://api.deepgram.com/v1/listen");
+  const allowedParams = new Set([
+    "model",
+    "language",
+    "smart_format",
+    "interim_results",
+    "endpointing",
+    "utterance_end_ms",
+    "vad_events",
+    "encoding",
+    "sample_rate",
+    "channels",
+  ]);
+  for (const [key, value] of requestUrl.searchParams) {
+    if (allowedParams.has(key) && value.length <= 80) upstreamUrl.searchParams.set(key, value);
+  }
+
+  const upstream = new WebSocket(upstreamUrl, {
+    headers: { Authorization: `Token ${env.DEEPGRAM_API_KEY}` },
+    perMessageDeflate: false,
+  });
+  const pending = [];
+  const sessionTimer = setTimeout(() => {
+    closeWebSocket(client, 1000, "Voice session complete");
+    closeWebSocket(upstream, 1000, "Voice session complete");
+  }, MAX_VOICE_SESSION_MS);
+
+  client.on("message", (data, isBinary) => {
+    if (upstream.readyState === WebSocket.OPEN) upstream.send(data, { binary: isBinary });
+    else if (upstream.readyState === WebSocket.CONNECTING && pending.length < 20) {
+      pending.push({ data, isBinary });
+    }
+  });
+  upstream.on("open", () => {
+    for (const item of pending.splice(0)) upstream.send(item.data, { binary: item.isBinary });
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({ type: "MakeableVoiceReady" }));
+    }
+  });
+  upstream.on("message", (data, isBinary) => {
+    if (client.readyState === WebSocket.OPEN) client.send(data, { binary: isBinary });
+  });
+  upstream.on("unexpected-response", (_request, response) => {
+    console.error(`Deepgram rejected the voice connection with HTTP ${response.statusCode}`);
+    closeWebSocket(client, 1011, "Voice service rejected the connection");
+  });
+  upstream.on("error", (error) => {
+    console.error("Deepgram WebSocket error", error.message);
+    closeWebSocket(client, 1011, "Voice service unavailable");
+  });
+  client.on("error", () => closeWebSocket(upstream, 1000, "Browser connection ended"));
+  client.on("close", () => {
+    clearTimeout(sessionTimer);
+    closeWebSocket(upstream, 1000, "Browser connection ended");
+  });
+  upstream.on("close", (code, reason) => {
+    clearTimeout(sessionTimer);
+    closeWebSocket(client, code === 1000 ? 1000 : 1011, reason.toString().slice(0, 100));
+  });
+}
+
+function rejectUpgrade(socket, status, message) {
+  if (socket.destroyed) return;
+  const body = String(message || "Connection rejected");
+  socket.write(
+    `HTTP/1.1 ${status} ${body}\r\nConnection: close\r\nContent-Type: text/plain\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`,
+  );
+  socket.destroy();
+}
+
+function closeWebSocket(socket, code, reason) {
+  if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+    socket.close(code, reason);
+  }
+}
 
 function getEnv() {
   return { ...readEnv(path.join(__dirname, ".env")), ...process.env };
@@ -141,6 +288,10 @@ function publicConfig(env) {
     hasGithubToken: Boolean(env.GITHUB_TOKEN),
     hasEsp32Compiler: Boolean(findArduinoCli(env)),
     hasVoice: Boolean(env.DEEPGRAM_API_KEY),
+    hasAccounts: hasAccountConfig(env),
+    cognitoDomain: env.COGNITO_DOMAIN || "",
+    cognitoClientId: env.COGNITO_CLIENT_ID || "",
+    cognitoRedirectUri: env.COGNITO_REDIRECT_URI || "",
     hostedMode: true,
     firmwareCompileSupported: Boolean(findArduinoCli(env)),
     supportedBoards: supportedBoardSummary(),
@@ -150,18 +301,218 @@ function publicConfig(env) {
 
 function applyCors(req, res, env) {
   const origin = String(req.headers.origin || "");
+  if (isAllowedBrowserOrigin(origin, env)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Makeable-Generation-Id");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Cache-Control", "no-store");
+}
+
+function isAllowedBrowserOrigin(origin, env) {
   const configured = String(env.ALLOWED_ORIGINS || "https://makeable.build,https://www.makeable.build")
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
   const localOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
-  if (configured.includes(origin) || localOrigin) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Vary", "Origin");
+  return configured.includes(origin) || localOrigin;
+}
+
+function hasAccountConfig(env) {
+  return Boolean(
+    env.COGNITO_USER_POOL_ID &&
+      env.COGNITO_CLIENT_ID &&
+      env.CREDIT_ACCOUNTS_TABLE &&
+      env.CREDIT_LEDGER_TABLE,
+  );
+}
+
+function cognitoIssuer(env) {
+  const region = env.AWS_REGION || "us-east-1";
+  return `https://cognito-idp.${region}.amazonaws.com/${env.COGNITO_USER_POOL_ID}`;
+}
+
+async function verifyAccessToken(token, env) {
+  if (!hasAccountConfig(env)) throw new Error("Account service is not configured");
+  const issuer = cognitoIssuer(env);
+  let jwks = jwksByIssuer.get(issuer);
+  if (!jwks) {
+    jwks = createRemoteJWKSet(new URL(`${issuer}/.well-known/jwks.json`));
+    jwksByIssuer.set(issuer, jwks);
   }
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Cache-Control", "no-store");
+  const { payload } = await jwtVerify(token, jwks, { issuer });
+  if (payload.token_use !== "access" || payload.client_id !== env.COGNITO_CLIENT_ID) {
+    throw new Error("Invalid access token");
+  }
+  if (!payload.sub) throw new Error("Access token has no subject");
+  return {
+    userId: String(payload.sub),
+    username: String(payload.username || payload["cognito:username"] || "Maker"),
+  };
+}
+
+async function requireUser(req, res, env) {
+  const match = String(req.headers.authorization || "").match(/^Bearer\s+(.+)$/i);
+  if (!match) {
+    sendJson(res, { error: "Sign in to continue." }, 401);
+    return null;
+  }
+  try {
+    const user = await verifyAccessToken(match[1], env);
+    await ensureCreditAccount(user, env);
+    return user;
+  } catch (error) {
+    console.error("Authentication failed", error.message);
+    sendJson(res, { error: "Your sign-in expired. Please sign in again." }, 401);
+    return null;
+  }
+}
+
+async function verifyWebSocketUser(req, env) {
+  const protocols = String(req.headers["sec-websocket-protocol"] || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const token = protocols.find((value) => value !== "makeable");
+  if (!token) return null;
+  const user = await verifyAccessToken(token, env);
+  await ensureCreditAccount(user, env);
+  return user;
+}
+
+async function ensureCreditAccount(user, env) {
+  const now = new Date().toISOString();
+  try {
+    await dynamodb.send(
+      new TransactWriteItemsCommand({
+        TransactItems: [
+          {
+            Put: {
+              TableName: env.CREDIT_ACCOUNTS_TABLE,
+              Item: {
+                userId: { S: user.userId },
+                username: { S: user.username },
+                credits: { N: String(INITIAL_FREE_CREDITS) },
+                createdAt: { S: now },
+                updatedAt: { S: now },
+              },
+              ConditionExpression: "attribute_not_exists(userId)",
+            },
+          },
+          {
+            Put: {
+              TableName: env.CREDIT_LEDGER_TABLE,
+              Item: {
+                userId: { S: user.userId },
+                entryId: { S: "welcome" },
+                delta: { N: String(INITIAL_FREE_CREDITS) },
+                kind: { S: "welcome" },
+                createdAt: { S: now },
+              },
+              ConditionExpression: "attribute_not_exists(userId) AND attribute_not_exists(entryId)",
+            },
+          },
+        ],
+      }),
+    );
+  } catch (error) {
+    if (error.name !== "TransactionCanceledException") throw error;
+  }
+}
+
+async function getCreditAccount(userId, env) {
+  const result = await dynamodb.send(
+    new GetItemCommand({
+      TableName: env.CREDIT_ACCOUNTS_TABLE,
+      Key: { userId: { S: userId } },
+      ConsistentRead: true,
+    }),
+  );
+  return result.Item || null;
+}
+
+async function accountSummary(user, env) {
+  const [account, ledger] = await Promise.all([
+    getCreditAccount(user.userId, env),
+    dynamodb.send(
+      new QueryCommand({
+        TableName: env.CREDIT_LEDGER_TABLE,
+        KeyConditionExpression: "userId = :userId",
+        ExpressionAttributeValues: { ":userId": { S: user.userId } },
+        ScanIndexForward: false,
+        Limit: 20,
+      }),
+    ),
+  ]);
+  return {
+    user: { id: user.userId, username: user.username },
+    credits: Number(account?.credits?.N || 0),
+    freeCreditsGranted: INITIAL_FREE_CREDITS,
+    usage: (ledger.Items || []).map((item) => ({
+      id: item.entryId?.S || "",
+      delta: Number(item.delta?.N || 0),
+      kind: item.kind?.S || "generation",
+      createdAt: item.createdAt?.S || "",
+    })),
+  };
+}
+
+async function authorizeGeneration(req, res, user, env) {
+  const generationId = String(req.headers["x-makeable-generation-id"] || "").trim();
+  if (!/^[a-zA-Z0-9_-]{8,100}$/.test(generationId)) {
+    sendJson(res, { error: "A valid generation id is required." }, 400);
+    return false;
+  }
+  const entryId = `generation#${generationId}`;
+  const now = new Date().toISOString();
+  try {
+    await dynamodb.send(
+      new TransactWriteItemsCommand({
+        TransactItems: [
+          {
+            Update: {
+              TableName: env.CREDIT_ACCOUNTS_TABLE,
+              Key: { userId: { S: user.userId } },
+              UpdateExpression: "SET updatedAt = :now ADD credits :minusOne",
+              ConditionExpression: "attribute_exists(userId) AND credits >= :one",
+              ExpressionAttributeValues: {
+                ":now": { S: now },
+                ":minusOne": { N: "-1" },
+                ":one": { N: "1" },
+              },
+            },
+          },
+          {
+            Put: {
+              TableName: env.CREDIT_LEDGER_TABLE,
+              Item: {
+                userId: { S: user.userId },
+                entryId: { S: entryId },
+                delta: { N: "-1" },
+                kind: { S: "generation" },
+                createdAt: { S: now },
+              },
+              ConditionExpression: "attribute_not_exists(userId) AND attribute_not_exists(entryId)",
+            },
+          },
+        ],
+      }),
+    );
+    return true;
+  } catch (error) {
+    if (error.name !== "TransactionCanceledException") throw error;
+    const prior = await dynamodb.send(
+      new GetItemCommand({
+        TableName: env.CREDIT_LEDGER_TABLE,
+        Key: { userId: { S: user.userId }, entryId: { S: entryId } },
+        ConsistentRead: true,
+      }),
+    );
+    if (prior.Item) return true;
+    sendJson(res, { error: "You have no generation credits left." }, 402);
+    return false;
+  }
 }
 
 async function createDeepgramToken(res, env) {

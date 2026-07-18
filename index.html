@@ -33,11 +33,16 @@
           <span class="step-number">4</span><span class="step-note step-note--mint"><img src="images/makeable/icon-bolt.svg" alt="" /><strong>Test</strong></span>
         </button>
         <button class="timeline-step" data-workflow-stage="4" type="button">
-          <span class="step-number">5</span><span class="step-note step-note--yellow"><img src="images/makeable/icon-globe.svg" alt="" /><strong>Publish</strong></span>
+          <span class="step-number">5</span><span class="step-note step-note--yellow"><img src="images/makeable/icon-globe.svg" alt="" /><strong>Finish</strong></span>
         </button>
       </nav>
 
       <div class="rail-actions">
+        <div class="account-panel">
+          <span class="account-name" id="accountName">10 free generations</span>
+          <span class="credit-badge" id="creditBadge" hidden>10 credits</span>
+          <button class="rail-account" id="accountButton" type="button">Sign in</button>
+        </div>
         <button class="rail-home" id="homeButton" type="button" aria-label="Start over">Start over</button>
         <svg class="rail-squiggle" viewBox="0 0 100 42" aria-hidden="true"><path d="M5 26c9-18 13-17 11 3 12-22 17-20 15 3 14-18 18-16 16 2 12-17 17-17 18-1 7-12 13-13 22-4" /></svg>
       </div>
@@ -183,15 +188,12 @@
       </section>
 
       <section class="workflow-stage" id="document" data-stage-index="4" hidden>
-        <header class="stage-heading stage-heading--row"><div><h1>You built it. Now<br /><span>share it.</span></h1><p>Makeable packages your guide, code, parts list, and test results.</p></div><svg class="sparkles" viewBox="0 0 110 82" aria-hidden="true"><path d="m38 4 8 22 19 9-19 8-8 24-8-24-19-8 19-9 8-22ZM83 39l4 12 11 5-11 5-4 13-5-13-10-5 10-5 5-12Z" /></svg></header>
+        <header class="stage-heading stage-heading--row"><div><h1>You built it.<br /><span>Nice work.</span></h1><p>Makeable keeps the guide, parts list, and test results together while you build.</p></div><svg class="sparkles" viewBox="0 0 110 82" aria-hidden="true"><path d="m38 4 8 22 19 9-19 8-8 24-8-24-19-8 19-9 8-22ZM83 39l4 12 11 5-11 5-4 13-5-13-10-5 10-5 5-12Z" /></svg></header>
         <div class="doc-grid paper-sheet tape-blue">
           <div class="doc-actions">
-            <label>Repository name<input id="repoNameInput" type="text" value="self-watering-plant" /></label>
-            <label class="checkbox-row"><input id="privateRepoInput" type="checkbox" /> Keep it private</label>
             <div class="package-list"><span>✓ project notes</span><span>✓ build guide</span><span>✓ parts list</span><span>✓ test results</span></div>
             <button class="paper-button" id="generateReadmeButton" type="button">Refresh project notes</button>
-            <button class="torn-button torn-button--ink" id="publishGithubButton" type="button">Connect GitHub &amp; publish</button>
-            <div class="status-strip" id="githubStatus">Nothing shared yet.</div>
+            <div class="status-strip" id="githubStatus">Your notes stay here with your build session.</div>
           </div>
           <div class="readme-card"><div class="project-preview"><img src="images/makeable/self-watering-kit.png" alt="Illustrated self-watering plant electronics build" /><strong>My Makeable project</strong><span>Tested &amp; working</span></div><pre class="readme-preview" id="readmePreview">Your project notes will appear here.</pre></div>
         </div>

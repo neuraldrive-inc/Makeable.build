@@ -64,6 +64,8 @@ ENV ARDUINO_COMPILE_JOBS=1 \
     COMPILE_TIMEOUT_MS=300000
 
 WORKDIR /app
+COPY --chown=node:node package.json package-lock.json ./
+RUN npm ci --omit=dev
 COPY --chown=node:node . .
 RUN mkdir -p /app/.makeable/builds && chown -R node:node /app/.makeable
 

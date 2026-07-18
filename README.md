@@ -27,7 +27,7 @@ It can:
 - 💻 Generate ESP32 firmware for your idea
 - 🚀 Flash the code into the board without touching Arduino IDE
 - 👀 Debug the real build using terminal logs and webcam evidence
-- 📚 Package the final project into GitHub documentation
+- 📚 Keep the final project guide and test notes together
 
 ---
 
@@ -95,9 +95,9 @@ After flashing, Makeable can check terminal logs and webcam footage to confirm t
 
 ![Closed loop debugging with terminal logs and webcam](images/closed%20loop%20debugging%20system%20with%20terminal%20logs%20and%20webcam.jpg)
 
-### 8. One-Click GitHub Documentation 📚
+### 8. Project Notes 📚
 
-When the build works, Makeable packages the project into GitHub-friendly documentation so it is easy to save, share, and show off.
+When the build works, Makeable packages the project guide, parts, and test results into readable notes within the build session.
 
 ![One button upload project to GitHub](images/one%20button%20click%20upload%20project%20to%20github.jpg)
 
@@ -113,7 +113,7 @@ When the build works, Makeable packages the project into GitHub-friendly documen
 | Copy random Arduino code | Generate firmware for your exact idea |
 | Manually compile and flash | Load code directly into the ESP32 |
 | Debug alone with serial logs | AI checks logs + webcam evidence |
-| Write docs after everything | One-click GitHub documentation |
+| Write docs after everything | Automatic in-session project notes |
 
 ---
 
@@ -139,9 +139,9 @@ The Render container owns Arduino CLI, the ESP32 core, and common libraries. The
 
 The app can inspect serial logs and webcam evidence, then explain whether the physical build is behaving correctly.
 
-### 📚 GitHub Export
+### 📚 Build Notes
 
-The final project can be packaged into a shareable README and uploaded to GitHub.
+The final project is packaged into a readable guide in the final stage.
 
 ---
 
@@ -149,12 +149,12 @@ The final project can be packaged into a shareable README and uploaded to GitHub
 
 - **Frontend:** HTML, CSS, JavaScript
 - **AI planning:** OpenAI Responses API
-- **Voice input:** Deepgram transcription with short-lived server-issued browser tokens
-- **Firmware compile:** pinned Arduino CLI + ESP32 core in a Render Docker container
+- **Voice input:** Deepgram transcription through an authenticated server-side WebSocket proxy
+- **Accounts:** Amazon Cognito PKCE sign-in + DynamoDB credit ledger
+- **Firmware compile:** pinned Arduino CLI + ESP32 core in an AWS ECS Docker container
 - **Board flashing:** Web Serial + ESP flashing flow
 - **Debugging:** Serial logs + webcam evidence
-- **Publishing:** GitHub API
-- **Hosting:** Netlify frontend + Render build/API service
+- **Hosting:** Netlify frontend + CloudFront + AWS ECS Fargate Express Mode API
 
 ---
 
@@ -218,7 +218,7 @@ Makeable is not just a code generator.
 It is a hardware companion that watches the whole loop:
 
 ```text
-parts photo → AI guide → wiring steps → firmware → flashing → real-world check → GitHub docs
+parts photo → AI guide → wiring steps → firmware → flashing → real-world check → build notes
 ```
 
 The dream is simple:

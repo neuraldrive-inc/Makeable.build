@@ -5,16 +5,16 @@
 
 **Product scope decision:** Makeable supports the ESP32 family only: ESP32, ESP32-S2, ESP32-S3, ESP32-C3, and ESP32-C6. Arduino Uno, Nano, Mega, AVR, RP2040, STM32, and other board families are explicitly out of scope. Arduino CLI remains an invisible build engine for the ESP32 Arduino core; it is not an end-user dependency.
 
-> **Implementation update (July 17, 2026):** Hosted ESP32 compilation is now implemented as a pinned, cache-warmed Docker service on Amazon ECS Fargate Express Mode. The browser UI no longer exposes firmware source, downloads, provider settings, FQBN fields, or a local-app fallback. The service allowlists ESP32, S2, S3, C3, and C6 profiles; caps bodies, source size, time, and concurrency; deletes build workspaces; and returns merged flash images. Deepgram now uses temporary tokens and OpenAI model choice is server-owned. Physical Web Serial flashing still requires the browser's one-time native USB permission and must be verified on real target boards before a production claim.
+> **Implementation update (July 17, 2026):** Hosted ESP32 compilation is implemented as a pinned, cache-warmed Docker service on Amazon ECS Fargate Express Mode. The browser UI no longer exposes firmware source, downloads, provider settings, FQBN fields, or a local-app fallback. Amazon Cognito provides code-flow sign-in with PKCE; DynamoDB stores an encrypted, point-in-time-recoverable account balance and immutable usage entries. Every account gets ten welcome credits. A generation ID makes the two-call plan-plus-firmware workflow cost exactly one credit and makes retries idempotent. Deepgram is reached through an authenticated server-side WebSocket proxy, and OpenAI model choice is server-owned. Physical Web Serial flashing still requires the browser's one-time native USB permission and must be verified on real target boards before a production claim.
 
-> **Deployment validation:** The production compiler runs as one always-warm 1-vCPU/2-GB Fargate task with 20 GB of ephemeral storage, private provider secrets, a CloudFront-only origin rule, and caching disabled. AWS's generated ECS hostname failed to publish an A/alias record even though the service, certificate, load balancer, target groups, and task were healthy, so the production path uses `d3maxnfgtzk18u.cloudfront.net`. The first direct build took 20.9 seconds, a warm repeat took 11.6 seconds, the secured CloudFront build took 8.2 seconds, and the complete `makeable.build` path took 9.7 seconds. Each returned one 4,194,304-byte merged image at address `0x0`; an arbitrary non-ESP32 target returned HTTP 400. The public site is now connected to this endpoint. Account authentication, rate limits, and the ten-credit ledger are still not implemented, so the AI generation endpoints must not be treated as launch-ready for untrusted traffic.
+> **Deployment validation:** The production compiler runs as one always-warm 1-vCPU/2-GB Fargate task with 20 GB of ephemeral storage, private provider secrets, a CloudFront-only origin rule, and caching disabled. AWS's generated ECS hostname failed to publish an A/alias record even though the service, certificate, load balancer, target groups, and task were healthy, so the production path uses `d3maxnfgtzk18u.cloudfront.net`. The first direct build took 20.9 seconds, a warm repeat took 11.6 seconds, the secured CloudFront build took 8.2 seconds, and the complete `makeable.build` path took 9.7 seconds. Each returned one 4,194,304-byte merged image at address `0x0`; an arbitrary non-ESP32 target returned HTTP 400. The public site is connected to this endpoint. The signed-in account and ten-credit production flow is covered by the release validation described below.
 
 ## Executive recommendation
 
-Use the deployed **Amazon ECS Fargate Express service** for the ESP32 compiler and hosted provider API, keep all provider secrets on the server, and add **Clerk** plus a managed PostgreSQL ledger before opening generation access broadly.
+Use the deployed **Amazon ECS Fargate Express service** for the ESP32 compiler and hosted provider API, keep all provider secrets on the server, and enforce **Amazon Cognito** identity plus an atomic **DynamoDB** credit ledger before every paid generation.
 
 - The current always-warm 1-vCPU/2-GB Fargate task is roughly **$35/month** in `us-east-1`, before the shared load balancer, CloudFront, logs, and provider usage; AWS credits currently cover this deployment.
-- Netlify hosts the frontend and server-side proxy; CloudFront fronts the private ECS compiler origin. A future `/v1` API should enforce identity and credits before forwarding provider work.
+- Netlify hosts the frontend configuration shim; CloudFront fronts the private ECS compiler/API origin. The API verifies Cognito access tokens before provider, voice, compile, and account operations.
 - The database is the authority for balances. Grant exactly ten welcome credits once, through an immutable ledger.
 - A “generation” should mean one complete Makeable build package: parts plan + wiring guide + firmware. It costs one product credit even if Makeable makes two OpenAI calls internally.
 - Do not expose a generic OpenAI proxy. The server, not the browser, must choose the model, prompt, reasoning effort, tools, output schema, and output limits.
@@ -22,6 +22,8 @@ Use the deployed **Amazon ECS Fargate Express service** for the ESP32 compiler a
 - Run hosted ESP32 compilation from the pinned Docker image in this repository. At scale, split the compiler into a private worker without provider or database secrets.
 
 AWS is now the selected runtime because the account has credits and the ESP32 image needs more ephemeral storage than App Runner provides. ECS Express Mode supplies managed Fargate compute, TLS, load balancing, health checks, and deployment rollback. If the database is also moved to AWS, use a managed RDS/Aurora PostgreSQL option with backups and point-in-time recovery; do not run the paid credit ledger in an unmanaged database container.
+
+> The detailed comparison and limitation sections below preserve the original pre-deployment audit. Where they mention Clerk, PostgreSQL, direct Deepgram keys, shared GitHub publishing, or missing authentication, the production implementation described above supersedes them: it uses Cognito, DynamoDB, an authenticated voice proxy, and no public GitHub publishing control.
 
 ## What exists now
 
@@ -38,7 +40,7 @@ The frontend makes three kinds of OpenAI operation:
 
 Therefore, “ten generations” must not be confused with “ten OpenAI requests.” One product generation currently creates two paid OpenAI responses, and behavior checks add more calls.
 
-## Current backend limitations
+## Original backend limitations (pre-deployment audit)
 
 ### 1. There is no user boundary
 
