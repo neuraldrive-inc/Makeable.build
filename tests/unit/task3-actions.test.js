@@ -171,6 +171,79 @@ test("hardware requests derive diagnostics identity only from the outer OpenAI r
   );
 });
 
+test("confirmed inventory planning maximizes useful parts without inventing an actuator", async () => {
+  let requestPayload;
+  await actions.requestHardwarePlan({
+    idea: {
+      text: "GPIO-only demonstrator",
+      selectedAlternative: {
+        title: "GPIO-only demonstrator",
+        summary: "Demonstrate a GPIO response with the available electronics.",
+      },
+      history: [{ text: "Build something useful with these parts." }],
+    },
+    confirmedParts: [
+      { id: "esp32", name: "ESP32 DevKit", type: "controller", confirmed: true },
+      { id: "pir", name: "PIR motion sensor", type: "sensor", confirmed: true },
+      { id: "oled", name: "Small I2C OLED display", type: "display", confirmed: true },
+    ],
+    fetchImpl: async (_url, init) => {
+      requestPayload = JSON.parse(init.body);
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify({
+            id: "inventory_first_plan",
+            output_text: JSON.stringify({
+              projectTitle: "Motion display",
+              summary: "The PIR detects motion, the ESP32 evaluates it, and the OLED displays the result.",
+              parts: [],
+              feasibility: { status: "missing", reasons: [] },
+              missingParts: [],
+              alternatives: [],
+              wiringSteps: [],
+              firmwareSpec: {
+                board: "ESP32",
+                behavior: "Show motion status on the OLED.",
+                libraries: [],
+                pinAssignments: [],
+                serialProtocol: [],
+              },
+              firmware: {
+                language: "Arduino C++",
+                sketch: "",
+                notes: "",
+              },
+              diagnostics: {
+                warnings: [],
+                tests: [],
+                manualAction: "Move in front of the PIR.",
+                manualQuestion: "Did the OLED change?",
+                manualSuccessLabel: "Yes, the OLED changed",
+              },
+            }),
+          });
+        },
+      };
+    },
+  });
+
+  const serialized = JSON.stringify(requestPayload);
+  assert.match(serialized, /ESP32 DevKit/);
+  assert.match(serialized, /PIR motion sensor/);
+  assert.match(serialized, /Small I2C OLED display/);
+  assert.match(serialized, /maximize.*safely compatible.*confirmed parts/i);
+  assert.match(serialized, /sensor.*input.*display.*output/i);
+  assert.match(serialized, /do not require.*actuator.*switch/i);
+  assert.match(serialized, /OLED.*display diagnostic.*never.*actuator/i);
+  assert.match(serialized, /USB data cable.*setup.*not.*missing/i);
+  assert.match(serialized, /summary.*each confirmed part.*role/i);
+  assert.match(serialized, /Demonstrate a GPIO response with the available electronics/);
+  assert.match(serialized, /Build something useful with these parts/);
+  assert.match(serialized, /roles?.*stale.*reassign/i);
+  assert.match(serialized, /fallback.*not a constraint.*replace/i);
+});
+
 test("annotation frames align percentage coordinates to contained image content", () => {
   assert.equal(typeof actions.calculateContainedImageFrame, "function");
   assert.deepEqual(
@@ -269,9 +342,9 @@ test("legacy Optional-prefixed suggestions are non-blocking while unspecified pa
     actions
       .requiredMissingParts([
         {
-          id: "cable",
-          name: "USB data cable",
-          reason: "Loads the firmware.",
+          id: "sensor",
+          name: "Replacement sensor module",
+          reason: "Provides the required input.",
         },
         {
           id: "led",
@@ -280,7 +353,15 @@ test("legacy Optional-prefixed suggestions are non-blocking while unspecified pa
         },
       ])
       .map(({ id }) => id),
-    ["cable"],
+    ["sensor"],
+  );
+  assert.equal(
+    actions.isRequiredMissingPart({
+      name: "USB data cable compatible with the ESP32",
+      reason: "Used to upload the sketch.",
+      required: true,
+    }),
+    false,
   );
 });
 
@@ -432,12 +513,13 @@ test("part searches are targeted and alternatives only use the confirmed invento
     actions
       .inventoryCompatibleAlternatives(
         [
+          { id: "board-only", requiredPartIds: ["board"] },
           { id: "spinner", requiredPartIds: ["board", "motor"] },
           { id: "plant", requiredPartIds: ["board", "soil-sensor"] },
         ],
         inventory,
       )
       .map(({ id }) => id),
-    ["spinner"],
+    ["spinner", "board-only"],
   );
 });

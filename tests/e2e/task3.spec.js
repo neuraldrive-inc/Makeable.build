@@ -840,6 +840,8 @@ test("ready feasibility renders the uploaded photo and confirmed inventory", asy
       feasibility: {
         status: "ready",
         reasons: [],
+        summary:
+          "The Arduino runs the project logic and controls the connected output.",
         missingParts: [],
         alternatives: [],
       },
@@ -861,6 +863,11 @@ test("ready feasibility renders the uploaded photo and confirmed inventory", asy
     page.getByRole("heading", { level: 1, name: "Yep — you can build it!" }),
   ).toBeVisible();
   await expect(page.getByAltText("Your uploaded parts")).toBeVisible();
+  await expect(
+    page.getByText(
+      "The Arduino runs the project logic and controls the connected output.",
+    ),
+  ).toBeVisible();
   await expect(
     page
       .getByRole("list", { name: "Confirmed parts" })

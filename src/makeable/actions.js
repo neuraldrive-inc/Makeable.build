@@ -145,7 +145,7 @@ const DIAGNOSTIC_TEST_SCHEMA = Object.freeze({
     name: { type: "string" },
     kind: {
       type: "string",
-      enum: ["board", "sensor", "actuator", "power"],
+      enum: ["board", "sensor", "display", "actuator", "power"],
     },
     pulseMs: { type: "integer" },
     assemblyStep: { type: "integer" },
@@ -784,6 +784,14 @@ export function acquireMissingPart(project, partId) {
 }
 
 export function isRequiredMissingPart(part) {
+  const description = `${part?.name || ""} ${part?.reason || ""}`;
+  if (
+    /\b(?:usb(?:-c| micro-usb)?\s+(?:data|programming|upload)\s+cable|programming cable|computer|laptop)\b/i.test(
+      description,
+    )
+  ) {
+    return false;
+  }
   if (part?.required === false) return false;
   if (part?.required === true) return true;
   return !/^\s*optional\b/i.test(String(part?.name || ""));
@@ -904,9 +912,15 @@ export function createPartSearchUrl(part, confirmedParts = []) {
 
 export function inventoryCompatibleAlternatives(alternatives, confirmedParts) {
   const inventory = new Set(array(confirmedParts).map(({ id }) => slug(id)));
-  return array(alternatives).filter(({ requiredPartIds }) =>
-    textArray(requiredPartIds).every((id) => inventory.has(slug(id))),
-  );
+  return array(alternatives)
+    .filter(({ requiredPartIds }) =>
+      textArray(requiredPartIds).every((id) => inventory.has(slug(id))),
+    )
+    .sort(
+      (left, right) =>
+        textArray(right.requiredPartIds).length -
+        textArray(left.requiredPartIds).length,
+    );
 }
 
 export async function requestHardwarePlan({
@@ -918,15 +932,25 @@ export async function requestHardwarePlan({
   signal,
 }) {
   const confirmation = Array.isArray(confirmedParts);
+  const projectIntent = planningIdeaText(idea);
   const userContent = confirmation
     ? [
         {
           type: "input_text",
           text: [
-            `Project idea: ${idea}`,
+            `Project idea: ${projectIntent}`,
             "Regenerate the beginner-safe guide and firmware from this confirmed inventory.",
             "Treat this as the confirmed inventory; do not re-identify or add photographed parts.",
             JSON.stringify(confirmedParts),
+            "Inventory-first reasoning rules:",
+            "- Maximize the meaningful safe use of all safely compatible confirmed parts. Prefer a cohesive input → controller logic → output behavior over a minimal controller-only or bare-GPIO demonstration.",
+            "- Confirmed part names and physical types are authoritative. Their role labels may be stale from an earlier project or fallback, so reassign roles from the actual hardware capabilities.",
+            "- Treat sensors as inputs and displays as outputs. If a confirmed controller, sensor, and display can form a complete useful build, mark it ready and use all three.",
+            "- Do not require an actuator, motor, relay, or switch merely to make an observable result when a confirmed display can show that result.",
+            "- Classify an OLED, LCD, screen, or e-paper check as a display diagnostic, never an actuator. Reserve actuator for outputs that create physical motion, heat, fluid flow, or power switching.",
+            "- Treat a computer and USB data cable used only to program or monitor the controller as setup equipment, not missing project parts. Mention setup equipment in notes or warnings, never missingParts.",
+            "- The summary must clearly explain each confirmed part’s role and how information or control flows between them.",
+            "- If the exact idea is impossible, rank alternatives by how many safely compatible confirmed functional parts they use, with the fullest useful build first.",
             "Return honest feasibility, missing parts, compatible alternatives, wiring, firmware, and stable diagnostics.",
             "Set missingParts.required true only for parts essential to complete, load, or safely test this build. Mark nice-to-have accessories false, and never let optional parts make feasibility missing.",
             firmwareDiagnosticRequirements(),
@@ -938,9 +962,13 @@ export async function requestHardwarePlan({
         {
           type: "input_text",
           text: [
-            `Project idea: ${idea}`,
+            `Project idea: ${projectIntent}`,
             "Identify only actual visible parts needed for the idea.",
             "Use tight 0-100 percentage bounds and conservative confidence.",
+            "Propose alternatives that maximize meaningful safe use of the detected compatible parts. Prefer sensor → controller → display behavior over controller-only GPIO demonstrations, and do not invent an actuator or switch when a display already provides useful output.",
+            "Classify OLED, LCD, screen, and e-paper checks as display diagnostics, never actuators.",
+            "Treat a computer and USB data cable used only for programming or monitoring as setup equipment, not missing project parts.",
+            "Write the summary as a clear role-by-role explanation of how the visible parts work together.",
             "Return honest feasibility, missing parts, inventory-compatible alternatives, and stable diagnostics.",
             "Set missingParts.required true only for parts essential to complete, load, or safely test this build. Mark nice-to-have accessories false, and never let optional parts make feasibility missing.",
             firmwareDiagnosticRequirements(),
@@ -988,12 +1016,97 @@ export async function requestHardwarePlan({
     requestId: data?.id,
   });
   if (confirmation && plan.feasibility.status === "ready") {
-    assertFirmwareDiagnosticContract(
-      plan.firmware?.sketch,
-      plan.diagnostics?.tests,
-    );
+    if (
+      !hasFirmwareDiagnosticContract(
+        plan.firmware?.sketch,
+        plan.diagnostics?.tests,
+      )
+    ) {
+      return repairHardwarePlanFirmware({
+        plan,
+        projectIntent,
+        fetchImpl,
+        model,
+        signal,
+      });
+    }
   }
   return plan;
+}
+
+async function repairHardwarePlanFirmware({
+  plan,
+  projectIntent,
+  fetchImpl,
+  model,
+  signal,
+}) {
+  const payload = {
+    model,
+    reasoning: {
+      effort: globalThis.MAKEABLE_CONFIG?.openaiReasoningEffort || "high",
+    },
+    input: [
+      {
+        role: "system",
+        content:
+          "You repair Arduino firmware rejected by Makeable’s deterministic diagnostic validator. Preserve the supplied hardware behavior, wiring, pins, libraries, and diagnostic IDs. Return only schema-valid firmware JSON.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              `Project intent: ${projectIntent}`,
+              "The hardware plan is already approved. Replace only the rejected firmware.",
+              JSON.stringify({
+                projectTitle: plan.projectTitle,
+                summary: plan.summary,
+                wiringSteps: plan.wiringSteps,
+                firmwareSpec: plan.firmwareSpec,
+                diagnostics: plan.diagnostics,
+                rejectedFirmware: plan.firmware,
+              }),
+              firmwareDiagnosticRequirements(),
+            ].join("\n\n"),
+          },
+        ],
+      },
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "makeable_firmware_repair",
+        strict: true,
+        schema: FIRMWARE_SCHEMA,
+      },
+    },
+  };
+  const response = await fetchImpl("/api/openai/responses", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  const data = await safeJson(response);
+  if (!response.ok) {
+    throw new Error(
+      cleanText(
+        data?.error?.message || data?.error || data?.message,
+        "The firmware could not be repaired.",
+      ),
+    );
+  }
+  const firmware = normalizeFirmware(parseResponsePayload(data));
+  assertFirmwareDiagnosticContract(
+    firmware.sketch,
+    plan.diagnostics?.tests,
+  );
+  return {
+    ...plan,
+    firmware,
+  };
 }
 
 export function blobToDataUrl(blob) {
@@ -1007,6 +1120,23 @@ export function blobToDataUrl(blob) {
 
 export function ideaText(idea) {
   return typeof idea === "string" ? idea : cleanText(idea?.text, "");
+}
+
+export function planningIdeaText(idea) {
+  const primary = ideaText(idea);
+  if (typeof idea === "string" || !idea?.selectedAlternative) return primary;
+  const selected = idea.selectedAlternative;
+  const history = array(idea.history);
+  const previous = cleanText(history.at(-1)?.text, "");
+  return [
+    previous ? `Original request context: ${previous}` : "",
+    `Earlier fallback suggestion: ${cleanText(selected.title, primary)}`,
+    cleanText(selected.summary, ""),
+    "The earlier fallback is not a constraint: replace its title, roles, and implementation when another safe build uses more confirmed functional parts.",
+    "Choose the fullest useful implementation supported by the confirmed compatible inventory.",
+  ]
+    .filter(Boolean)
+    .join(". ");
 }
 
 export function advanceAssembly(wiring = {}) {
@@ -1524,7 +1654,7 @@ export function hasFirmwareDiagnosticContract(sketch, diagnostics) {
       "i",
     ).test(source);
   const hasExecutableRun = Boolean(
-    findCommandBlock(extractBalancedIfBlocks(source), "RUN"),
+    findCommandBlock(extractBalancedIfBlocks(source), "RUN", source),
   );
   const normalizedDiagnostics = Array.isArray(diagnostics)
     ? normalizeDiagnosticTests(diagnostics)
@@ -1673,10 +1803,23 @@ function normalizeDiagnosticTests(diagnostics) {
       diagnostic?.id || diagnostic?.name || `check-${index + 1}`,
       usedIds,
     );
-    const kind = ["board", "sensor", "actuator", "power"].includes(
-      diagnostic?.kind,
-    )
-      ? diagnostic.kind
+    const description = `${diagnostic?.id || ""} ${diagnostic?.name || ""}`;
+    const displayLike =
+      /\b(?:oled|lcd|display|screen|e-?paper)\b/i.test(description);
+    const requestedKind =
+      diagnostic?.kind === "actuator" &&
+      displayLike &&
+      Number(diagnostic?.pulseMs) <= 0
+        ? "display"
+        : diagnostic?.kind;
+    const kind = [
+      "board",
+      "sensor",
+      "display",
+      "actuator",
+      "power",
+    ].includes(requestedKind)
+      ? requestedKind
       : "sensor";
     return {
       id,
@@ -1735,8 +1878,8 @@ function containsEnergizingWrite(source) {
 
 function hasBranchBoundActuatorSafety(source) {
   const ifBlocks = extractBalancedIfBlocks(source);
-  const runBlock = findCommandBlock(ifBlocks, "RUN");
-  const stopBlock = findCommandBlock(ifBlocks, "STOP");
+  const runBlock = findCommandBlock(ifBlocks, "RUN", source);
+  const stopBlock = findCommandBlock(ifBlocks, "STOP", source);
   if (!runBlock || !stopBlock) return false;
 
   const runPrefix = canonicalTopLevelPrefix(runBlock.body);
@@ -1819,13 +1962,46 @@ function extractBalancedIfBlocks(source) {
   return blocks;
 }
 
-function findCommandBlock(blocks, command) {
+function findCommandBlock(blocks, command, source = "") {
   const pattern = new RegExp(
     `(?:startsWith|indexOf)\\s*\\(\\s*["']MAKEABLE\\|${command}\\||` +
       `strncmp\\s*\\([^,\\n]+,\\s*["']MAKEABLE\\|${command}\\|`,
     "i",
   );
-  return blocks.find(({ condition }) => pattern.test(condition)) || null;
+  const directBlock =
+    blocks.find(({ condition }) => pattern.test(condition)) || null;
+  if (directBlock) return directBlock;
+
+  const aliases = immutableCommandPrefixAliases(source, command);
+  if (!aliases.size) return null;
+  return (
+    blocks.find(({ condition }) =>
+      [...aliases].some((alias) => {
+        const escapedAlias = escapeRegExp(alias);
+        return new RegExp(
+          `(?:startsWith|indexOf)\\s*\\(\\s*${escapedAlias}\\b|` +
+            `strncmp\\s*\\([^,\\n]+,\\s*${escapedAlias}\\b`,
+          "i",
+        ).test(condition);
+      }),
+    ) || null
+  );
+}
+
+function immutableCommandPrefixAliases(source, command) {
+  const aliases = new Set();
+  const prefix = `MAKEABLE\\|${command}\\|`;
+  const declaration = new RegExp(
+    `\\b(?:static\\s+)?const\\s+(?:String|char\\s*\\*)\\s+` +
+      `([A-Za-z_]\\w*)\\s*=\\s*["']${prefix}["']\\s*;|` +
+      `\\b(?:static\\s+)?constexpr\\s+char\\s+` +
+      `([A-Za-z_]\\w*)\\s*\\[\\s*\\]\\s*=\\s*["']${prefix}["']\\s*;`,
+    "gi",
+  );
+  for (const match of String(source || "").matchAll(declaration)) {
+    aliases.add(match[1] || match[2]);
+  }
+  return aliases;
 }
 
 function directActuatorTargets(block, state) {

@@ -213,7 +213,10 @@ async function serveStatic(pathname, res) {
   try {
     const data = await readFile(filePath);
     const contentType = mimeTypes.get(path.extname(filePath)) || "application/octet-stream";
-    res.writeHead(200, { "Content-Type": contentType });
+    res.writeHead(200, {
+      "Content-Type": contentType,
+      "Cache-Control": "no-store",
+    });
     res.end(data);
   } catch {
     sendText(res, "Not found", "text/plain; charset=utf-8", 404);

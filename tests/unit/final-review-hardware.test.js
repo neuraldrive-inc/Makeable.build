@@ -105,6 +105,11 @@ test("the local server binds only to loopback and serves an explicit public surf
   ]) {
     const response = await fetch(`${baseUrl}${pathname}`);
     assert.equal(response.status, 200, `${pathname} should remain public`);
+    assert.equal(
+      response.headers.get("cache-control"),
+      "no-store",
+      `${pathname} should reload current local code`,
+    );
   }
 
   for (const pathname of [

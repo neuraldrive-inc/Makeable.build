@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   compileAndFlashFirmware,
+  HARDWARE_PLAN_SCHEMA,
   hasFirmwareDiagnosticContract,
+  normalizeHardwarePlan,
   requestHardwarePlan,
 } from "../../src/makeable/actions.js";
 
@@ -28,12 +30,51 @@ void loop() {
 }
 `;
 
+const PREFIX_CONSTANT_FIRMWARE = `
+const String runPrefix = "MAKEABLE|RUN|";
+const String stopPrefix = "MAKEABLE|STOP|";
+
+void reportReset() { Serial.println("MAKEABLE|RESET|POWER_ON"); }
+void reportReady() { Serial.println("MAKEABLE|READY|ESP32"); }
+
+void handleCommand(String line) {
+  if (line.startsWith(runPrefix)) {
+    Serial.println("MAKEABLE|CHECK|pir|PASS|motion=0");
+    Serial.println("MAKEABLE|CHECK|oled|PASS|display_updated");
+    return;
+  }
+  if (line.startsWith(stopPrefix)) {
+    Serial.println("MAKEABLE|CHECK|pir|PASS|stopped_no_actuator");
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  reportReset();
+  reportReady();
+}
+
+void loop() {
+  if (Serial.available()) handleCommand(Serial.readStringUntil('\\n'));
+}
+`;
+
 const SENSOR_DIAGNOSTICS = [
   { id: "pir", name: "PIR sensor", kind: "sensor", pulseMs: 0, assemblyStep: 1 },
 ];
 
 const ACTUATOR_DIAGNOSTICS = [
   { id: "fan", name: "Fan motor", kind: "actuator", pulseMs: 500, assemblyStep: 1 },
+];
+
+const DISPLAY_DIAGNOSTICS = [
+  {
+    id: "oled",
+    name: "OLED I2C acknowledgement",
+    kind: "display",
+    pulseMs: 0,
+    assemblyStep: 1,
+  },
 ];
 
 const UNSAFE_MISLABELED_ACTUATOR_FIRMWARE = `
@@ -59,6 +100,16 @@ test("ready sensor-only firmware does not require actuator STOP and deadline cod
   );
 });
 
+test("non-actuating diagnostics accept immutable command-prefix constants", () => {
+  assert.equal(
+    hasFirmwareDiagnosticContract(PREFIX_CONSTANT_FIRMWARE, [
+      ...SENSOR_DIAGNOSTICS,
+      ...DISPLAY_DIAGNOSTICS,
+    ]),
+    true,
+  );
+});
+
 test("energizing code cannot bypass actuator safety through empty or mislabeled diagnostics", () => {
   assert.equal(
     hasFirmwareDiagnosticContract(UNSAFE_MISLABELED_ACTUATOR_FIRMWARE, []),
@@ -78,6 +129,37 @@ test("actuator diagnostics still require actuator STOP and deadline code", () =>
   assert.equal(
     hasFirmwareDiagnosticContract(SENSOR_ONLY_FIRMWARE, ACTUATOR_DIAGNOSTICS),
     false,
+  );
+});
+
+test("display diagnostics are non-actuating capabilities with zero pulse duration", () => {
+  assert.deepEqual(
+    HARDWARE_PLAN_SCHEMA.properties.diagnostics.properties.tests.items.properties
+      .kind.enum,
+    ["board", "sensor", "display", "actuator", "power"],
+  );
+
+  const plan = normalizeHardwarePlan({
+    diagnostics: {
+      tests: [
+        {
+          id: "oled",
+          name: "OLED I2C acknowledgement",
+          kind: "actuator",
+          pulseMs: 0,
+          assemblyStep: 1,
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(plan.diagnostics.tests, DISPLAY_DIAGNOSTICS);
+  assert.equal(
+    hasFirmwareDiagnosticContract(SENSOR_ONLY_FIRMWARE, [
+      ...SENSOR_DIAGNOSTICS,
+      ...DISPLAY_DIAGNOSTICS,
+    ]),
+    true,
   );
 });
 
@@ -155,6 +237,54 @@ test("confirmed ready sensor-only plans validate against their diagnostic capabi
     ),
   });
 
+  assert.equal(plan.feasibility.status, "ready");
+});
+
+test("a rejected ready-plan sketch gets one bounded firmware-only repair", async () => {
+  const requests = [];
+  const firstPlan = planPayload({
+    status: "ready",
+    diagnostics: [...SENSOR_DIAGNOSTICS, ...DISPLAY_DIAGNOSTICS],
+    sketch: "void setup() {} void loop() {}",
+  });
+  const responses = [
+    {
+      id: "resp_initial_invalid",
+      output_text: JSON.stringify(firstPlan),
+    },
+    {
+      id: "resp_firmware_repair",
+      output_text: JSON.stringify({
+        language: "Arduino C++",
+        sketch: SENSOR_ONLY_FIRMWARE,
+        notes: "Repaired diagnostic firmware.",
+      }),
+    },
+  ];
+
+  const plan = await requestHardwarePlan({
+    idea: "Show motion on an OLED",
+    confirmedParts: [
+      { id: "esp32", name: "ESP32", confirmed: true },
+      { id: "pir", name: "PIR sensor", confirmed: true },
+      { id: "oled", name: "OLED display", confirmed: true },
+    ],
+    fetchImpl: async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify(responses.shift());
+        },
+      };
+    },
+  });
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].text.format.name, "makeable_firmware_repair");
+  assert.match(JSON.stringify(requests[1]), /Show motion status/);
+  assert.match(JSON.stringify(requests[1]), /OLED I2C acknowledgement/);
+  assert.equal(plan.firmware.sketch.trim(), SENSOR_ONLY_FIRMWARE.trim());
   assert.equal(plan.feasibility.status, "ready");
 });
 

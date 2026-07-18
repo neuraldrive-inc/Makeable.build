@@ -454,7 +454,7 @@ async function handlePartsPhoto(context, route, file) {
     if (!isScopedRequestCurrent(context, request, photoRevision)) return;
     progress.textContent = "Looking closely at your parts…";
     const plan = await requestHardwarePlan({
-      idea: ideaText(app.getProject().idea),
+      idea: app.getProject().idea,
       imageDataUrl: await blobToDataUrl(normalized.blob),
       signal: request.controller.signal,
     });
@@ -621,11 +621,15 @@ function renderReady(context) {
   const { outlet, app } = context;
   const project = app.getProject();
   const parts = project.confirmedParts || [];
+  const feasibility = project.feasibility || {};
   outlet.innerHTML = screenFrame(`
     <article class="route-screen ready-screen">
       <header class="screen-heading">
         <h1>Yep — you can build it!</h1>
-        <p>Your parts are a match for ${escapeHtml(ideaText(project.idea))}.</p>
+        <p>${escapeHtml(
+          feasibility.summary ||
+            `Your parts are a match for ${ideaText(project.idea)}.`,
+        )}</p>
       </header>
 
       <section class="paper-panel ready-photo-panel" aria-label="Ready project inventory">
@@ -855,7 +859,7 @@ async function regenerateAfterMissingParts(
   const request = beginScopedRequest(context, current.photo?.revision);
   try {
     const plan = await requestHardwarePlan({
-      idea: ideaText(current.idea),
+      idea: current.idea,
       confirmedParts: updated.confirmedParts,
       signal: request.controller.signal,
     });
@@ -931,7 +935,7 @@ async function startAlternativeProject(context, alternativeId) {
   };
   try {
     const plan = await requestHardwarePlan({
-      idea: alternative.title,
+      idea: nextIdea,
       confirmedParts: project.confirmedParts || [],
       signal: request.controller.signal,
     });
@@ -2486,7 +2490,7 @@ async function confirmParts(context, route) {
   request.confirmedPartsFingerprint = stableFingerprint(confirmedParts);
   try {
     const plan = await requestHardwarePlan({
-      idea: ideaText(app.getProject().idea),
+      idea: app.getProject().idea,
       confirmedParts,
       signal: request.controller.signal,
     });
