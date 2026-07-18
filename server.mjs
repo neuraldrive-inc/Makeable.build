@@ -1,5 +1,12 @@
 import { createServer } from "node:http";
-import { readFile, mkdir, writeFile, rm, readdir } from "node:fs/promises";
+import {
+  appendFile,
+  readFile,
+  mkdir,
+  writeFile,
+  rm,
+  readdir,
+} from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +27,10 @@ import {
   validateGitHubUploadRequest,
   verifyPublishCapability,
 } from "./src/makeable/server-contract.js";
+import {
+  createEmailWaitlistRecord,
+  createGoogleAcquisitionResult,
+} from "./src/makeable/acquisition.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -33,6 +44,9 @@ const localConfigKeys = new Set([
   "DEEPGRAM_API_KEY",
   "GITHUB_TOKEN",
   "GITHUB_OWNER",
+  "GOOGLE_CLIENT_ID",
+  "WAITLIST_WEBHOOK_URL",
+  "WAITLIST_WEBHOOK_SECRET",
 ]);
 const initialEnv = getEnv();
 const port = Number(initialEnv.PORT || 8787);
@@ -52,11 +66,19 @@ const mimeTypes = new Map([
   [".woff", "font/woff"],
   [".woff2", "font/woff2"],
 ]);
-const publicRootFiles = new Set(["index.html", "app.js", "styles.css"]);
+const publicRootFiles = new Set([
+  "index.html",
+  "pilot.html",
+  "builder.html",
+  "landing.js",
+  "app.js",
+  "styles.css",
+]);
 const publicDirectoryRoots = new Map([
   ["assets", path.join(__dirname, "assets")],
   ["src", path.join(__dirname, "src", "makeable")],
   ["styles", path.join(__dirname, "styles")],
+  ["Makeable figma", path.join(__dirname, "Makeable figma")],
 ]);
 
 const server = createServer(async (req, res) => {
@@ -74,6 +96,14 @@ const server = createServer(async (req, res) => {
 
     if (url.pathname === "/api/deepgram/token" && req.method === "POST") {
       return createDeepgramToken(res, env);
+    }
+
+    if (url.pathname === "/api/waitlist" && req.method === "POST") {
+      return createWaitlistSignup(req, res);
+    }
+
+    if (url.pathname === "/api/auth/google" && req.method === "POST") {
+      return completeGoogleAcquisition(req, res, env);
     }
 
     if (url.pathname === "/api/openai/responses" && req.method === "POST") {
@@ -118,6 +148,7 @@ const server = createServer(async (req, res) => {
         hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
         hasDeepgramKey: Boolean(env.DEEPGRAM_API_KEY),
         hasGithubToken: Boolean(env.GITHUB_TOKEN),
+        hasGoogleClientId: Boolean(env.GOOGLE_CLIENT_ID),
         hasArduinoCli: Boolean(findArduinoCli(env)),
       });
     }
@@ -204,6 +235,96 @@ async function createDeepgramToken(res, env) {
   return sendJson(res, result.body, result.status, { "Cache-Control": "no-store" });
 }
 
+async function createWaitlistSignup(req, res) {
+  const validation = createEmailWaitlistRecord(await readJsonBody(req, 16 * 1024));
+  if (!validation.ok) {
+    return sendJson(res, { error: validation.error }, validation.status);
+  }
+  await saveLocalWaitlistRecord(validation.value);
+  return sendJson(
+    res,
+    { ok: true },
+    200,
+    { "Cache-Control": "no-store" },
+  );
+}
+
+async function completeGoogleAcquisition(req, res, env) {
+  if (!env.GOOGLE_CLIENT_ID) {
+    return sendJson(res, { error: "Google sign-in is not configured." }, 503);
+  }
+  const body = await readJsonBody(req, 20 * 1024);
+  if (
+    typeof body.credential !== "string" ||
+    !body.credential ||
+    body.credential.length > 16_384 ||
+    typeof body.intent !== "string" ||
+    Object.keys(body).some((key) => !["credential", "intent"].includes(key))
+  ) {
+    return sendJson(res, { error: "Google sign-in request is invalid." }, 400);
+  }
+  let identity;
+  try {
+    const { OAuth2Client } = await import("google-auth-library");
+    const client = new OAuth2Client(env.GOOGLE_CLIENT_ID);
+    const ticket = await client.verifyIdToken({
+      idToken: body.credential,
+      audience: env.GOOGLE_CLIENT_ID,
+    });
+    identity = ticket.getPayload();
+  } catch {
+    return sendJson(
+      res,
+      { error: "Google could not verify this sign-in." },
+      401,
+      { "Cache-Control": "no-store" },
+    );
+  }
+  const result = createGoogleAcquisitionResult(identity, body.intent);
+  if (!result.ok) {
+    return sendJson(res, { error: result.error }, result.status);
+  }
+  if (result.value.record) {
+    await saveLocalWaitlistRecord(result.value.record);
+  }
+  return sendJson(
+    res,
+    {
+      ok: true,
+      user: result.value.user,
+      next: result.value.next,
+    },
+    200,
+    { "Cache-Control": "no-store" },
+  );
+}
+
+async function saveLocalWaitlistRecord(record) {
+  const directory = path.join(__dirname, "data");
+  const filePath = path.join(directory, "waitlist.jsonl");
+  await mkdir(directory, { recursive: true });
+  try {
+    const existing = await readFile(filePath, "utf8");
+    const duplicate = existing
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .some((line) => {
+        try {
+          return JSON.parse(line).email === record.email;
+        } catch {
+          return false;
+        }
+      });
+    if (duplicate) return;
+  } catch {
+    // The first signup creates the data file.
+  }
+  await appendFile(filePath, `${JSON.stringify(record)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+}
+
 async function serveStatic(pathname, res) {
   const filePath = resolvePublicFile(pathname);
   if (!filePath) {
@@ -234,8 +355,14 @@ function resolvePublicFile(pathname) {
   if (segments.some((segment) => segment.startsWith("."))) {
     return "";
   }
-  if (pathname === "/" || pathname.startsWith("/build/")) {
+  if (pathname === "/") {
     return path.join(__dirname, "index.html");
+  }
+  if (pathname === "/pilot" || pathname === "/pilot/") {
+    return path.join(__dirname, "pilot.html");
+  }
+  if (pathname.startsWith("/build/")) {
+    return path.join(__dirname, "builder.html");
   }
   if (!segments.length) return "";
   if (segments.length === 1 && publicRootFiles.has(segments[0])) {

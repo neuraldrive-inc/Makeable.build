@@ -33,7 +33,7 @@ async function assertNonEmptyFile(...segments) {
 }
 
 test("the document exposes the semantic Makeable application shell", async () => {
-  const html = await read("index.html");
+  const html = await read("builder.html");
 
   assert.match(html, /<title>Makeable<\/title>/);
   assert.doesNotMatch(html, /GeckCo AI|Codex For Hardware/);
@@ -46,7 +46,7 @@ test("the document exposes the semantic Makeable application shell", async () =>
 });
 
 test("the build progress shell contains the five approved parent steps", async () => {
-  const html = await read("index.html");
+  const html = await read("builder.html");
 
   for (const label of ["Describe", "Scan Parts", "Build + Code", "Test", "Publish"]) {
     const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -112,7 +112,7 @@ test("the browser regression matrix uses a bounded worker pool", async () => {
 });
 
 test("the favicon and brand accent use the licensed vendored icon", async () => {
-  const html = await read("index.html");
+  const html = await read("builder.html");
   const makeableStyles = await read("styles", "makeable.css");
 
   assert.doesNotMatch(html, /data:image\/svg\+xml/);

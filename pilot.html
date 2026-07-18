@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f7f0e4" />
+    <title>Pilot access · Makeable</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="/assets/icons/lucide/sparkles.svg" />
+    <link rel="preconnect" href="https://accounts.google.com" />
+    <link rel="stylesheet" href="/styles/landing.css" />
+  </head>
+  <body class="landing-page pilot-page">
+    <a class="landing-skip" href="#pilot-main">Skip to pilot access</a>
+    <header class="landing-header pilot-header">
+      <a class="landing-brand" href="/" aria-label="Makeable home">
+        <span>Makeable</span>
+        <img
+          src="/assets/icons/lucide/sparkles.svg"
+          alt=""
+          width="24"
+          height="24"
+          aria-hidden="true"
+        />
+      </a>
+      <p class="pilot-label">
+        <span aria-hidden="true">✦</span>
+        Private pilot
+      </p>
+    </header>
+
+    <main class="pilot-main" id="pilot-main">
+      <section class="pilot-card" aria-labelledby="pilot-title">
+        <span class="paper-tape paper-tape--blue pilot-tape" aria-hidden="true"></span>
+        <div class="pilot-copy">
+          <p class="eyebrow">
+            <span class="eyebrow-number">P</span>
+            Pilot access
+          </p>
+          <h1 id="pilot-title">Your pilot bench is ready.</h1>
+          <p>
+            Sign in with Google, put your electronics in one photo, and start
+            building with Makeable.
+          </p>
+          <div class="google-slot google-slot--pilot" data-google-slot>
+            <button class="google-fallback" type="button" data-google-fallback>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="#4285f4"
+                  d="M21.8 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.5a4.7 4.7 0 0 1-2 3.1v2.5h3.2c1.9-1.8 3.1-4.4 3.1-7.4Z"
+                />
+                <path
+                  fill="#34a853"
+                  d="M12 22c2.7 0 5-.9 6.7-2.4l-3.2-2.5c-.9.6-2 1-3.5 1a5.9 5.9 0 0 1-5.5-4.1H3.2v2.6A10 10 0 0 0 12 22Z"
+                />
+                <path
+                  fill="#fbbc05"
+                  d="M6.5 14a6 6 0 0 1 0-3.9V7.4H3.2a10 10 0 0 0 0 9.2L6.5 14Z"
+                />
+                <path
+                  fill="#ea4335"
+                  d="M12 5.9c1.6 0 3 .5 4.1 1.6L19 4.6A9.7 9.7 0 0 0 3.2 7.4l3.3 2.7A5.9 5.9 0 0 1 12 5.9Z"
+                />
+              </svg>
+              Continue with Google
+            </button>
+          </div>
+          <div class="signup-status" data-signup-status role="status" aria-live="polite"></div>
+          <p class="pilot-share-note">
+            <img
+              src="/assets/icons/lucide/share-2.svg"
+              alt=""
+              width="21"
+              height="21"
+              aria-hidden="true"
+            />
+            Anyone with this link can join the pilot.
+          </p>
+        </div>
+
+        <div class="pilot-path" aria-label="The five Makeable project stages">
+          <p class="annotation">From this…</p>
+          <div class="pilot-parts" aria-hidden="true">
+            <span class="part part--board"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+            <span class="part part--sensor"></span>
+            <span class="part part--display"></span>
+          </div>
+          <div class="pilot-arrow" aria-hidden="true">↘</div>
+          <ol>
+            <li class="build-stage--describe">Describe</li>
+            <li class="build-stage--scan">Scan</li>
+            <li class="build-stage--build">Build</li>
+            <li class="build-stage--test">Test</li>
+            <li class="build-stage--publish">Share</li>
+          </ol>
+          <p class="annotation pilot-done">…to something that works. ✓</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="landing-footer pilot-footer">
+      <a href="/">Back to Makeable</a>
+      <p>Forward this pilot link to another builder.</p>
+    </footer>
+
+    <script src="/config.local.js"></script>
+    <script type="module" src="/landing.js"></script>
+  </body>
+</html>

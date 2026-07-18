@@ -28,6 +28,8 @@ export function createPublicConfig(env, extras = {}) {
     hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
     hasDeepgramKey: Boolean(env.DEEPGRAM_API_KEY),
     hasGithubToken: Boolean(env.GITHUB_TOKEN),
+    googleClientId: env.GOOGLE_CLIENT_ID || "",
+    hasGoogleClientId: Boolean(env.GOOGLE_CLIENT_ID),
     ...extras,
   };
 }

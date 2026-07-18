@@ -40,6 +40,23 @@ All 11 approved routes were captured at all three sizes. The desktop captures we
 - Desktop/tablet/mobile: no unintended horizontal document overflow; code is the only intentionally scrollable region
 - Final independent implementation review: clean, with no unresolved P0, P1, or P2 findings
 
+## Landing page and pilot entry
+
+- Public landing page checked at 1440 × 1024, 834 × 1194, and 390 × 844.
+- Pilot entry checked at the same three viewports.
+- The visual language matches the approved builder: cream paper canvas, torn
+  panels, washi tape, hand-drawn annotations, and the five existing stage
+  colors and type roles.
+- Public signup exposes only Google or one email field. Pilot entry exposes
+  Google only and has no public navigation link or email allowlist.
+- Email confirmation, mocked Google verification/redirect, missing Google
+  configuration, focus, live errors, reduced motion, and no-overflow behavior
+  are covered.
+- Axe found zero serious or critical issues on the landing and pilot pages.
+- Fresh Web Interface Guidelines review found no unresolved actionable issues
+  after adding intrinsic image dimensions, input description wiring, focus and
+  hover states, reduced motion, balanced headings, and touch behavior.
+
 ## Accepted intentional deviations
 
 - The approved plan requires hardware truth, so detected ESP32/board names replace illustrative Uno labels.

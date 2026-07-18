@@ -4,95 +4,340 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f7f0e4" />
-    <base href="/" />
-    <title>Makeable</title>
-    <link rel="icon" href="./assets/icons/lucide/sparkles.svg" />
-    <link rel="stylesheet" href="./styles.css" />
+    <title>Make hardware. Make it real. · Makeable</title>
+    <meta
+      name="description"
+      content="Turn the electronics on your desk into a working hardware project with a visual guide, code, and tests."
+    />
+    <link rel="icon" href="/assets/icons/lucide/sparkles.svg" />
+    <link rel="preconnect" href="https://accounts.google.com" />
+    <link rel="stylesheet" href="/styles/landing.css" />
   </head>
-  <body>
-    <a class="skip-link" href="#main-content">Skip to project builder</a>
+  <body class="landing-page">
+    <a class="landing-skip" href="#landing-main">Skip to Makeable</a>
 
-    <header class="app-header" data-makeable-shell>
-      <a class="makeable-brand" href="/" aria-label="Makeable home">
-        <span aria-hidden="true">Makeable</span>
-        <span class="visually-hidden">Makeable home</span>
+    <header class="landing-header">
+      <a class="landing-brand" href="/" aria-label="Makeable home">
+        <span>Makeable</span>
         <img
-          class="brand-spark"
-          src="./assets/icons/lucide/sparkles.svg"
+          src="/assets/icons/lucide/sparkles.svg"
           alt=""
           width="24"
           height="24"
           aria-hidden="true"
         />
       </a>
-
-      <nav class="progress-rail" aria-label="Build progress">
-        <ol>
-          <li class="progress-step progress-step--describe" data-progress-step="describe" aria-current="step">
-            <a class="progress-action" data-progress-action aria-disabled="true" tabindex="-1">
-              <span class="progress-number" aria-hidden="true">1</span>
-              <img src="./assets/icons/lucide/message-circle.svg" alt="" width="30" height="30" aria-hidden="true" />
-              <span class="progress-label">Describe</span>
-            </a>
-            <span class="progress-complete" aria-hidden="true">
-              <img src="./assets/icons/lucide/check.svg" alt="" width="20" height="20" />
-            </span>
-          </li>
-          <li class="progress-step progress-step--scan" data-progress-step="scan">
-            <a class="progress-action" data-progress-action aria-disabled="true" tabindex="-1">
-              <span class="progress-number" aria-hidden="true">2</span>
-              <img src="./assets/icons/lucide/camera.svg" alt="" width="30" height="30" aria-hidden="true" />
-              <span class="progress-label">Scan Parts</span>
-            </a>
-            <span class="progress-complete" aria-hidden="true">
-              <img src="./assets/icons/lucide/check.svg" alt="" width="20" height="20" />
-            </span>
-          </li>
-          <li class="progress-step progress-step--build" data-progress-step="build">
-            <a class="progress-action" data-progress-action aria-disabled="true" tabindex="-1">
-              <span class="progress-number" aria-hidden="true">3</span>
-              <img src="./assets/icons/lucide/code-xml.svg" alt="" width="30" height="30" aria-hidden="true" />
-              <span class="progress-label">Build + Code</span>
-            </a>
-            <span class="progress-complete" aria-hidden="true">
-              <img src="./assets/icons/lucide/check.svg" alt="" width="20" height="20" />
-            </span>
-          </li>
-          <li class="progress-step progress-step--test" data-progress-step="test">
-            <a class="progress-action" data-progress-action aria-disabled="true" tabindex="-1">
-              <span class="progress-number" aria-hidden="true">4</span>
-              <img src="./assets/icons/lucide/zap.svg" alt="" width="30" height="30" aria-hidden="true" />
-              <span class="progress-label">Test</span>
-            </a>
-            <span class="progress-complete" aria-hidden="true">
-              <img src="./assets/icons/lucide/check.svg" alt="" width="20" height="20" />
-            </span>
-          </li>
-          <li class="progress-step progress-step--publish" data-progress-step="publish">
-            <a class="progress-action" data-progress-action aria-disabled="true" tabindex="-1">
-              <span class="progress-number" aria-hidden="true">5</span>
-              <img src="./assets/icons/lucide/globe-2.svg" alt="" width="30" height="30" aria-hidden="true" />
-              <span class="progress-label">Publish</span>
-            </a>
-            <span class="progress-complete" aria-hidden="true">
-              <img src="./assets/icons/lucide/check.svg" alt="" width="20" height="20" />
-            </span>
-          </li>
-        </ol>
-      </nav>
+      <p class="launch-note">
+        <span aria-hidden="true"></span>
+        Early access opens August 8
+      </p>
+      <a class="header-cta" href="#join">Join the waitlist</a>
     </header>
 
-    <main class="app-main" id="main-content" tabindex="-1">
-      <section class="screen-outlet" data-screen-outlet aria-labelledby="makeable-heading">
-        <h1 class="visually-hidden" id="makeable-heading" data-app-heading>Makeable</h1>
-        <p class="app-status" id="appStatus" role="status" aria-live="polite">Loading Makeable…</p>
-        <noscript>
-          <p class="app-notice">Makeable needs JavaScript to guide your hardware build.</p>
-        </noscript>
+    <main id="landing-main">
+      <section class="landing-hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">
+            <span class="eyebrow-number">01</span>
+            From idea to working hardware
+          </p>
+          <h1 id="hero-title">
+            Turn the parts on your desk into
+            <span>something real.</span>
+          </h1>
+          <p class="hero-lede">
+            Take one photo. Tell us what you want to make. Makeable gives you a
+            wire-by-wire guide, working code, and a way to test it.
+          </p>
+
+          <section class="signup-paper" id="join" aria-labelledby="signup-title">
+            <span class="paper-tape paper-tape--pink" aria-hidden="true"></span>
+            <div data-signup-content>
+              <div class="signup-heading">
+                <div>
+                  <p class="annotation">Messy ideas welcome.</p>
+                  <h2 id="signup-title">Join the first builders</h2>
+                </div>
+                <span class="launch-stamp">AUG 08</span>
+              </div>
+
+              <div class="google-slot" data-google-slot>
+                <button class="google-fallback" type="button" data-google-fallback>
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      fill="#4285f4"
+                      d="M21.8 12.2c0-.7-.1-1.4-.2-2H12v3.8h5.5a4.7 4.7 0 0 1-2 3.1v2.5h3.2c1.9-1.8 3.1-4.4 3.1-7.4Z"
+                    />
+                    <path
+                      fill="#34a853"
+                      d="M12 22c2.7 0 5-.9 6.7-2.4l-3.2-2.5c-.9.6-2 1-3.5 1a5.9 5.9 0 0 1-5.5-4.1H3.2v2.6A10 10 0 0 0 12 22Z"
+                    />
+                    <path
+                      fill="#fbbc05"
+                      d="M6.5 14a6 6 0 0 1 0-3.9V7.4H3.2a10 10 0 0 0 0 9.2L6.5 14Z"
+                    />
+                    <path
+                      fill="#ea4335"
+                      d="M12 5.9c1.6 0 3 .5 4.1 1.6L19 4.6A9.7 9.7 0 0 0 3.2 7.4l3.3 2.7A5.9 5.9 0 0 1 12 5.9Z"
+                    />
+                  </svg>
+                  Continue with Google
+                </button>
+              </div>
+
+              <div class="signup-divider" aria-hidden="true"><span>or</span></div>
+
+              <form class="email-form" data-email-form novalidate>
+                <label for="waitlistEmail">Email address</label>
+                <div class="email-row">
+                  <input
+                    id="waitlistEmail"
+                    name="email"
+                    type="email"
+                    inputmode="email"
+                    autocomplete="email"
+                    spellcheck="false"
+                    placeholder="you@example.com"
+                    aria-describedby="signupStatus"
+                    required
+                  />
+                  <button type="submit">Join the waitlist</button>
+                </div>
+              </form>
+              <p class="signup-fine-print">
+                One tap or one email. No forms after this.
+              </p>
+            </div>
+            <div
+              class="signup-status"
+              id="signupStatus"
+              data-signup-status
+              role="status"
+              aria-live="polite"
+            ></div>
+          </section>
+        </div>
+
+        <div
+          class="hero-workbench"
+          role="img"
+          aria-label="A Makeable project moving from parts to a clear build guide"
+        >
+          <span class="paper-tape paper-tape--blue hero-tape" aria-hidden="true"></span>
+          <div class="parts-note">
+            <p class="note-label">Your desk</p>
+            <div class="part-cluster">
+              <span class="part part--board" aria-hidden="true">
+                <i></i><i></i><i></i><i></i><i></i><i></i>
+              </span>
+              <span class="part part--sensor" aria-hidden="true"></span>
+              <span class="part part--display" aria-hidden="true"></span>
+              <span class="part-wire part-wire--one" aria-hidden="true"></span>
+              <span class="part-wire part-wire--two" aria-hidden="true"></span>
+            </div>
+            <p class="hand-note">ESP32 + sensor + tiny screen?</p>
+          </div>
+
+          <div class="build-thread" aria-hidden="true">
+            <svg viewBox="0 0 320 120" preserveAspectRatio="none">
+              <path d="M8 62 C82 12 116 108 178 55 S264 24 312 55" />
+              <path class="thread-shadow" d="M8 70 C82 20 116 116 178 63 S264 32 312 63" />
+            </svg>
+            <span>Makeable maps the path</span>
+          </div>
+
+          <article class="guide-note">
+            <span class="mini-stage mini-stage--describe">1</span>
+            <span class="mini-stage mini-stage--scan">2</span>
+            <span class="mini-stage mini-stage--build">3</span>
+            <span class="mini-stage mini-stage--test">4</span>
+            <span class="mini-stage mini-stage--publish">5</span>
+            <div class="guide-preview">
+              <p>Next connection</p>
+              <strong>PIR OUT → GPIO 27</strong>
+              <span class="wire-line" aria-hidden="true"></span>
+              <small>Then we’ll put “Motion!” on your display.</small>
+            </div>
+            <p class="guide-check">
+              <img
+                src="/assets/icons/lucide/check.svg"
+                alt=""
+                width="25"
+                height="25"
+                aria-hidden="true"
+              />
+              Clear enough to build
+            </p>
+          </article>
+          <span class="hero-spark hero-spark--one" aria-hidden="true">✦</span>
+          <span class="hero-spark hero-spark--two" aria-hidden="true">✧</span>
+        </div>
+      </section>
+
+      <section class="build-path-section" aria-labelledby="build-path-title">
+        <div class="section-heading">
+          <p class="eyebrow">
+            <span class="eyebrow-number">02</span>
+            How it works
+          </p>
+          <h2 id="build-path-title">One photo. One clear path to done.</h2>
+          <p>
+            Makeable stays with you from the first messy idea to a project you
+            can test and share.
+          </p>
+        </div>
+
+        <ol class="build-path" aria-label="The five Makeable stages">
+          <li class="build-stage build-stage--describe" data-build-stage>
+            <span class="stage-number">1</span>
+            <img
+              src="/assets/icons/lucide/message-circle.svg"
+              alt=""
+              width="42"
+              height="42"
+              aria-hidden="true"
+            />
+            <div>
+              <h3>Describe</h3>
+              <p>Say what you want to make like you’d tell a friend.</p>
+            </div>
+          </li>
+          <li class="build-stage build-stage--scan" data-build-stage>
+            <span class="stage-number">2</span>
+            <img
+              src="/assets/icons/lucide/camera.svg"
+              alt=""
+              width="42"
+              height="42"
+              aria-hidden="true"
+            />
+            <div>
+              <h3>Scan parts</h3>
+              <p>Put the electronics on your desk into one photo.</p>
+            </div>
+          </li>
+          <li class="build-stage build-stage--build" data-build-stage>
+            <span class="stage-number">3</span>
+            <img
+              src="/assets/icons/lucide/code-xml.svg"
+              alt=""
+              width="42"
+              height="42"
+              aria-hidden="true"
+            />
+            <div>
+              <h3>Build + code</h3>
+              <p>Connect one piece at a time, then load working code.</p>
+            </div>
+          </li>
+          <li class="build-stage build-stage--test" data-build-stage>
+            <span class="stage-number">4</span>
+            <img
+              src="/assets/icons/lucide/zap.svg"
+              alt=""
+              width="42"
+              height="42"
+              aria-hidden="true"
+            />
+            <div>
+              <h3>Test</h3>
+              <p>Check the hardware, then prove it works in the real world.</p>
+            </div>
+          </li>
+          <li class="build-stage build-stage--publish" data-build-stage>
+            <span class="stage-number">5</span>
+            <img
+              src="/assets/icons/lucide/globe-2.svg"
+              alt=""
+              width="42"
+              height="42"
+              aria-hidden="true"
+            />
+            <div>
+              <h3>Publish</h3>
+              <p>Package the guide, code, parts, and results into one project.</p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <section class="product-story" aria-labelledby="story-title">
+        <div class="story-copy">
+          <p class="eyebrow">
+            <span class="eyebrow-number">03</span>
+            See what to do next
+          </p>
+          <h2 id="story-title">It doesn’t just give you code.</h2>
+          <p>
+            Makeable looks at what you actually have, plans around those parts,
+            and shows you exactly what to connect before anything gets powered.
+          </p>
+          <ul>
+            <li>
+              <img
+                src="/assets/icons/lucide/check.svg"
+                alt=""
+                width="27"
+                height="27"
+                aria-hidden="true"
+              />
+              Uses the parts already on your desk
+            </li>
+            <li>
+              <img
+                src="/assets/icons/lucide/check.svg"
+                alt=""
+                width="27"
+                height="27"
+                aria-hidden="true"
+              />
+              Explains every wire in plain language
+            </li>
+            <li>
+              <img
+                src="/assets/icons/lucide/check.svg"
+                alt=""
+                width="27"
+                height="27"
+                aria-hidden="true"
+              />
+              Helps test, fix, and finish the project
+            </li>
+          </ul>
+          <p class="story-annotation">Beginners welcome. Makers too. ↗</p>
+        </div>
+        <figure class="screen-paper">
+          <span class="paper-tape paper-tape--mint" aria-hidden="true"></span>
+          <img
+            src="/Makeable%20figma/final-1440x1024/04-assemble-step.png"
+            alt="Makeable showing one clear soil sensor connection step"
+            width="1440"
+            height="1024"
+            loading="lazy"
+          />
+          <figcaption>One connection at a time. No guessing.</figcaption>
+        </figure>
+      </section>
+
+      <section class="final-invite" aria-labelledby="final-title">
+        <span class="final-doodle" aria-hidden="true">✦</span>
+        <p class="annotation">Your parts are waiting.</p>
+        <h2 id="final-title">Make something you can actually hold.</h2>
+        <p>Join the first wave of builders. Early access opens August 8.</p>
+        <a class="final-cta" href="#join">Join the waitlist</a>
+        <span class="paper-tape paper-tape--yellow final-tape" aria-hidden="true"></span>
       </section>
     </main>
 
-    <script src="./config.local.js"></script>
-    <script type="module" src="./app.js"></script>
+    <footer class="landing-footer">
+      <a class="landing-brand landing-brand--footer" href="/" aria-label="Makeable home">
+        Makeable
+      </a>
+      <p>Built for curious people with parts on their desk.</p>
+      <p>© <span data-current-year></span> Makeable</p>
+    </footer>
+
+    <script src="/config.local.js"></script>
+    <script type="module" src="/landing.js"></script>
   </body>
 </html>

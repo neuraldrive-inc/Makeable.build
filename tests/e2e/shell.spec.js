@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
 test("the Makeable shell loads with meaningful semantic content", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/build/new");
 
   await expect(page).toHaveTitle("What do you want to make? · Makeable");
   await expect(page.getByRole("banner")).toBeVisible();
@@ -33,7 +33,7 @@ test("build routes load the SPA directly and guard unavailable progress", async 
 test("project and image mutations persist across a completed-screen direct reload", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/build/new");
   await expect
     .poll(() => page.evaluate(() => typeof window.MAKEABLE_APP?.completeRoute))
     .toBe("function");
@@ -82,7 +82,7 @@ test("legacy settings migrate on startup without retaining the Deepgram secret",
     );
   });
 
-  await page.goto("/");
+  await page.goto("/build/new");
 
   const settings = await page.evaluate(() => ({
     current: localStorage.getItem("makeable.settings"),
@@ -94,7 +94,7 @@ test("legacy settings migrate on startup without retaining the Deepgram secret",
 });
 
 test("skip navigation moves keyboard focus to the application content", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/build/new");
 
   await page.keyboard.press("Tab");
   const skipLink = page.getByRole("link", { name: "Skip to project builder" });
@@ -104,7 +104,7 @@ test("skip navigation moves keyboard focus to the application content", async ({
 });
 
 test("the shell has no serious accessibility violations", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/build/new");
 
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
@@ -117,7 +117,7 @@ test("the shell has no serious accessibility violations", async ({ page }) => {
 });
 
 test("the shell stays within the viewport", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/build/new");
 
   const dimensions = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
@@ -127,7 +127,7 @@ test("the shell stays within the viewport", async ({ page }) => {
 });
 
 test("the self-hosted fonts are served as browser font assets", async ({ page, request }) => {
-  await page.goto("/");
+  await page.goto("/build/new");
 
   for (const fontPath of [
     "/assets/fonts/fredoka/fredoka.woff2",

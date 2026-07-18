@@ -59,6 +59,104 @@ test("public configuration exposes capability, never the Deepgram secret", async
   });
 });
 
+test("public configuration exposes the Google client identifier but not waitlist storage", async () => {
+  const previous = {
+    GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+    WAITLIST_WEBHOOK_URL: process.env.WAITLIST_WEBHOOK_URL,
+    WAITLIST_WEBHOOK_SECRET: process.env.WAITLIST_WEBHOOK_SECRET,
+  };
+  process.env.GOOGLE_CLIENT_ID = "browser-client.apps.googleusercontent.com";
+  process.env.WAITLIST_WEBHOOK_URL = "https://hooks.example.com/private";
+  process.env.WAITLIST_WEBHOOK_SECRET = "server-only-waitlist-secret";
+  try {
+    const response = await netlifyHandler(new Request("https://makeable.test/api/config"));
+    const config = await response.json();
+    assert.equal(
+      config.googleClientId,
+      "browser-client.apps.googleusercontent.com",
+    );
+    assert.equal(config.hasGoogleClientId, true);
+    assert.doesNotMatch(
+      JSON.stringify(config),
+      /hooks\.example\.com|server-only-waitlist-secret/,
+    );
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("hosted email waitlist validates and forwards one normalized record", async () => {
+  const originalFetch = globalThis.fetch;
+  const previous = {
+    WAITLIST_WEBHOOK_URL: process.env.WAITLIST_WEBHOOK_URL,
+    WAITLIST_WEBHOOK_SECRET: process.env.WAITLIST_WEBHOOK_SECRET,
+  };
+  const calls = [];
+  process.env.WAITLIST_WEBHOOK_URL = "https://hooks.example.com/waitlist";
+  process.env.WAITLIST_WEBHOOK_SECRET = "webhook-secret";
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+  try {
+    const response = await netlifyHandler(
+      new Request("https://makeable.test/api/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: " Maker@Example.COM " }),
+      }),
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload, { ok: true });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://hooks.example.com/waitlist");
+    assert.equal(
+      calls[0].options.headers.Authorization,
+      "Bearer webhook-secret",
+    );
+    const record = JSON.parse(calls[0].options.body);
+    assert.equal(record.email, "maker@example.com");
+    assert.equal(record.source, "email");
+    assert.equal(typeof record.createdAt, "string");
+    assert.deepEqual(Object.keys(record).sort(), ["createdAt", "email", "source"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("hosted waitlist fails honestly when durable storage is not configured", async () => {
+  const previous = process.env.WAITLIST_WEBHOOK_URL;
+  delete process.env.WAITLIST_WEBHOOK_URL;
+  try {
+    const response = await netlifyHandler(
+      new Request("https://makeable.test/api/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "maker@example.com" }),
+      }),
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 503);
+    assert.equal(
+      payload.error,
+      "Waitlist storage is not configured for this deployment.",
+    );
+  } finally {
+    if (previous === undefined) delete process.env.WAITLIST_WEBHOOK_URL;
+    else process.env.WAITLIST_WEBHOOK_URL = previous;
+  }
+});
+
 test("the public config script defines MAKEABLE_CONFIG and only aliases the legacy global", async () => {
   await withDeepgramEnvironment("server-only-secret", async () => {
     const response = await netlifyHandler(new Request("https://makeable.test/config.local.js"));
@@ -229,14 +327,14 @@ test("local and Netlify entrypoints wire the secure token endpoint and /build SP
     readFile(path.join(root, "server.mjs"), "utf8"),
     readFile(path.join(root, "netlify/functions/api.mjs"), "utf8"),
     readFile(path.join(root, "netlify.toml"), "utf8"),
-    readFile(path.join(root, "index.html"), "utf8"),
+    readFile(path.join(root, "builder.html"), "utf8"),
   ]);
 
   assert.match(serverSource, /\/api\/deepgram\/token/);
   assert.match(netlifySource, /\/api\/deepgram\/token/);
   assert.match(serverSource, /pathname\.startsWith\(["']\/build\/["']\)/);
   assert.match(netlifyConfig, /from\s*=\s*"\/build\/\*"/);
-  assert.match(netlifyConfig, /to\s*=\s*"\/index\.html"/);
+  assert.match(netlifyConfig, /to\s*=\s*"\/builder\.html"/);
   assert.match(html, /<base href="\/"\s*\/?>/);
   assert.match(html, /src="\.\/config\.local\.js"/);
 });

@@ -19,7 +19,7 @@ export default defineConfig({
   webServer: {
     command: "node server.mjs",
     url: "http://127.0.0.1:8787/api/health",
-    reuseExistingServer: false,
-    timeout: 30_000,
+    reuseExistingServer: !process.env.CI,
+    timeout: 60_000,
   },
 });

@@ -8,7 +8,12 @@
 
 [[redirects]]
   from = "/build/*"
-  to = "/index.html"
+  to = "/builder.html"
+  status = 200
+
+[[redirects]]
+  from = "/pilot"
+  to = "/pilot.html"
   status = 200
 
 [[headers]]

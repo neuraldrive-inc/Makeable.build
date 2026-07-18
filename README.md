@@ -29,7 +29,11 @@ npm install
 npm start
 ```
 
-Open `http://127.0.0.1:8787/build/new`.
+Open:
+
+- `http://127.0.0.1:8787/` for the public landing page and waitlist.
+- `http://127.0.0.1:8787/pilot` for the forwardable Google pilot entry.
+- `http://127.0.0.1:8787/build/new` for the existing builder.
 
 The local server binds only to `127.0.0.1`. Hosted mode supports planning and code generation, but physical compilation and flashing require the local server.
 
@@ -46,6 +50,13 @@ OPENAI_SERVICE_TIER=priority
 
 DEEPGRAM_API_KEY=
 
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+
+# Required on hosted deployments. Local signups are stored in ignored
+# data/waitlist.jsonl.
+WAITLIST_WEBHOOK_URL=https://your-durable-waitlist-endpoint.example.com
+WAITLIST_WEBHOOK_SECRET=
+
 GITHUB_TOKEN=
 GITHUB_OWNER=
 
@@ -54,7 +65,13 @@ ARDUINO_CLI_PATH=/absolute/path/to/arduino-cli
 ARDUINO_FQBN=esp32:esp32:esp32
 ```
 
-The browser receives capability flags only. OpenAI, Deepgram, and GitHub credentials remain server-side; voice uses a temporary Deepgram token.
+The Google client ID is public by design; Google credentials are verified on
+the server. OpenAI, Deepgram, GitHub, and waitlist webhook credentials remain
+server-side. Voice uses a temporary Deepgram token.
+
+Public waitlist visitors can either use Google once or submit one email field.
+The pilot link accepts any Google account and intentionally has no allowlist, so
+partners can forward it.
 
 ## Commands
 
