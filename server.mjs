@@ -136,6 +136,7 @@ const server = createServer(async (req, res) => {
       });
     }
 
+    if (env.NODE_ENV === "production") return sendJson(res, { error: "Not found" }, 404);
     return serveStatic(url.pathname, res);
   } catch (error) {
     console.error(error);
