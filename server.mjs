@@ -96,7 +96,7 @@ const server = createServer(async (req, res) => {
     const responseMatch = url.pathname.match(/^\/api\/openai\/responses\/([^/]+)$/);
     if (responseMatch && req.method === "GET") {
       const user = await requireUser(req, res, env);
-      if (!user) return;
+      if (!user || !(await verifyGenerationOwnership(req, res, user, env))) return;
       return retrieveOpenAIResponse(responseMatch[1], res, env);
     }
 
@@ -513,6 +513,24 @@ async function authorizeGeneration(req, res, user, env) {
     sendJson(res, { error: "You have no generation credits left." }, 402);
     return false;
   }
+}
+
+async function verifyGenerationOwnership(req, res, user, env) {
+  const generationId = String(req.headers["x-makeable-generation-id"] || "").trim();
+  if (!/^[a-zA-Z0-9_-]{8,100}$/.test(generationId)) {
+    sendJson(res, { error: "A valid generation id is required." }, 400);
+    return false;
+  }
+  const result = await dynamodb.send(
+    new GetItemCommand({
+      TableName: env.CREDIT_LEDGER_TABLE,
+      Key: { userId: { S: user.userId }, entryId: { S: `generation#${generationId}` } },
+      ConsistentRead: true,
+    }),
+  );
+  if (result.Item) return true;
+  sendJson(res, { error: "This generation does not belong to your account." }, 403);
+  return false;
 }
 
 async function createDeepgramToken(res, env) {

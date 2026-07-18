@@ -1,6 +1,11 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Makeable accounts and atomic generation-credit ledger
 
+Parameters:
+  CognitoDomainPrefix:
+    Type: String
+    Description: Globally unique Cognito hosted-login prefix
+
 Resources:
   UserPool:
     Type: AWS::Cognito::UserPool
@@ -37,6 +42,13 @@ Resources:
       SupportedIdentityProviders: [COGNITO]
       PreventUserExistenceErrors: ENABLED
       EnableTokenRevocation: true
+
+  HostedLoginDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref CognitoDomainPrefix
+      UserPoolId: !Ref UserPool
+      ManagedLoginVersion: 1
 
   CreditAccounts:
     Type: AWS::DynamoDB::Table
@@ -110,5 +122,7 @@ Outputs:
     Value: !Ref UserPool
   WebClientId:
     Value: !Ref WebClient
+  HostedLoginDomain:
+    Value: !Sub https://${CognitoDomainPrefix}.auth.${AWS::Region}.amazoncognito.com
   TaskRoleArn:
     Value: !GetAtt TaskRole.Arn

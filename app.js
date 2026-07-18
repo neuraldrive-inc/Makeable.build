@@ -1312,7 +1312,9 @@ async function waitForOpenAiResponse(started, label, progress) {
     }
 
     await sleep(Math.min(6500, AI_POLL_BASE_INTERVAL_MS + pollCount * 450));
-    latest = await apiJson(`/api/openai/responses/${encodeURIComponent(started.id)}`);
+    latest = await apiJson(`/api/openai/responses/${encodeURIComponent(started.id)}`, {
+      generationId: state.generationId,
+    });
     const status = normalizeOpenAiStatus(latest.status);
     if (isOpenAiTerminalStatus(status)) return assertOpenAiResponseUsable(latest, label);
     pollCount += 1;
