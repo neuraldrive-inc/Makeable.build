@@ -19,6 +19,8 @@ test("hosted compiler produces a merged ESP32 image and blocks arbitrary targets
       ARDUINO_DIRECTORIES_DATA: path.join(toolchain, "data"),
       ARDUINO_DIRECTORIES_DOWNLOADS: path.join(toolchain, "downloads"),
       ARDUINO_DIRECTORIES_USER: path.join(toolchain, "user"),
+      NODE_ENV: "test",
+      MAKEABLE_TEST_AUTH_BYPASS: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -49,6 +51,20 @@ test("hosted compiler produces a merged ESP32 image and blocks arbitrary targets
   assert.ok(compiled.images[0].size > 100_000);
   assert.ok(compiled.images[0].dataBase64.length > compiled.images[0].size);
   assert.equal("stdout" in compiled, false);
+
+  const invalidResponse = await fetch(`${base}/api/firmware/compile`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      boardProfile: "esp32",
+      sketch: "void setup() { makeableUndefinedCall(); }\nvoid loop() {}",
+    }),
+  });
+  const invalid = await invalidResponse.json();
+  assert.equal(invalidResponse.status, 500);
+  assert.match(invalid.details, /makeableUndefinedCall/);
+  assert.match(invalid.details, /(not declared|was not declared)/i);
+  assert.doesNotMatch(invalid.details, /build-cache-path has been deprecated/i);
 
   const blockedResponse = await fetch(`${base}/api/firmware/compile`, {
     method: "POST",

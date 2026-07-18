@@ -355,6 +355,9 @@ async function verifyAccessToken(token, env) {
 }
 
 async function requireUser(req, res, env) {
+  if (env.NODE_ENV === "test" && env.MAKEABLE_TEST_AUTH_BYPASS === "1") {
+    return { userId: "compiler-integration-test", username: "compiler-integration-test" };
+  }
   const match = String(req.headers.authorization || "").match(/^Bearer\s+(.+)$/i);
   if (!match) {
     sendJson(res, { error: "Sign in to continue." }, 401);
@@ -733,7 +736,6 @@ async function compileFirmware(req, res, env) {
       String(ARDUINO_COMPILE_JOBS),
       "--fqbn",
       fqbn,
-      ...(env.ARDUINO_BUILD_CACHE_PATH ? ["--build-cache-path", env.ARDUINO_BUILD_CACHE_PATH] : []),
       "--output-dir",
       outputDir,
       "--export-binaries",
@@ -764,12 +766,15 @@ async function compileFirmware(req, res, env) {
       compiler: "arduino-cli",
     });
   } catch (error) {
-    console.error("Firmware compile failed", error.stderr || error.message);
+    const compilerDetails = sanitizeCompilerError(
+      [error.stdout, error.stderr, error.message].filter(Boolean).join("\n"),
+    );
+    console.error("Firmware compile failed", compilerDetails);
     return sendJson(
       res,
       {
         error: "The generated firmware did not compile for this board.",
-        details: sanitizeCompilerError(error.stderr || error.message),
+        details: compilerDetails,
       },
       500,
     );

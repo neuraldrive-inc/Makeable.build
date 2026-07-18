@@ -53,7 +53,6 @@ RUN mkdir -p /opt/arduino/cache /tmp/MakeableWarmup \
         arduino-cli compile \
           --jobs 2 \
           --fqbn "$fqbn" \
-          --build-cache-path /opt/arduino/cache \
           /tmp/MakeableWarmup; \
       done \
     && rm -rf /tmp/MakeableWarmup \

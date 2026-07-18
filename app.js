@@ -252,6 +252,18 @@ const firmwareSchema = {
   required: ["language", "sketch", "notes"],
 };
 
+const HOSTED_FIRMWARE_LIBRARIES = [
+  "ESP32 Arduino core built-ins (Arduino, Wire, SPI, WiFi, HTTPClient, Preferences, FS)",
+  "Adafruit Unified Sensor",
+  "DHT sensor library",
+  "Adafruit NeoPixel",
+  "ESP32Servo",
+  "Adafruit GFX Library",
+  "Adafruit SSD1306",
+  "ArduinoJson",
+  "PubSubClient",
+];
+
 const behaviorSchema = {
   type: "object",
   additionalProperties: false,
@@ -1369,7 +1381,7 @@ async function generateFirmwareForPlan(idea) {
       {
         role: "system",
         content:
-          "You are Makeable's ESP32 firmware engineer. Generate a compact, compile-ready ESP32 Arduino-core C++ sketch from the provided hardware plan. Support ESP32-family targets only. Output only schema-valid JSON. Do not include markdown fences. Keep the sketch under 180 lines unless absolutely required.",
+          "You are Makeable's ESP32 firmware engineer. Generate a compact, compile-ready ESP32 Arduino-core C++ sketch from the provided hardware plan. Support ESP32-family targets only. Use only the libraries explicitly listed as available in the user prompt. Output only schema-valid JSON. Do not include markdown fences. Keep the sketch under 180 lines unless absolutely required.",
       },
       {
         role: "user",
@@ -1402,7 +1414,16 @@ async function generateFirmwareForPlan(idea) {
     },
   });
   state.plan.firmware = normalizeFirmware(parseStructuredJson(data, "firmware"));
-  setStatus(els.transcriptBox, "The guide and board software are ready.", "ok");
+  const profile = selectBoardProfile(state.plan);
+  if (!profile) throw new Error("The generated guide does not contain a supported ESP32 board.");
+  setStatus(els.transcriptBox, "Checking the board software with the hosted ESP32 compiler...", "warn");
+  state.compiledFirmware = await compileFirmwareWithAutomaticRepair(profile, {
+    idea,
+    onProgress(message) {
+      setStatus(els.transcriptBox, message, "warn");
+    },
+  });
+  setStatus(els.transcriptBox, "The guide and verified board software are ready.", "ok");
 }
 
 function buildFirmwarePrompt(idea, plan) {
@@ -1437,8 +1458,103 @@ function buildFirmwarePrompt(idea, plan) {
     "- Print clear diagnostic markers matching the diagnostic tests.",
     "- Avoid unsafe boot pins unless the plan explicitly requires them.",
     "- If the hardware plan is uncertain, make the sketch conservative and explain the assumption in notes.",
+    `- Use only these hosted compiler libraries: ${HOSTED_FIRMWARE_LIBRARIES.join(", ")}.`,
+    "- Do not invent headers, packages, classes, methods, pin aliases, or APIs that are not supplied by those libraries.",
     "- Do not include markdown fences in the sketch string.",
   ].join("\n");
+}
+
+async function compileFirmwareWithAutomaticRepair(profile, options = {}) {
+  let sketch = state.plan?.firmware?.sketch || "";
+  try {
+    return await compileFirmwareSketch(sketch, profile);
+  } catch (error) {
+    const details = compilerFailureDetails(error);
+    if (!details || !state.generationId) throw error;
+
+    options.onProgress?.("The first version had a compiler issue. I’m repairing it automatically...");
+    appendSerial("Makeable: The first code version needs a small repair. Fixing it automatically.\n");
+    const repaired = await repairFirmwareForCompilerError({
+      idea: options.idea || els.ideaText.value.trim(),
+      profile,
+      sketch,
+      details,
+      onProgress: options.onProgress,
+    });
+    state.plan.firmware = repaired;
+    sketch = repaired.sketch;
+    options.onProgress?.("The repair is ready. Verifying it with the ESP32 compiler...");
+    try {
+      return await compileFirmwareSketch(sketch, profile);
+    } catch (repairError) {
+      console.error("Automatic firmware repair did not compile", repairError);
+      throw new Error("The automatic code repair could not pass the ESP32 compiler. Please make the guide again.");
+    }
+  }
+}
+
+async function compileFirmwareSketch(sketch, profile) {
+  const compiled = await apiJson("/api/firmware/compile", {
+    method: "POST",
+    body: JSON.stringify({ sketch, boardProfile: profile.id }),
+  });
+  compiled.sourceSketch = sketch;
+  return compiled;
+}
+
+function compilerFailureDetails(error) {
+  if (Number(error?.status) !== 500) return "";
+  return String(error?.apiData?.details || "").trim();
+}
+
+async function repairFirmwareForCompilerError({ idea, profile, sketch, details, onProgress }) {
+  const payload = {
+    model: settings.openaiReasoningModel,
+    reasoning: { effort: settings.openaiReasoningEffort || DEFAULT_REASONING_EFFORT },
+    input: [
+      {
+        role: "system",
+        content:
+          "You repair ESP32 Arduino-core C++ after a real compiler failure. Return a complete corrected sketch, not a patch. Preserve the intended behavior and pin assignments. Use only the explicitly available libraries. Resolve every reported diagnostic. Output only schema-valid JSON without markdown fences.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              `Project idea: ${idea || "ESP32 project"}`,
+              `Target board profile: ${profile.id} (${profile.fqbn})`,
+              `Available libraries: ${HOSTED_FIRMWARE_LIBRARIES.join(", ")}`,
+              "",
+              "Compiler diagnostic:",
+              details,
+              "",
+              "Original sketch:",
+              sketch,
+              "",
+              "Return the complete corrected firmware. Do not add a library that is not available.",
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "esp32_firmware_repair",
+        strict: true,
+        schema: firmwareSchema,
+      },
+    },
+  };
+  const data = await openAiResponse(payload, {
+    label: "firmware repair",
+    onProgress: ({ elapsedLabel, message }) => {
+      onProgress?.(message || `Repairing the board software (${elapsedLabel}).`);
+    },
+  });
+  return normalizeFirmware(parseStructuredJson(data, "firmware repair"));
 }
 
 function normalizeFirmware(firmware) {
@@ -2343,10 +2459,14 @@ async function compileAndFlashFirmware() {
     setStatus(els.esp32Status, "I’m preparing firmware for your ESP32.", "warn");
     appendSerial("\nMakeable: Preparing the code for your board.\n");
 
-    const compiled = await apiJson("/api/firmware/compile", {
-      method: "POST",
-      body: JSON.stringify({ sketch, boardProfile: profile.id }),
-    });
+    const compiled =
+      state.compiledFirmware?.board === profile.id && state.compiledFirmware?.sourceSketch === sketch
+        ? state.compiledFirmware
+        : await compileFirmwareWithAutomaticRepair(profile, {
+            onProgress(message) {
+              setStatus(els.esp32Status, message, "warn");
+            },
+          });
     state.compiledFirmware = compiled;
     appendSerial("Makeable: Code is ready. Now I’m sending it to the board.\n");
     if (compiled.stderr) appendSerial(`Makeable: Setup note from the compiler:\n${compiled.stderr}\n`);
@@ -2559,7 +2679,10 @@ async function apiJson(path, options = {}) {
   }
   if (!response.ok) {
     const message = formatApiError(response.status, data, text);
-    throw new Error(`${response.status} ${message}`);
+    const error = new Error(`${response.status} ${message}`);
+    error.status = response.status;
+    error.apiData = data;
+    throw error;
   }
   if (data?.upstreamStatus && data?.error) {
     throw new Error(`${data.upstreamStatus} ${formatApiError(data.upstreamStatus, data, text)}`);
