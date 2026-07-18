@@ -11,6 +11,7 @@ import {
   GetItemCommand,
   QueryCommand,
   TransactWriteItemsCommand,
+  UpdateItemCommand,
 } from "@aws-sdk/client-dynamodb";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { WebSocket, WebSocketServer } from "ws";
@@ -492,6 +493,7 @@ async function authorizeGeneration(req, res, user, env) {
                 entryId: { S: entryId },
                 delta: { N: "-1" },
                 kind: { S: "generation" },
+                providerCalls: { N: "1" },
                 createdAt: { S: now },
               },
               ConditionExpression: "attribute_not_exists(userId) AND attribute_not_exists(entryId)",
@@ -510,7 +512,27 @@ async function authorizeGeneration(req, res, user, env) {
         ConsistentRead: true,
       }),
     );
-    if (prior.Item) return true;
+    if (prior.Item) {
+      try {
+        await dynamodb.send(
+          new UpdateItemCommand({
+            TableName: env.CREDIT_LEDGER_TABLE,
+            Key: { userId: { S: user.userId }, entryId: { S: entryId } },
+            UpdateExpression: "ADD providerCalls :one",
+            ConditionExpression: "attribute_not_exists(providerCalls) OR providerCalls < :maxCalls",
+            ExpressionAttributeValues: {
+              ":one": { N: "1" },
+              ":maxCalls": { N: "3" },
+            },
+          }),
+        );
+        return true;
+      } catch (updateError) {
+        if (updateError.name !== "ConditionalCheckFailedException") throw updateError;
+        sendJson(res, { error: "This generation has reached its provider-call limit." }, 429);
+        return false;
+      }
+    }
     sendJson(res, { error: "You have no generation credits left." }, 402);
     return false;
   }
