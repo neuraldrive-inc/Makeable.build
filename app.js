@@ -2190,32 +2190,50 @@ async function connectSerial() {
 async function readSerialLoop() {
   const decoder = new TextDecoderStream();
   state.serialReadableClosed = state.serialPort.readable.pipeTo(decoder.writable).catch(() => {});
-  state.serialReader = decoder.readable.getReader();
+  const reader = decoder.readable.getReader();
+  state.serialReader = reader;
 
   try {
     while (true) {
-      const { value, done } = await state.serialReader.read();
+      const { value, done } = await reader.read();
       if (done) break;
       if (value) appendSerial(value);
     }
   } catch (error) {
     appendSerial(`\n[serial read stopped] ${error.message}\n`);
   } finally {
-    state.serialReader.releaseLock();
+    try {
+      reader.releaseLock();
+    } catch {
+      // The port may already have released the reader while disconnecting.
+    }
+    if (state.serialReader === reader) state.serialReader = null;
   }
 }
 
 async function disconnectSerial() {
-  try {
-    await state.serialReader?.cancel();
-    await state.serialReadableClosed;
-    await state.serialPort?.close();
-  } catch (error) {
-    console.error(error);
-  }
+  const reader = state.serialReader;
+  const readableClosed = state.serialReadableClosed;
+  const port = state.serialPort;
   state.serialReader = null;
   state.serialReadableClosed = null;
   state.serialPort = null;
+
+  try {
+    await reader?.cancel();
+  } catch (error) {
+    if (!/released|closed|lock/i.test(String(error?.message || error))) console.warn(error);
+  }
+  try {
+    await readableClosed;
+  } catch {
+    // The pipe normally rejects when a USB serial device changes modes.
+  }
+  try {
+    await port?.close();
+  } catch (error) {
+    if (!/closed|forgotten|lost/i.test(String(error?.message || error))) console.warn(error);
+  }
   els.connectSerialButton.disabled = false;
   els.disconnectSerialButton.disabled = true;
   els.sendSerialButton.disabled = true;
