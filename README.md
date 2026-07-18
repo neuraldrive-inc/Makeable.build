@@ -151,6 +151,7 @@ The final project is packaged into a readable guide in the final stage.
 - **AI planning:** OpenAI Responses API
 - **Voice input:** Deepgram transcription through an authenticated server-side WebSocket proxy
 - **Accounts:** Amazon Cognito PKCE sign-in + DynamoDB credit ledger
+- **Login branding:** Cognito Managed Login, styled with Makeable assets in `infra/cognito-managed-login-branding.json`
 - **Firmware compile:** pinned Arduino CLI + ESP32 core in an AWS ECS Docker container
 - **Board flashing:** Web Serial + ESP flashing flow
 - **Debugging:** Serial logs + webcam evidence

@@ -52,7 +52,7 @@ Resources:
     Properties:
       Domain: !Ref CognitoDomainPrefix
       UserPoolId: !Ref UserPool
-      ManagedLoginVersion: 1
+      ManagedLoginVersion: 2
 
   CreditAccounts:
     Type: AWS::DynamoDB::Table
