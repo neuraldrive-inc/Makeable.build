@@ -11,6 +11,8 @@
 
 > **Account release validation:** A fresh Cognito account received 10 credits. Two production OpenAI calls carrying one shared generation ID completed while the atomic ledger charged exactly once, leaving 9 credits. Each paid generation is capped at the two normal provider steps plus one retry, preventing reuse as an unlimited proxy. A signed-in CloudFront compile returned a 4,194,304-byte merged ESP32 image in 9.79 seconds. An authenticated production voice WebSocket reached `MakeableVoiceReady`; unauthenticated account requests returned HTTP 401; backend source paths returned HTTP 404; and the Chrome QA console had no errors or warnings. Temporary QA users and ledger entries were removed after validation.
 
+> **Fast release builds:** Normal CodeBuild releases use `Dockerfile.runtime` to overlay the API package and server files onto the last validated, prewarmed compiler image. Set `FULL_TOOLCHAIN_REBUILD=1` only when changing the ESP32 core, Arduino CLI, system packages, or bundled libraries. This avoids rebuilding five compiler caches for an API-only change.
+
 ## Executive recommendation
 
 Use the deployed **Amazon ECS Fargate Express service** for the ESP32 compiler and hosted provider API, keep all provider secrets on the server, and enforce **Amazon Cognito** identity plus an atomic **DynamoDB** credit ledger before every paid generation.

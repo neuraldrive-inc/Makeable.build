@@ -11,7 +11,20 @@ phases:
       - docker pull "$ECR_REPOSITORY_URI:latest" || true
   build:
     commands:
-      - DOCKER_BUILDKIT=1 docker build --platform linux/amd64 --build-arg BUILDKIT_INLINE_CACHE=1 --cache-from "$ECR_REPOSITORY_URI:latest" --tag "$ECR_REPOSITORY_URI:$IMAGE_TAG" --tag "$ECR_REPOSITORY_URI:latest" .
+      - |
+        if [ "${FULL_TOOLCHAIN_REBUILD:-0}" = "1" ]; then
+          DOCKER_BUILDKIT=1 docker build --platform linux/amd64 \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            --cache-from "$ECR_REPOSITORY_URI:latest" \
+            --tag "$ECR_REPOSITORY_URI:$IMAGE_TAG" \
+            --tag "$ECR_REPOSITORY_URI:latest" .
+        else
+          DOCKER_BUILDKIT=1 docker build --platform linux/amd64 \
+            --file Dockerfile.runtime \
+            --build-arg BASE_IMAGE="$ECR_REPOSITORY_URI:latest" \
+            --tag "$ECR_REPOSITORY_URI:$IMAGE_TAG" \
+            --tag "$ECR_REPOSITORY_URI:latest" .
+        fi
   post_build:
     commands:
       - docker push "$ECR_REPOSITORY_URI:$IMAGE_TAG"
