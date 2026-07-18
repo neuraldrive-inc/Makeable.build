@@ -1,0 +1,25 @@
+.dockerignore
+.env
+.env.*
+.gitignore
+.github/
+.makeable/
+.netlify/
+.netlifyignore
+Dockerfile
+README.md
+buildspec.aws.yml
+design/
+docs/
+infra/
+netlify/
+netlify.toml
+node_modules/
+package-lock.json
+package.json
+render.yaml
+scripts/
+server.mjs
+test image.jpg
+test.md
+tests/
