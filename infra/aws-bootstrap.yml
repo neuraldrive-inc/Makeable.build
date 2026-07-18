@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Makeable ESP32 compiler build and App Runner access resources
+Description: Makeable ESP32 compiler build and ECS Express Mode access resources
 
 Parameters:
   RepositoryUrl:
@@ -81,31 +81,18 @@ Resources:
             Type: PLAINTEXT
             Value: !GetAtt CompilerRepository.RepositoryUri
 
-  AppRunnerEcrAccessRole:
+  EcsTaskExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: MakeableAppRunnerEcrAccessRole
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
-              Service: build.apprunner.amazonaws.com
+              Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
-
-  AppRunnerInstanceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: MakeableAppRunnerInstanceRole
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: tasks.apprunner.amazonaws.com
-            Action: sts:AssumeRole
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
       Policies:
         - PolicyName: ReadMakeableSecrets
           PolicyDocument:
@@ -115,12 +102,25 @@ Resources:
                 Action: secretsmanager:GetSecretValue
                 Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:makeable/*
 
+  EcsExpressInfrastructureRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSInfrastructureRoleforExpressGatewayServices
+
 Outputs:
   EcrRepositoryUri:
     Value: !GetAtt CompilerRepository.RepositoryUri
   BuildProjectName:
     Value: !Ref ImageBuildProject
-  AppRunnerEcrAccessRoleArn:
-    Value: !GetAtt AppRunnerEcrAccessRole.Arn
-  AppRunnerInstanceRoleArn:
-    Value: !GetAtt AppRunnerInstanceRole.Arn
+  EcsTaskExecutionRoleArn:
+    Value: !GetAtt EcsTaskExecutionRole.Arn
+  EcsExpressInfrastructureRoleArn:
+    Value: !GetAtt EcsExpressInfrastructureRole.Arn

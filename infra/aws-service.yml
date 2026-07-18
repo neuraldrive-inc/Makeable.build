@@ -1,12 +1,12 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Always-warm Makeable ESP32 API on AWS App Runner
+Description: Always-warm Makeable ESP32 API on Amazon ECS Express Mode
 
 Parameters:
   ImageIdentifier:
     Type: String
-  EcrAccessRoleArn:
+  ExecutionRoleArn:
     Type: String
-  InstanceRoleArn:
+  InfrastructureRoleArn:
     Type: String
   OpenAISecretArn:
     Type: String
@@ -14,54 +14,71 @@ Parameters:
     Type: String
 
 Resources:
-  AutoScaling:
-    Type: AWS::AppRunner::AutoScalingConfiguration
+  CompilerCluster:
+    Type: AWS::ECS::Cluster
     Properties:
-      AutoScalingConfigurationName: makeable-esp32-single-instance
-      MinSize: 1
-      MaxSize: 1
-      MaxConcurrency: 2
+      ClusterName: makeable
+
+  CompilerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/makeable-esp32-api
+      RetentionInDays: 14
 
   Service:
-    Type: AWS::AppRunner::Service
+    Type: AWS::ECS::ExpressGatewayService
+    DependsOn: CompilerLogGroup
     Properties:
       ServiceName: makeable-esp32-api
-      AutoScalingConfigurationArn: !GetAtt AutoScaling.AutoScalingConfigurationArn
-      SourceConfiguration:
-        AutoDeploymentsEnabled: true
-        AuthenticationConfiguration:
-          AccessRoleArn: !Ref EcrAccessRoleArn
-        ImageRepository:
-          ImageIdentifier: !Ref ImageIdentifier
-          ImageRepositoryType: ECR
-          ImageConfiguration:
-            Port: "10000"
-            RuntimeEnvironmentVariables:
-              NODE_ENV: production
-              ALLOWED_ORIGINS: https://makeable.build,https://www.makeable.build
-              MAX_CONCURRENT_COMPILES: "1"
-              ARDUINO_COMPILE_JOBS: "1"
-              COMPILE_TIMEOUT_MS: "300000"
-              OPENAI_MODEL: gpt-5.6-sol
-              OPENAI_REASONING_MODEL: gpt-5.6-sol
-              OPENAI_REASONING_EFFORT: high
-            RuntimeEnvironmentSecrets:
-              OPENAI_API_KEY: !Ref OpenAISecretArn
-              DEEPGRAM_API_KEY: !Ref DeepgramSecretArn
-      InstanceConfiguration:
-        Cpu: "1 vCPU"
-        Memory: "2 GB"
-        InstanceRoleArn: !Ref InstanceRoleArn
-      HealthCheckConfiguration:
-        Protocol: HTTP
-        Path: /api/health
-        Interval: 10
-        Timeout: 5
-        HealthyThreshold: 1
-        UnhealthyThreshold: 5
+      Cluster: !GetAtt CompilerCluster.Arn
+      ExecutionRoleArn: !Ref ExecutionRoleArn
+      InfrastructureRoleArn: !Ref InfrastructureRoleArn
+      Cpu: "1024"
+      Memory: "2048"
+      HealthCheckPath: /api/health
+      PrimaryContainer:
+        Image: !Ref ImageIdentifier
+        ContainerPort: 10000
+        AwsLogsConfiguration:
+          LogGroup: !Ref CompilerLogGroup
+          LogStreamPrefix: ecs
+        Environment:
+          - Name: PORT
+            Value: "10000"
+          - Name: NODE_ENV
+            Value: production
+          - Name: ALLOWED_ORIGINS
+            Value: https://makeable.build,https://www.makeable.build
+          - Name: MAX_CONCURRENT_COMPILES
+            Value: "1"
+          - Name: ARDUINO_COMPILE_JOBS
+            Value: "1"
+          - Name: COMPILE_TIMEOUT_MS
+            Value: "300000"
+          - Name: OPENAI_MODEL
+            Value: gpt-5.6-sol
+          - Name: OPENAI_REASONING_MODEL
+            Value: gpt-5.6-sol
+          - Name: OPENAI_REASONING_EFFORT
+            Value: high
+        Secrets:
+          - Name: OPENAI_API_KEY
+            ValueFrom: !Ref OpenAISecretArn
+          - Name: DEEPGRAM_API_KEY
+            ValueFrom: !Ref DeepgramSecretArn
+      ScalingTarget:
+        MinTaskCount: 1
+        MaxTaskCount: 1
+        AutoScalingMetric: AVERAGE_CPU
+        AutoScalingTargetValue: 60
+      Tags:
+        - Key: Project
+          Value: Makeable
+        - Key: Workload
+          Value: ESP32Compiler
 
 Outputs:
   ServiceArn:
     Value: !GetAtt Service.ServiceArn
   ServiceUrl:
-    Value: !GetAtt Service.ServiceUrl
+    Value: !Sub https://${Service.Endpoint}
