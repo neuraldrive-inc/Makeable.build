@@ -71,11 +71,13 @@ Resources:
           - Name: COMPILE_TIMEOUT_MS
             Value: "300000"
           - Name: OPENAI_MODEL
-            Value: gpt-5.6-sol
+            Value: gpt-5.6-terra
           - Name: OPENAI_REASONING_MODEL
-            Value: gpt-5.6-sol
+            Value: gpt-5.6-terra
           - Name: OPENAI_REASONING_EFFORT
-            Value: high
+            Value: low
+          - Name: OPENAI_SERVICE_TIER
+            Value: priority
           - Name: AWS_REGION
             Value: !Ref AWS::Region
           - Name: COGNITO_USER_POOL_ID

@@ -23,6 +23,9 @@ const initialEnv = getEnv();
 const port = Number(initialEnv.PORT || 8787);
 const MAX_REQUEST_BYTES = 512 * 1024;
 const MAX_SKETCH_BYTES = 96 * 1024;
+const DEFAULT_OPENAI_MODEL = "gpt-5.6-terra";
+const DEFAULT_OPENAI_REASONING_EFFORT = "low";
+const DEFAULT_OPENAI_SERVICE_TIER = "priority";
 const MAX_CONCURRENT_COMPILES = Math.max(1, Number(initialEnv.MAX_CONCURRENT_COMPILES || 2));
 const ARDUINO_COMPILE_JOBS = Math.max(1, Number(initialEnv.ARDUINO_COMPILE_JOBS || 1));
 const COMPILE_TIMEOUT_MS = Math.max(30000, Number(initialEnv.COMPILE_TIMEOUT_MS || 240000));
@@ -283,9 +286,10 @@ function readEnv(filePath) {
 function publicConfig(env) {
   const config = {
     githubOwner: env.GITHUB_OWNER || "",
-    openaiModel: env.OPENAI_MODEL || "gpt-5.6-sol",
-    openaiReasoningModel: env.OPENAI_REASONING_MODEL || "gpt-5.6-sol",
-    openaiReasoningEffort: env.OPENAI_REASONING_EFFORT || "high",
+    openaiModel: env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
+    openaiReasoningModel: env.OPENAI_REASONING_MODEL || DEFAULT_OPENAI_MODEL,
+    openaiReasoningEffort: env.OPENAI_REASONING_EFFORT || DEFAULT_OPENAI_REASONING_EFFORT,
+    openaiServiceTier: openAIServiceTier(env),
     hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
     hasGithubToken: Boolean(env.GITHUB_TOKEN),
     hasEsp32Compiler: Boolean(findArduinoCli(env)),
@@ -606,13 +610,10 @@ async function proxyOpenAI(req, res, env) {
   if (!env.OPENAI_API_KEY) return sendJson(res, { error: "OPENAI_API_KEY is missing in .env" }, 401);
 
   const body = await readJsonBody(req);
-  body.model = env.OPENAI_MODEL || "gpt-5.6-sol";
+  body.model = env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
+  body.service_tier = openAIServiceTier(env);
 
-  const upstream = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: openAIHeaders(env),
-    body: JSON.stringify(body),
-  });
+  const upstream = await requestOpenAIResponse(body, env);
 
   const text = await upstream.text();
   res.writeHead(upstream.status, {
@@ -627,18 +628,43 @@ async function createOpenAIBackgroundResponse(req, res, env) {
   const body = await readJsonBody(req);
   const payload = {
     ...body,
-    model: env.OPENAI_REASONING_MODEL || env.OPENAI_MODEL || "gpt-5.6-sol",
+    model: env.OPENAI_REASONING_MODEL || env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
+    service_tier: openAIServiceTier(env),
     background: true,
     store: body.store ?? true,
   };
   delete payload.stream;
 
+  const upstream = await requestOpenAIResponse(payload, env);
+  return pipeJson(upstream, res);
+}
+
+function openAIServiceTier(env) {
+  const tier = String(env.OPENAI_SERVICE_TIER || DEFAULT_OPENAI_SERVICE_TIER).toLowerCase();
+  return ["auto", "default", "flex", "priority"].includes(tier)
+    ? tier
+    : DEFAULT_OPENAI_SERVICE_TIER;
+}
+
+async function requestOpenAIResponse(payload, env) {
   const upstream = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: openAIHeaders(env),
     body: JSON.stringify(payload),
   });
-  return pipeJson(upstream, res);
+  if (openAIServiceTier(env) !== "priority" || upstream.ok) return upstream;
+
+  const failure = await upstream.clone().text();
+  if (!/service[_\s-]*tier|priority.*(?:unavailable|not enabled|not supported)/i.test(failure)) {
+    return upstream;
+  }
+
+  console.warn("OpenAI priority tier is unavailable; retrying this request on the standard tier.");
+  return fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: openAIHeaders(env),
+    body: JSON.stringify({ ...payload, service_tier: "default" }),
+  });
 }
 
 async function retrieveOpenAIResponse(responseId, res, env) {

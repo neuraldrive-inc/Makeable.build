@@ -2,9 +2,9 @@ import { selectBoardProfile, USB_SERIAL_FILTERS } from "./lib/board-profiles.mjs
 
 const $ = (selector) => document.querySelector(selector);
 
-const FRONTIER_MODEL = "gpt-5.6-sol";
+const FRONTIER_MODEL = "gpt-5.6-terra";
 const LEGACY_MODEL_DEFAULTS = new Set(["gpt-5.4-mini"]);
-const DEFAULT_REASONING_EFFORT = "high";
+const DEFAULT_REASONING_EFFORT = "low";
 const LEGACY_REASONING_EFFORT_DEFAULTS = new Set(["low"]);
 const AI_BACKGROUND_TIMEOUT_MS = 8 * 60 * 1000;
 const AI_POLL_BASE_INTERVAL_MS = 2200;

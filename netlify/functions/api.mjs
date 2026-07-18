@@ -65,12 +65,17 @@ export const config = {
   path: ["/config.local.js", "/api/*"],
 };
 
+const DEFAULT_OPENAI_MODEL = "gpt-5.6-terra";
+const DEFAULT_OPENAI_REASONING_EFFORT = "low";
+const DEFAULT_OPENAI_SERVICE_TIER = "priority";
+
 function getEnv() {
   const keys = [
     "OPENAI_API_KEY",
     "OPENAI_MODEL",
     "OPENAI_REASONING_MODEL",
     "OPENAI_REASONING_EFFORT",
+    "OPENAI_SERVICE_TIER",
     "GITHUB_TOKEN",
     "GITHUB_OWNER",
     "MAKEABLE_API_BASE_URL",
@@ -89,9 +94,10 @@ function publicConfig(env) {
   return {
     apiBaseUrl: String(env.MAKEABLE_API_BASE_URL || "").replace(/\/$/, ""),
     githubOwner: env.GITHUB_OWNER || "",
-    openaiModel: env.OPENAI_MODEL || "gpt-5.6-sol",
-    openaiReasoningModel: env.OPENAI_REASONING_MODEL || "gpt-5.6-sol",
-    openaiReasoningEffort: env.OPENAI_REASONING_EFFORT || "high",
+    openaiModel: env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
+    openaiReasoningModel: env.OPENAI_REASONING_MODEL || DEFAULT_OPENAI_MODEL,
+    openaiReasoningEffort: env.OPENAI_REASONING_EFFORT || DEFAULT_OPENAI_REASONING_EFFORT,
+    openaiServiceTier: openAIServiceTier(env),
     hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
     hasGithubToken: Boolean(env.GITHUB_TOKEN),
     hasVoice: Boolean(env.MAKEABLE_API_BASE_URL),
@@ -129,15 +135,10 @@ async function proxyOpenAI(req, env) {
   if (missing) return missing;
 
   const body = await req.json();
-  body.model = env.OPENAI_MODEL || "gpt-5.6-sol";
+  body.model = env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL;
+  body.service_tier = openAIServiceTier(env);
 
-  return streamJsonUpstream(
-    fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: openAIHeaders(env),
-      body: JSON.stringify(body),
-    }),
-  );
+  return streamJsonUpstream(requestOpenAIResponse(body, env));
 }
 
 async function createOpenAIBackgroundResponse(req, env) {
@@ -147,19 +148,42 @@ async function createOpenAIBackgroundResponse(req, env) {
   const body = await req.json();
   const payload = {
     ...body,
-    model: env.OPENAI_REASONING_MODEL || env.OPENAI_MODEL || "gpt-5.6-sol",
+    model: env.OPENAI_REASONING_MODEL || env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
+    service_tier: openAIServiceTier(env),
     background: true,
     store: body.store ?? true,
   };
   delete payload.stream;
 
-  return streamJsonUpstream(
-    fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: openAIHeaders(env),
-      body: JSON.stringify(payload),
-    }),
-  );
+  return streamJsonUpstream(requestOpenAIResponse(payload, env));
+}
+
+function openAIServiceTier(env) {
+  const tier = String(env.OPENAI_SERVICE_TIER || DEFAULT_OPENAI_SERVICE_TIER).toLowerCase();
+  return ["auto", "default", "flex", "priority"].includes(tier)
+    ? tier
+    : DEFAULT_OPENAI_SERVICE_TIER;
+}
+
+async function requestOpenAIResponse(payload, env) {
+  const upstream = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: openAIHeaders(env),
+    body: JSON.stringify(payload),
+  });
+  if (openAIServiceTier(env) !== "priority" || upstream.ok) return upstream;
+
+  const failure = await upstream.clone().text();
+  if (!/service[_\s-]*tier|priority.*(?:unavailable|not enabled|not supported)/i.test(failure)) {
+    return upstream;
+  }
+
+  console.warn("OpenAI priority tier is unavailable; retrying this request on the standard tier.");
+  return fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: openAIHeaders(env),
+    body: JSON.stringify({ ...payload, service_tier: "default" }),
+  });
 }
 
 async function retrieveOpenAIResponse(responseId, env) {
