@@ -40,6 +40,10 @@ Resources:
       CallbackURLs: [https://makeable.build/, http://localhost:8787/]
       LogoutURLs: [https://makeable.build/, http://localhost:8787/]
       SupportedIdentityProviders: [COGNITO]
+      ExplicitAuthFlows:
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
       PreventUserExistenceErrors: ENABLED
       EnableTokenRevocation: true
 
