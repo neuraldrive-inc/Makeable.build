@@ -9,6 +9,8 @@
 
 > **Deployment validation:** The production compiler runs as one always-warm 1-vCPU/2-GB Fargate task with 20 GB of ephemeral storage, private provider secrets, a CloudFront-only origin rule, and caching disabled. AWS's generated ECS hostname failed to publish an A/alias record even though the service, certificate, load balancer, target groups, and task were healthy, so the production path uses `d3maxnfgtzk18u.cloudfront.net`. The first direct build took 20.9 seconds, a warm repeat took 11.6 seconds, the secured CloudFront build took 8.2 seconds, and the complete `makeable.build` path took 9.7 seconds. Each returned one 4,194,304-byte merged image at address `0x0`; an arbitrary non-ESP32 target returned HTTP 400. The public site is connected to this endpoint. The signed-in account and ten-credit production flow is covered by the release validation described below.
 
+> **Account release validation:** A fresh Cognito account received 10 credits. Two production OpenAI calls carrying one shared generation ID completed while the atomic ledger charged exactly once, leaving 9 credits. A signed-in CloudFront compile returned a 4,194,304-byte merged ESP32 image in 9.79 seconds. An authenticated production voice WebSocket reached `MakeableVoiceReady`; unauthenticated account requests returned HTTP 401; backend source paths returned HTTP 404; and the Chrome QA console had no errors or warnings. Temporary QA users and ledger entries were removed after validation.
+
 ## Executive recommendation
 
 Use the deployed **Amazon ECS Fargate Express service** for the ESP32 compiler and hosted provider API, keep all provider secrets on the server, and enforce **Amazon Cognito** identity plus an atomic **DynamoDB** credit ledger before every paid generation.
