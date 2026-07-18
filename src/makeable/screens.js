@@ -748,11 +748,58 @@ function renderMissing(context) {
     button.addEventListener("click", async () => {
       const current = app.getProject();
       const updated = acquireMissingPart(current, button.dataset.obtainPart);
-      await app.replaceProject(updated);
-      if (updated.feasibility?.status === "ready") {
-        app.navigation.navigate("/build/feasibility/ready");
-      } else {
+      if (updated.feasibility?.status !== "ready") {
+        await app.replaceProject(updated);
         renderMissing(context);
+        return;
+      }
+
+      const status = outlet.querySelector("[data-shopping-status]");
+      const buttons = outlet.querySelectorAll(
+        "[data-obtain-part], [data-shop-missing], [data-start-alternative]",
+      );
+      buttons.forEach((control) => (control.disabled = true));
+      status.textContent = "Regenerating your guide and firmware with your complete parts list…";
+      const request = beginScopedRequest(context, current.photo?.revision);
+      try {
+        const plan = await requestHardwarePlan({
+          idea: ideaText(current.idea),
+          confirmedParts: updated.confirmedParts,
+          signal: request.controller.signal,
+        });
+        if (!isScopedRequestCurrent(context, request, current.photo?.revision)) return;
+        await app.replaceProject({
+          ...updated,
+          feasibility: feasibilityRecord(plan),
+          wiring: { steps: plan.wiringSteps },
+          firmware: plan.firmware,
+          tests: null,
+          publish: null,
+          progress: {
+            completedRoutes: (current.progress?.completedRoutes || []).filter((path) =>
+              [
+                "/build/new",
+                "/build/parts/upload",
+                "/build/parts/review",
+              ].includes(path),
+            ),
+          },
+          updatedAt: new Date().toISOString(),
+        });
+        if (!isScopedRequestCurrent(context, request, current.photo?.revision)) return;
+        app.navigation.navigate(
+          plan.feasibility.status === "missing"
+            ? "/build/feasibility/missing"
+            : "/build/feasibility/ready",
+        );
+      } catch (error) {
+        if (request.controller.signal.aborted || error?.name === "AbortError") return;
+        status.textContent = `I couldn’t refresh the build yet: ${error.message}`;
+        buttons.forEach((control) => (control.disabled = false));
+      } finally {
+        if (context.runtime.requestAbort === request.controller) {
+          context.runtime.requestAbort = null;
+        }
       }
     });
   }
@@ -1913,6 +1960,7 @@ async function flashCurrentFirmware(context, route, sketch, configuredFqbn) {
     );
     const result = await context.runtime.hardware.compileAndFlashFirmware({
       sketch,
+      diagnostics: app.getProject().feasibility?.diagnostics?.tests,
       fqbn: configuredFqbn || "esp32:esp32:esp32",
       erase,
       serial: context.window.navigator.serial,
@@ -2281,11 +2329,13 @@ async function acknowledgeManualTest(context, route, { action, acknowledged }) {
       signal: request.controller.signal,
     });
     if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
+    const certified = acknowledged && evaluation.status === "pass";
     const tests = app.getProject().tests || {};
     await app.updateProject("tests", {
       ...tests,
       manual: {
-        acknowledged,
+        acknowledged: certified,
+        userReportedSuccess: acknowledged,
         requestedAction: action,
         evidenceImageId: "manual-evidence",
         capturedAt: evidence.takenAt,
@@ -2296,7 +2346,7 @@ async function acknowledgeManualTest(context, route, { action, acknowledged }) {
       },
     });
     if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
-    if (acknowledged) {
+    if (certified) {
       await app.completeRoute(route.path);
       if (!isScopedRequestCurrent(context, request, request.photoRevision)) return;
       context.runtime.cameraStream?.getTracks?.().forEach((track) => track.stop());
@@ -2306,7 +2356,9 @@ async function acknowledgeManualTest(context, route, { action, acknowledged }) {
     }
     guidance.replaceChildren();
     const text = context.root.createElement("p");
-    text.textContent = `Try this repair: ${evaluation.nextStep}`;
+    text.textContent = acknowledged
+      ? `I couldn’t verify the result yet. Try this repair: ${evaluation.nextStep}`
+      : `Try this repair: ${evaluation.nextStep}`;
     const link = context.root.createElement("a");
     link.href = "/build/assemble";
     link.textContent = "Review the related connection";

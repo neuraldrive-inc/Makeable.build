@@ -220,6 +220,107 @@ test("missing parts exposes a local shop action and alternatives preserve idea h
   expect(idea.history.at(-1).text).toBe("Build a self-watering plant");
 });
 
+test("obtaining the final missing part regenerates wiring and firmware before continuing", async ({
+  page,
+}) => {
+  const project = {
+    ...baseProject,
+    feasibility: {
+      ...baseProject.feasibility,
+      status: "missing",
+      reasons: ["A motor is required to create airflow."],
+      missingParts: [
+        {
+          id: "motor",
+          name: "Small DC motor",
+          reason: "Creates airflow.",
+          searchTerms: ["3V DC motor"],
+          compatibleWith: ["board"],
+        },
+      ],
+      alternatives: [
+        {
+          id: "sensor-display",
+          title: "Sensor display",
+          summary: "Show the sensor reading without the pump.",
+          requiredPartIds: ["board", "sensor"],
+        },
+      ],
+    },
+    wiring: { steps: [{ title: "Stale wiring" }] },
+    firmware: { sketch: "stale firmware" },
+    progress: {
+      completedRoutes: [
+        "/build/new",
+        "/build/parts/upload",
+        "/build/parts/review",
+      ],
+    },
+  };
+  let requestPayload;
+  await page.route("**/api/openai/responses", async (route) => {
+    requestPayload = route.request().postDataJSON();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "regenerated-ready",
+        output_text: JSON.stringify({
+          projectTitle: "Mini fan",
+          summary: "Run a small motor when motion is detected.",
+          parts: [],
+          feasibility: { status: "ready", reasons: [] },
+          missingParts: [],
+          alternatives: [],
+          wiringSteps: baseProject.wiring.steps.slice(0, 2),
+          firmwareSpec: {
+            board: "ESP32 DevKit",
+            behavior: "Run the fan when motion is detected.",
+            libraries: [],
+            pinAssignments: [],
+            serialProtocol: [],
+          },
+          firmware: {
+            language: "Arduino C++",
+            sketch:
+              "const int MOTOR_PIN=8; unsigned long motorOffDeadline=0; void reportReset(){Serial.println(\"MAKEABLE|RESET|POWER_ON\");} void reportReady(){Serial.println(\"MAKEABLE|READY|ESP32\");} void reportCheck(){Serial.println(\"MAKEABLE|CHECK|motor|PASS|ok\");} void handleCommand(String line){if(line.startsWith(\"MAKEABLE|STOP|\")){digitalWrite(MOTOR_PIN,LOW);return;} if(line.startsWith(\"MAKEABLE|RUN|\")){unsigned long pulseMs=500;motorOffDeadline=millis()+pulseMs;digitalWrite(MOTOR_PIN,HIGH);reportCheck();}} void setup(){Serial.begin(115200);reportReset();reportReady();} void loop(){if((long)(millis()-motorOffDeadline)>=0){digitalWrite(MOTOR_PIN,LOW);}if(Serial.available())handleCommand(Serial.readStringUntil('\\\\n'));}",
+            notes: "Use a transistor driver for the motor.",
+          },
+          diagnostics: {
+            warnings: [],
+            tests: [
+              {
+                id: "motor",
+                name: "Motor spins",
+                kind: "actuator",
+                pulseMs: 500,
+                assemblyStep: 2,
+              },
+            ],
+            manualAction: "Move in front of the PIR sensor.",
+            manualQuestion: "Did the fan spin?",
+            manualSuccessLabel: "Yes, the fan spun",
+          },
+        }),
+      }),
+    });
+  });
+  await seed(page, project, "/build/feasibility/missing");
+
+  await page
+    .getByRole("button", { name: "Mark Small DC motor as obtained" })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Start Sensor display" }),
+  ).toBeDisabled();
+
+  await expect(page).toHaveURL(/\/build\/feasibility\/ready$/);
+  expect(JSON.stringify(requestPayload)).toContain("Small DC motor");
+  const regenerated = await page.evaluate(() => window.MAKEABLE_APP.getProject());
+  expect(regenerated.wiring.steps[0].title).not.toBe("Stale wiring");
+  expect(regenerated.firmware.sketch).not.toBe("stale firmware");
+});
+
 test("desktop camera entry opens a live preview and shutter with file fallback", async ({
   page,
 }) => {

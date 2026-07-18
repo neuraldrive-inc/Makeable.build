@@ -107,6 +107,7 @@ const confirmedPlan = {
       toPartId: "motor",
       pin: "D9",
       wireColor: "blue",
+      explanation: "The motor driver lets the controller switch the motor safely.",
       check: "Motor is off before power.",
     },
   ],
@@ -118,16 +119,49 @@ const confirmedPlan = {
   diagnostics: { requestId: "confirmed_1", warnings: [] },
 };
 
+const readyPlan = {
+  ...confirmedPlan,
+  feasibility: { status: "ready", reasons: [] },
+  missingParts: [],
+  diagnostics: {
+    ...confirmedPlan.diagnostics,
+    requestId: "ready_1",
+    tests: [
+      {
+        id: "motor",
+        name: "Motor responds",
+        kind: "actuator",
+        pulseMs: 500,
+        assemblyStep: 1,
+      },
+    ],
+    manualAction: "Confirm the fan blade spins freely.",
+    manualQuestion: "Did the fan blade spin?",
+    manualSuccessLabel: "Yes, the fan blade spun",
+  },
+};
+
 async function mockPlanning(page) {
   await page.route("**/api/openai/responses", async (route) => {
     const body = route.request().postDataJSON();
-    const isConfirmation = JSON.stringify(body).includes("confirmed inventory");
+    const serialized = JSON.stringify(body);
+    const isConfirmation = serialized.includes("confirmed inventory");
+    const includesAcquiredBlade = serialized.includes("Fan blade");
+    const plan = includesAcquiredBlade
+      ? readyPlan
+      : isConfirmation
+        ? confirmedPlan
+        : scanPlan;
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
-        id: isConfirmation ? "resp_confirmed_1" : "resp_scan_1",
+        id: includesAcquiredBlade
+          ? "resp_ready_1"
+          : isConfirmation
+            ? "resp_confirmed_1"
+            : "resp_scan_1",
         status: "completed",
-        output_text: JSON.stringify(isConfirmation ? confirmedPlan : scanPlan),
+        output_text: JSON.stringify(plan),
       }),
     });
   });
@@ -448,6 +482,7 @@ test("review selection and normalized edits survive a direct reload", async ({ p
 });
 
 test("obtaining the final required part transitions Missing to Ready", async ({ page }) => {
+  await mockPlanning(page);
   await page.goto("/build/new");
   await page.waitForFunction(() => Boolean(window.MAKEABLE_APP));
   await page.evaluate(async () => {
@@ -497,8 +532,8 @@ test("obtaining the final required part transitions Missing to Ready", async ({ 
   const persisted = await page.evaluate(() => window.MAKEABLE_APP.getProject());
   expect(persisted.feasibility.status).toBe("ready");
   expect(persisted.feasibility.missingParts).toEqual([]);
-  expect(persisted.wiring.steps).toEqual([{ title: "Preserve me" }]);
-  expect(persisted.firmware.sketch).toBe("void setup() {}");
+  expect(persisted.wiring.steps).toEqual(readyPlan.wiringSteps);
+  expect(persisted.firmware.sketch.trim()).toBe(contractSketch.trim());
 });
 
 test("replaced and torn-down photo object URLs are revoked", async ({ page }) => {

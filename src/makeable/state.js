@@ -97,7 +97,11 @@ const ROUTES_INVALIDATED_BY_FIELD = Object.freeze({
     "/build/publish/connect",
     "/build/publish/success",
   ],
-  tests: ["/build/publish/connect", "/build/publish/success"],
+  tests: [
+    "/build/test/manual",
+    "/build/publish/connect",
+    "/build/publish/success",
+  ],
   publishAuthorization: [],
   publish: [],
 });
@@ -272,34 +276,82 @@ export function createIndexedDbAdapter({
 } = {}) {
   if (!indexedDB?.open) throw new TypeError("IndexedDB is unavailable");
 
-  const database = new Promise((resolve, reject) => {
-    const request = indexedDB.open(dbName, version);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      for (const storeName of [PROJECT_STORE, IMAGE_STORE]) {
-        if (!db.objectStoreNames.contains(storeName)) db.createObjectStore(storeName);
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("Unable to open IndexedDB"));
-    request.onblocked = () => reject(new Error("IndexedDB upgrade was blocked"));
-  });
+  let databasePromise = null;
+  let activeDatabase = null;
+
+  const invalidateDatabase = (database) => {
+    if (activeDatabase !== database) return;
+    activeDatabase = null;
+    databasePromise = null;
+  };
+
+  const openDatabase = () => {
+    if (databasePromise) return databasePromise;
+    const opening = new Promise((resolve, reject) => {
+      const request = indexedDB.open(dbName, version);
+      let abandoned = false;
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        for (const storeName of [PROJECT_STORE, IMAGE_STORE]) {
+          if (!db.objectStoreNames.contains(storeName)) db.createObjectStore(storeName);
+        }
+      };
+      request.onsuccess = () => {
+        const db = request.result;
+        if (abandoned) {
+          db.close();
+          return;
+        }
+        activeDatabase = db;
+        db.onversionchange = () => {
+          invalidateDatabase(db);
+          db.close();
+        };
+        db.onclose = () => invalidateDatabase(db);
+        resolve(db);
+      };
+      request.onerror = () => {
+        abandoned = true;
+        reject(request.error || new Error("Unable to open IndexedDB"));
+      };
+      request.onblocked = () => {
+        abandoned = true;
+        reject(new Error("IndexedDB upgrade was blocked"));
+      };
+    });
+    databasePromise = opening;
+    opening.catch(() => {
+      if (databasePromise === opening) databasePromise = null;
+    });
+    return opening;
+  };
+
+  const startTransaction = async (storeName, mode, mayRetry = true) => {
+    const db = await openDatabase();
+    try {
+      return db.transaction(storeName, mode);
+    } catch (error) {
+      if (!mayRetry || error?.name !== "InvalidStateError") throw error;
+      invalidateDatabase(db);
+      db.close?.();
+      return startTransaction(storeName, mode, false);
+    }
+  };
+
+  openDatabase();
 
   return Object.freeze({
     async get(storeName, key) {
-      const db = await database;
-      const transaction = db.transaction(storeName, "readonly");
+      const transaction = await startTransaction(storeName, "readonly");
       return requestResult(transaction.objectStore(storeName).get(key));
     },
     async put(storeName, key, value) {
-      const db = await database;
-      const transaction = db.transaction(storeName, "readwrite");
+      const transaction = await startTransaction(storeName, "readwrite");
       transaction.objectStore(storeName).put(value, key);
       await transactionComplete(transaction);
     },
     async delete(storeName, key) {
-      const db = await database;
-      const transaction = db.transaction(storeName, "readwrite");
+      const transaction = await startTransaction(storeName, "readwrite");
       transaction.objectStore(storeName).delete(key);
       await transactionComplete(transaction);
     },

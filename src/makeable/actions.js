@@ -955,7 +955,12 @@ export async function requestHardwarePlan({
   const plan = normalizeHardwarePlan(parseResponsePayload(data), {
     requestId: data?.id,
   });
-  if (confirmation) assertFirmwareDiagnosticContract(plan.firmware?.sketch);
+  if (confirmation && plan.feasibility.status === "ready") {
+    assertFirmwareDiagnosticContract(
+      plan.firmware?.sketch,
+      plan.diagnostics?.tests,
+    );
+  }
   return plan;
 }
 
@@ -1329,6 +1334,7 @@ export async function createDiagnosticSession({
 
 export async function compileAndFlashFirmware({
   sketch,
+  diagnostics,
   fqbn = "esp32:esp32:esp32",
   erase = false,
   serial = globalThis.navigator?.serial,
@@ -1341,7 +1347,7 @@ export async function compileAndFlashFirmware({
   if (!String(sketch || "").trim()) {
     throw new Error("There isn’t code to load yet.");
   }
-  assertFirmwareDiagnosticContract(sketch);
+  assertFirmwareDiagnosticContract(sketch, diagnostics);
   const statusResponse = await fetchImpl("/api/arduino/status", { signal });
   const status = await safeJson(statusResponse);
   if (!statusResponse.ok || status.hostedMode) {
@@ -1478,23 +1484,34 @@ export function transitionFirmwareFlash(firmware = {}, status, details = {}) {
   return { ...firmware, flash };
 }
 
-export function hasFirmwareDiagnosticContract(sketch) {
+export function hasFirmwareDiagnosticContract(sketch, diagnostics) {
   const source = stripCppComments(sketch);
   const emits = (marker) =>
     new RegExp(
       `Serial\\s*\\.\\s*(?:print|println|printf)\\s*\\(\\s*["']MAKEABLE\\|${marker}\\|`,
       "i",
     ).test(source);
+  const hasExecutableRun = Boolean(
+    findCommandBlock(extractBalancedIfBlocks(source), "RUN"),
+  );
+  const normalizedDiagnostics = Array.isArray(diagnostics)
+    ? normalizeDiagnosticTests(diagnostics)
+    : [];
+  const requiresActuatorSafety =
+    normalizedDiagnostics.length === 0 ||
+    normalizedDiagnostics.some(({ kind }) => kind === "actuator") ||
+    containsEnergizingWrite(source);
   return (
     emits("READY") &&
     emits("CHECK") &&
     emits("RESET") &&
-    hasBranchBoundActuatorSafety(source)
+    hasExecutableRun &&
+    (!requiresActuatorSafety || hasBranchBoundActuatorSafety(source))
   );
 }
 
-export function assertFirmwareDiagnosticContract(sketch) {
-  if (hasFirmwareDiagnosticContract(sketch)) return true;
+export function assertFirmwareDiagnosticContract(sketch, diagnostics) {
+  if (hasFirmwareDiagnosticContract(sketch, diagnostics)) return true;
   throw new Error(
     "Firmware must emit MAKEABLE READY, CHECK, and RESET markers, handle executable RUN and STOP commands, and enforce a millis-based actuator-off safety deadline.",
   );
@@ -1666,6 +1683,22 @@ function stripCppComments(source) {
     /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g,
     (_match, literal) => literal || "",
   );
+}
+
+function containsEnergizingWrite(source) {
+  const executable = String(source || "").replace(
+    /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g,
+    "",
+  );
+  if (/\bdigitalWrite\s*\(\s*[^,()]+\s*,\s*HIGH\s*\)/.test(executable)) {
+    return true;
+  }
+  for (const match of executable.matchAll(
+    /\b(?:analogWrite|ledcWrite)\s*\(\s*[^,()]+\s*,\s*([^,)]+)\)/g,
+  )) {
+    if (!/^0(?:[uUlL]*)?$/.test(match[1].trim())) return true;
+  }
+  return false;
 }
 
 function hasBranchBoundActuatorSafety(source) {

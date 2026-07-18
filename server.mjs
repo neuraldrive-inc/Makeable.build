@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { promisify } from "node:util";
 import {
   createPublicConfig,
@@ -446,6 +447,7 @@ function findArduinoCli(env) {
     "/Applications/Arduino.app/Contents/MacOS/arduino-cli",
     "/opt/homebrew/bin/arduino-cli",
     "/usr/local/bin/arduino-cli",
+    path.join(homedir(), ".local", "bin", "arduino-cli"),
   ].filter(Boolean);
   return candidates.find((candidate) => existsSync(candidate)) || "";
 }

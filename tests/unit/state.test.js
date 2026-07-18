@@ -125,6 +125,33 @@ test("review selection persists without invalidating generated downstream work",
   assert.deepEqual(updated.progress, COMPLETE_PROJECT.progress);
 });
 
+test("changing test evidence revokes prior manual certification and publish progress", () => {
+  const updated = state.updateProject(
+    COMPLETE_PROJECT,
+    "tests",
+    {
+      automatic: COMPLETE_PROJECT.tests.automatic,
+      manual: {
+        acknowledged: false,
+        evaluation: { status: "uncertain" },
+      },
+    },
+    { now: () => "2026-07-16T12:00:00.000Z" },
+  );
+
+  assert.equal(updated.tests.manual.acknowledged, false);
+  assert.deepEqual(updated.progress.completedRoutes, [
+    "/build/new",
+    "/build/parts/upload",
+    "/build/parts/review",
+    "/build/feasibility/ready",
+    "/build/assemble",
+    "/build/code",
+    "/build/test/automatic",
+  ]);
+  assert.equal(updated.publish, null);
+});
+
 test("publish authorization persists independently and a fresh snapshot clears it", () => {
   const authorization = {
     repositoryName: "self-watering-plant",
@@ -320,12 +347,14 @@ test("the browser adapter creates separate IndexedDB stores for projects and ima
       queueMicrotask(() => {
         const database = {
           objectStoreNames: { contains: () => false },
+          close() {},
           createObjectStore(storeName) {
             createdStores.push(storeName);
           },
         };
         request.result = database;
         request.onupgradeneeded();
+        request.onsuccess();
       });
       return request;
     },
@@ -339,4 +368,98 @@ test("the browser adapter creates separate IndexedDB stores for projects and ima
       resolve();
     }),
   );
+});
+
+test("the browser adapter reopens once when an IndexedDB connection is closing", async () => {
+  let openCount = 0;
+  const indexedDB = {
+    open() {
+      openCount += 1;
+      const request = {};
+      const connectionNumber = openCount;
+      queueMicrotask(() => {
+        request.result = {
+          objectStoreNames: { contains: () => true },
+          close() {},
+          transaction() {
+            if (connectionNumber === 1) {
+              throw new DOMException("The database connection is closing.", "InvalidStateError");
+            }
+            return {
+              objectStore() {
+                return {
+                  get() {
+                    const result = {};
+                    queueMicrotask(() => {
+                      result.result = COMPLETE_PROJECT;
+                      result.onsuccess();
+                    });
+                    return result;
+                  },
+                };
+              },
+            };
+          },
+        };
+        request.onsuccess();
+      });
+      return request;
+    },
+  };
+
+  const adapter = state.createIndexedDbAdapter({ indexedDB });
+
+  assert.deepEqual(await adapter.get("projects", "project-1"), COMPLETE_PROJECT);
+  assert.equal(openCount, 2);
+});
+
+test("a blocked IndexedDB open closes a late orphan connection", async () => {
+  const requests = [];
+  let orphanCloseCount = 0;
+  const indexedDB = {
+    open() {
+      const request = {};
+      requests.push(request);
+      return request;
+    },
+  };
+  const adapter = state.createIndexedDbAdapter({ indexedDB });
+  requests[0].onblocked();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  const load = adapter.get("projects", "project-1");
+  assert.equal(requests.length, 2);
+
+  requests[0].result = {
+    close() {
+      orphanCloseCount += 1;
+    },
+  };
+  requests[0].onsuccess();
+
+  requests[1].result = {
+    objectStoreNames: { contains: () => true },
+    close() {},
+    transaction() {
+      return {
+        objectStore() {
+          return {
+            get() {
+              const result = {};
+              queueMicrotask(() => {
+                result.result = COMPLETE_PROJECT;
+                result.onsuccess();
+              });
+              return result;
+            },
+          };
+        },
+      };
+    },
+  };
+  requests[1].onsuccess();
+
+  assert.deepEqual(await load, COMPLETE_PROJECT);
+  assert.equal(orphanCloseCount, 1);
 });

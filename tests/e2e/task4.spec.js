@@ -267,6 +267,56 @@ test("assembly, flash, automatic test, and manual acknowledgement use real route
   });
 });
 
+test("an uncertain manual evaluation cannot certify or publish the project", async ({
+  page,
+}) => {
+  const manualProject = {
+    ...project,
+    firmware: {
+      ...project.firmware,
+      flash: { status: "success", boardName: "ESP32 DevKit" },
+    },
+    tests: {
+      automatic: {
+        status: "pass",
+        checks: [{ id: "board", name: "Board responds", status: "pass" }],
+        serialOutput: "MAKEABLE|READY|ESP32\n",
+      },
+    },
+    progress: {
+      completedRoutes: [
+        ...project.progress.completedRoutes,
+        "/build/assemble",
+        "/build/code",
+        "/build/test/automatic",
+      ],
+    },
+  };
+  await seed(page, manualProject, "/build/test/manual");
+  await page.evaluate(() => {
+    window.MAKEABLE_HARDWARE.evaluateManualTest = async () => ({
+      responseId: "resp_uncertain",
+      status: "uncertain",
+      observations: ["The expected movement is not visible."],
+      nextStep: "Move the project into frame and retry.",
+    });
+  });
+
+  await page.getByRole("button", { name: "Start camera" }).click();
+  await page.getByRole("button", { name: "Capture evidence" }).click();
+  await page.getByRole("button", { name: "Yes, it watered the plant" }).click();
+
+  await expect(page).toHaveURL(/\/build\/test\/manual$/);
+  await expect(page.getByText(/Move the project into frame and retry/)).toBeVisible();
+  const stored = await page.evaluate(() => window.MAKEABLE_APP.getProject());
+  expect(stored.tests.manual).toMatchObject({
+    acknowledged: false,
+    userReportedSuccess: true,
+    evaluation: { status: "uncertain" },
+  });
+  expect(stored.progress.completedRoutes).not.toContain("/build/test/manual");
+});
+
 test("Task 4 routes are accessible and contained at desktop, tablet, and mobile widths", async ({
   page,
 }) => {

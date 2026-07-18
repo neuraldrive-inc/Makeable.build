@@ -95,6 +95,16 @@ test("the package and local server identify the product as Makeable", async () =
   assert.doesNotMatch(server, /GeckCo AI running at/);
 });
 
+test("the local server discovers user-installed Arduino CLI binaries", async () => {
+  const server = await read("server.mjs");
+
+  assert.match(server, /homedir/);
+  assert.match(
+    server,
+    /path\.join\(homedir\(\),\s*["']\.local["'],\s*["']bin["'],\s*["']arduino-cli["']\)/,
+  );
+});
+
 test("the browser regression matrix uses a bounded worker pool", async () => {
   const config = (await import("../../playwright.config.js")).default;
 

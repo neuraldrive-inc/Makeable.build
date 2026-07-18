@@ -67,6 +67,38 @@ test("completed screens remain revisitable while unavailable future screens rema
   assert.equal(router.resolveRoute("/build/publish/connect", project).path, "/build/test/automatic");
 });
 
+test("publish routes require a currently certified manual result", () => {
+  const project = {
+    ...projectWith(
+      "/build/new",
+      "/build/parts/upload",
+      "/build/parts/review",
+      "/build/feasibility/ready",
+      "/build/assemble",
+      "/build/code",
+      "/build/test/automatic",
+      "/build/test/manual",
+      "/build/publish/connect",
+    ),
+    tests: {
+      automatic: { status: "pass" },
+      manual: {
+        acknowledged: false,
+        evaluation: { status: "uncertain" },
+      },
+    },
+  };
+
+  assert.equal(
+    router.resolveRoute("/build/publish/connect", project).path,
+    "/build/test/manual",
+  );
+  assert.equal(
+    router.resolveRoute("/build/publish/success", project).path,
+    "/build/test/manual",
+  );
+});
+
 test("the missing-parts branch is the guarded destination until feasibility becomes ready", () => {
   assert.equal(typeof router.resolveRoute, "function", "resolveRoute should be exported");
   const project = {

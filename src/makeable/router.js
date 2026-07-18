@@ -41,6 +41,14 @@ export function resolveRoute(pathname, project = {}) {
   ) {
     return ROUTES_BY_PATH.get("/build/code");
   }
+  if (
+    requested &&
+    isPublishRoute(requested.path) &&
+    completed.has("/build/test/manual") &&
+    !hasCertifiedManualResult(project)
+  ) {
+    return ROUTES_BY_PATH.get("/build/test/manual");
+  }
   if (requested && completed.has(requested.path)) return requested;
 
   const availablePath = firstIncompletePath(project, completed);
@@ -122,6 +130,17 @@ function firstIncompletePath(project, completed) {
 function routeComesAfterCode(path) {
   return READY_PROGRESSION.indexOf(path) >
     READY_PROGRESSION.indexOf("/build/code");
+}
+
+function isPublishRoute(path) {
+  return path === "/build/publish/connect" || path === "/build/publish/success";
+}
+
+function hasCertifiedManualResult(project) {
+  return (
+    project.tests?.manual?.acknowledged === true &&
+    project.tests?.manual?.evaluation?.status === "pass"
+  );
 }
 
 function normalizePath(pathname) {
