@@ -7,7 +7,7 @@ Parameters:
     Default: https://github.com/neuraldrive-inc/Makeable.build.git
   RepositoryBranch:
     Type: String
-    Default: codex/hosted-flashing
+    Default: main
 
 Resources:
   CompilerRepository:
