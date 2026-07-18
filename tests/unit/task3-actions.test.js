@@ -43,6 +43,15 @@ test("AI plans normalize bounds, confidence, feasibility, missing parts, alterna
           reason: "Moves the air",
           searchTerms: ["3V motor fan blade", "2mm shaft"],
           compatibleWith: ["motor"],
+          required: true,
+        },
+        {
+          id: "status-led",
+          name: "Optional status LED",
+          reason: "Optional visual feedback; the build works without it.",
+          searchTerms: ["5mm LED"],
+          compatibleWith: ["board"],
+          required: false,
         },
       ],
       alternatives: [
@@ -80,6 +89,12 @@ test("AI plans normalize bounds, confidence, feasibility, missing parts, alterna
   assert.equal(plan.parts[1].confirmed, false);
   assert.equal(plan.feasibility.status, "missing");
   assert.equal(plan.missingParts[0].obtained, false);
+  assert.equal(plan.missingParts[0].required, true);
+  assert.equal(plan.missingParts[1].required, false);
+  assert.deepEqual(
+    actions.requiredMissingParts(plan.missingParts).map(({ id }) => id),
+    ["fan-blade"],
+  );
   assert.deepEqual(plan.alternatives[0].requiredPartIds, ["motor"]);
   assert.deepEqual(plan.diagnostics, {
     schemaVersion: 1,
@@ -212,6 +227,61 @@ test("obtaining the final missing part adds it to inventory and makes feasibilit
   });
   assert.equal(updated.wiring, project.wiring);
   assert.equal(updated.firmware, project.firmware);
+});
+
+test("optional suggestions never block obtaining the final required part", () => {
+  const project = {
+    confirmedParts: [{ id: "board", name: "ESP32" }],
+    feasibility: {
+      status: "missing",
+      reasons: ["A USB data cable is required."],
+      missingParts: [
+        {
+          id: "usb-cable",
+          name: "USB data cable",
+          reason: "Required to load code.",
+          obtained: false,
+          required: true,
+        },
+        {
+          id: "status-led",
+          name: "Optional status LED",
+          reason: "Optional visual feedback only.",
+          obtained: false,
+          required: false,
+        },
+      ],
+    },
+  };
+
+  const updated = actions.acquireMissingPart(project, "usb-cable");
+
+  assert.equal(updated.feasibility.status, "ready");
+  assert.deepEqual(updated.feasibility.missingParts, []);
+  assert.deepEqual(
+    updated.confirmedParts.map(({ id }) => id),
+    ["board", "usb-cable"],
+  );
+});
+
+test("legacy Optional-prefixed suggestions are non-blocking while unspecified parts fail closed", () => {
+  assert.deepEqual(
+    actions
+      .requiredMissingParts([
+        {
+          id: "cable",
+          name: "USB data cable",
+          reason: "Loads the firmware.",
+        },
+        {
+          id: "led",
+          name: "Optional LED indicator",
+          reason: "Adds visual feedback.",
+        },
+      ])
+      .map(({ id }) => id),
+    ["cable"],
+  );
 });
 
 test("object URL registry revokes replaced and torn-down URLs", () => {

@@ -45,8 +45,16 @@ const MISSING_PART_SCHEMA = Object.freeze({
     reason: { type: "string" },
     searchTerms: { type: "array", items: { type: "string" } },
     compatibleWith: { type: "array", items: { type: "string" } },
+    required: { type: "boolean" },
   },
-  required: ["id", "name", "reason", "searchTerms", "compatibleWith"],
+  required: [
+    "id",
+    "name",
+    "reason",
+    "searchTerms",
+    "compatibleWith",
+    "required",
+  ],
 });
 
 const ALTERNATIVE_SCHEMA = Object.freeze({
@@ -220,7 +228,24 @@ export function normalizeHardwarePlan(raw = {}, options = {}) {
         typeof part?.confirmed === "boolean" ? part.confirmed : !lowConfidence,
     };
   });
-  const status = normalizeFeasibilityStatus(raw.feasibility?.status);
+  const declaredStatus = normalizeFeasibilityStatus(raw.feasibility?.status);
+  const missingParts = array(raw.missingParts).map((part, index) => ({
+    id: slug(part?.id || part?.name || `missing-${index + 1}`),
+    name: cleanText(part?.name, `Missing part ${index + 1}`),
+    reason: cleanText(part?.reason, ""),
+    searchTerms: textArray(part?.searchTerms),
+    compatibleWith: textArray(part?.compatibleWith).map(slug),
+    required: isRequiredMissingPart(part),
+    obtained: Boolean(part?.obtained),
+  }));
+  const hasOutstandingRequiredPart = requiredMissingParts(missingParts).some(
+    ({ obtained }) => !obtained,
+  );
+  const status =
+    hasOutstandingRequiredPart ||
+    (declaredStatus === "missing" && missingParts.length === 0)
+      ? "missing"
+      : "ready";
   const lowConfidencePartIds = parts
     .filter(({ lowConfidence, confirmed }) => lowConfidence && !confirmed)
     .map(({ id }) => id);
@@ -235,14 +260,7 @@ export function normalizeHardwarePlan(raw = {}, options = {}) {
       status,
       reasons: textArray(raw.feasibility?.reasons || raw.feasibilityReasons),
     },
-    missingParts: array(raw.missingParts).map((part, index) => ({
-      id: slug(part?.id || part?.name || `missing-${index + 1}`),
-      name: cleanText(part?.name, `Missing part ${index + 1}`),
-      reason: cleanText(part?.reason, ""),
-      searchTerms: textArray(part?.searchTerms),
-      compatibleWith: textArray(part?.compatibleWith).map(slug),
-      obtained: Boolean(part?.obtained),
-    })),
+    missingParts,
     alternatives: array(raw.alternatives).map((alternative, index) => ({
       id: slug(alternative?.id || alternative?.title || `alternative-${index + 1}`),
       title: cleanText(alternative?.title, `Alternative ${index + 1}`),
@@ -749,7 +767,9 @@ export function acquireMissingPart(project, partId) {
           bounds: null,
         },
       ];
-  const ready = updatedMissing.every(({ obtained }) => obtained);
+  const ready = requiredMissingParts(updatedMissing).every(
+    ({ obtained }) => obtained,
+  );
 
   return {
     ...project,
@@ -761,6 +781,16 @@ export function acquireMissingPart(project, partId) {
       missingParts: ready ? [] : updatedMissing,
     },
   };
+}
+
+export function isRequiredMissingPart(part) {
+  if (part?.required === false) return false;
+  if (part?.required === true) return true;
+  return !/^\s*optional\b/i.test(String(part?.name || ""));
+}
+
+export function requiredMissingParts(parts) {
+  return array(parts).filter(isRequiredMissingPart);
 }
 
 export function createObjectUrlRegistry({
@@ -898,6 +928,7 @@ export async function requestHardwarePlan({
             "Treat this as the confirmed inventory; do not re-identify or add photographed parts.",
             JSON.stringify(confirmedParts),
             "Return honest feasibility, missing parts, compatible alternatives, wiring, firmware, and stable diagnostics.",
+            "Set missingParts.required true only for parts essential to complete, load, or safely test this build. Mark nice-to-have accessories false, and never let optional parts make feasibility missing.",
             firmwareDiagnosticRequirements(),
             "Never invent prices, sellers, stock, or checkout.",
           ].join("\n\n"),
@@ -911,6 +942,7 @@ export async function requestHardwarePlan({
             "Identify only actual visible parts needed for the idea.",
             "Use tight 0-100 percentage bounds and conservative confidence.",
             "Return honest feasibility, missing parts, inventory-compatible alternatives, and stable diagnostics.",
+            "Set missingParts.required true only for parts essential to complete, load, or safely test this build. Mark nice-to-have accessories false, and never let optional parts make feasibility missing.",
             firmwareDiagnosticRequirements(),
             "Do not invent prices, sellers, stock, or checkout.",
           ].join("\n\n"),

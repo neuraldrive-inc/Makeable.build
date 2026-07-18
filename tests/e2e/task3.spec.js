@@ -507,6 +507,15 @@ test("obtaining the final required part transitions Missing to Ready", async ({ 
             reason: "Moves air.",
             compatibleWith: ["motor"],
             obtained: false,
+            required: true,
+          },
+          {
+            id: "status-led",
+            name: "Optional status LED",
+            reason: "Optional visual feedback only.",
+            compatibleWith: ["motor"],
+            obtained: false,
+            required: false,
           },
         ],
         alternatives: [],
@@ -524,6 +533,10 @@ test("obtaining the final required part transitions Missing to Ready", async ({ 
     window.MAKEABLE_APP.navigation.navigate("/build/feasibility/missing");
   });
 
+  await expect(
+    page.getByRole("heading", { name: "Almost! You’re missing 1 part." }),
+  ).toBeVisible();
+  await expect(page.getByText("Optional status LED")).toHaveCount(0);
   await page.getByRole("button", { name: "Mark Fan blade as obtained" }).click();
   await expect(page).toHaveURL(/\/build\/feasibility\/ready$/);
   await expect(
@@ -534,6 +547,198 @@ test("obtaining the final required part transitions Missing to Ready", async ({ 
   expect(persisted.feasibility.missingParts).toEqual([]);
   expect(persisted.wiring.steps).toEqual(readyPlan.wiringSteps);
   expect(persisted.firmware.sketch.trim()).toBe(contractSketch.trim());
+});
+
+test("an optional-only legacy missing plan repairs itself to Ready", async ({ page }) => {
+  await page.goto("/build/new");
+  await page.waitForFunction(() => Boolean(window.MAKEABLE_APP));
+  await page.evaluate(async () => {
+    await window.MAKEABLE_APP.replaceProject({
+      ...window.MAKEABLE_APP.getProject(),
+      idea: { text: "Make a GPIO demonstrator" },
+      photo: {
+        imageId: "source",
+        width: 1200,
+        height: 800,
+        mimeType: "image/jpeg",
+        revision: "optional-only-legacy",
+      },
+      confirmedParts: [{ id: "board", name: "ESP32", confirmed: true }],
+      feasibility: {
+        status: "missing",
+        reasons: ["Optional indicators could make the result easier to see."],
+        projectTitle: "GPIO demonstrator",
+        summary: "Exercise one GPIO safely.",
+        missingParts: [
+          {
+            id: "status-led",
+            name: "Optional status LED",
+            reason: "Adds visual feedback but is not required.",
+            obtained: false,
+          },
+        ],
+        alternatives: [],
+      },
+      wiring: { steps: [] },
+      firmware: { sketch: "void setup() {}" },
+      progress: {
+        completedRoutes: [
+          "/build/new",
+          "/build/parts/upload",
+          "/build/parts/review",
+        ],
+      },
+    });
+    window.MAKEABLE_APP.navigation.navigate("/build/feasibility/missing");
+  });
+
+  await expect(page).toHaveURL(/\/build\/feasibility\/ready$/);
+  const persisted = await page.evaluate(() => window.MAKEABLE_APP.getProject());
+  expect(persisted.feasibility.status).toBe("ready");
+  expect(persisted.feasibility.reasons).toEqual([]);
+  expect(persisted.feasibility.missingParts).toEqual([]);
+});
+
+test("legacy obtained required parts regenerate before becoming Ready", async ({ page }) => {
+  let planRequests = 0;
+  await page.route("**/api/openai/responses", async (route) => {
+    planRequests += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "resp_legacy_obtained",
+        status: "completed",
+        output_text: JSON.stringify(readyPlan),
+      }),
+    });
+  });
+  await page.goto("/build/new");
+  await page.waitForFunction(() => Boolean(window.MAKEABLE_APP));
+  await page.evaluate(async () => {
+    await window.MAKEABLE_APP.replaceProject({
+      ...window.MAKEABLE_APP.getProject(),
+      idea: { text: "Make a mini desk fan" },
+      photo: {
+        imageId: "source",
+        width: 1200,
+        height: 800,
+        mimeType: "image/jpeg",
+        revision: "legacy-obtained-required",
+      },
+      confirmedParts: [
+        { id: "motor", name: "DC motor", confirmed: true },
+        { id: "fan-blade", name: "Fan blade", confirmed: true },
+      ],
+      feasibility: {
+        status: "missing",
+        reasons: ["A fan blade was required."],
+        missingParts: [
+          {
+            id: "fan-blade",
+            name: "Fan blade",
+            reason: "Moves air.",
+            obtained: true,
+            required: true,
+          },
+          {
+            id: "status-led",
+            name: "Optional status LED",
+            reason: "Adds visual feedback only.",
+            obtained: false,
+            required: false,
+          },
+        ],
+        alternatives: [],
+      },
+      wiring: { steps: [{ title: "Stale wiring" }] },
+      firmware: { sketch: "void setup() {}" },
+      progress: {
+        completedRoutes: [
+          "/build/new",
+          "/build/parts/upload",
+          "/build/parts/review",
+        ],
+      },
+    });
+    window.MAKEABLE_APP.navigation.navigate("/build/feasibility/missing");
+  });
+
+  await expect(page).toHaveURL(/\/build\/feasibility\/ready$/);
+  expect(planRequests).toBe(1);
+  const persisted = await page.evaluate(() => window.MAKEABLE_APP.getProject());
+  expect(persisted.wiring.steps).toEqual(readyPlan.wiringSteps);
+  expect(persisted.firmware.sketch.trim()).toBe(contractSketch.trim());
+});
+
+test("failed legacy regeneration offers a working retry", async ({ page }) => {
+  let planRequests = 0;
+  await page.route("**/api/openai/responses", async (route) => {
+    planRequests += 1;
+    if (planRequests === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { message: "Temporary planning outage." } }),
+      });
+      return;
+    }
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "resp_legacy_retry",
+        status: "completed",
+        output_text: JSON.stringify(readyPlan),
+      }),
+    });
+  });
+  await page.goto("/build/new");
+  await page.waitForFunction(() => Boolean(window.MAKEABLE_APP));
+  await page.evaluate(async () => {
+    await window.MAKEABLE_APP.replaceProject({
+      ...window.MAKEABLE_APP.getProject(),
+      idea: { text: "Make a mini desk fan" },
+      photo: {
+        imageId: "source",
+        width: 1200,
+        height: 800,
+        mimeType: "image/jpeg",
+        revision: "legacy-regeneration-retry",
+      },
+      confirmedParts: [
+        { id: "motor", name: "DC motor", confirmed: true },
+        { id: "fan-blade", name: "Fan blade", confirmed: true },
+      ],
+      feasibility: {
+        status: "missing",
+        reasons: ["A fan blade was required."],
+        missingParts: [
+          {
+            id: "fan-blade",
+            name: "Fan blade",
+            reason: "Moves air.",
+            obtained: true,
+            required: true,
+          },
+        ],
+        alternatives: [],
+      },
+      wiring: { steps: [{ title: "Stale wiring" }] },
+      firmware: { sketch: "void setup() {}" },
+      progress: {
+        completedRoutes: [
+          "/build/new",
+          "/build/parts/upload",
+          "/build/parts/review",
+        ],
+      },
+    });
+    window.MAKEABLE_APP.navigation.navigate("/build/feasibility/missing");
+  });
+
+  await expect(page.getByText(/Temporary planning outage/)).toBeVisible();
+  await page.getByRole("button", { name: "Retry guide refresh" }).click();
+  await expect(page).toHaveURL(/\/build\/feasibility\/ready$/);
+  expect(planRequests).toBe(2);
 });
 
 test("replaced and torn-down photo object URLs are revoked", async ({ page }) => {

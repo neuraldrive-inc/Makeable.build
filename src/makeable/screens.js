@@ -16,6 +16,7 @@ import {
   isAssemblyComplete,
   normalizeImageFile,
   requestHardwarePlan,
+  requiredMissingParts,
   recoverySecretForRepository,
   runSequentialDiagnostics,
   sharePublishedProject,
@@ -676,7 +677,71 @@ function renderMissing(context) {
   const project = app.getProject();
   const feasibility = project.feasibility || {};
   const parts = project.confirmedParts || [];
-  const missingParts = feasibility.missingParts || [];
+  const allMissingParts = feasibility.missingParts || [];
+  const missingParts = requiredMissingParts(allMissingParts);
+  const hasOutstandingRequiredPart = missingParts.some(
+    ({ obtained }) => !obtained,
+  );
+  if (
+    allMissingParts.length > 0 &&
+    missingParts.length === 0 &&
+    !hasOutstandingRequiredPart
+  ) {
+    const routeGeneration = context.runtime.routeGeneration;
+    outlet.innerHTML = screenFrame(`
+      <article class="route-screen missing-screen">
+        <p class="screen-status" role="status">Your required parts are ready. Opening Build + Code…</p>
+      </article>
+    `);
+    void app
+      .replaceProject({
+        ...project,
+        feasibility: {
+          ...feasibility,
+          status: "ready",
+          reasons: [],
+          missingParts: [],
+        },
+      })
+      .then(() => {
+        if (context.runtime.routeGeneration !== routeGeneration) return;
+        app.navigation.navigate("/build/feasibility/ready", { replace: true });
+      })
+      .catch((error) => {
+        if (context.runtime.routeGeneration !== routeGeneration) return;
+        outlet.querySelector("[role='status']").textContent =
+          `I couldn’t finish updating this build: ${error.message}`;
+      });
+    return;
+  }
+  if (missingParts.length > 0 && !hasOutstandingRequiredPart) {
+    outlet.innerHTML = screenFrame(`
+      <article class="route-screen missing-screen">
+        <p class="screen-status" data-shopping-status role="status">
+          Regenerating your guide and firmware with your complete parts list…
+        </p>
+        <button
+          class="secondary-button"
+          type="button"
+          data-retry-missing-refresh
+          hidden
+        >Retry guide refresh</button>
+      </article>
+    `);
+    const retry = outlet.querySelector("[data-retry-missing-refresh]");
+    const refresh = async () => {
+      retry.hidden = true;
+      await regenerateAfterMissingParts(context, project, project, {
+        replaceRoute: true,
+      });
+      if (app.getProject().feasibility?.status === "missing") {
+        retry.hidden = false;
+      }
+    };
+    retry.addEventListener("click", refresh);
+    void refresh();
+    return;
+  }
   const availableAlternatives = inventoryCompatibleAlternatives(
     feasibility.alternatives || [],
     parts,
@@ -754,53 +819,7 @@ function renderMissing(context) {
         return;
       }
 
-      const status = outlet.querySelector("[data-shopping-status]");
-      const buttons = outlet.querySelectorAll(
-        "[data-obtain-part], [data-shop-missing], [data-start-alternative]",
-      );
-      buttons.forEach((control) => (control.disabled = true));
-      status.textContent = "Regenerating your guide and firmware with your complete parts list…";
-      const request = beginScopedRequest(context, current.photo?.revision);
-      try {
-        const plan = await requestHardwarePlan({
-          idea: ideaText(current.idea),
-          confirmedParts: updated.confirmedParts,
-          signal: request.controller.signal,
-        });
-        if (!isScopedRequestCurrent(context, request, current.photo?.revision)) return;
-        await app.replaceProject({
-          ...updated,
-          feasibility: feasibilityRecord(plan),
-          wiring: { steps: plan.wiringSteps },
-          firmware: plan.firmware,
-          tests: null,
-          publish: null,
-          progress: {
-            completedRoutes: (current.progress?.completedRoutes || []).filter((path) =>
-              [
-                "/build/new",
-                "/build/parts/upload",
-                "/build/parts/review",
-              ].includes(path),
-            ),
-          },
-          updatedAt: new Date().toISOString(),
-        });
-        if (!isScopedRequestCurrent(context, request, current.photo?.revision)) return;
-        app.navigation.navigate(
-          plan.feasibility.status === "missing"
-            ? "/build/feasibility/missing"
-            : "/build/feasibility/ready",
-        );
-      } catch (error) {
-        if (request.controller.signal.aborted || error?.name === "AbortError") return;
-        status.textContent = `I couldn’t refresh the build yet: ${error.message}`;
-        buttons.forEach((control) => (control.disabled = false));
-      } finally {
-        if (context.runtime.requestAbort === request.controller) {
-          context.runtime.requestAbort = null;
-        }
-      }
+      await regenerateAfterMissingParts(context, current, updated);
     });
   }
   outlet.querySelector("[data-shop-missing]").addEventListener("click", () => {
@@ -816,6 +835,64 @@ function renderMissing(context) {
     button.addEventListener("click", () =>
       startAlternativeProject(context, button.dataset.startAlternative),
     );
+  }
+}
+
+async function regenerateAfterMissingParts(
+  context,
+  current,
+  updated,
+  { replaceRoute = false } = {},
+) {
+  const { outlet, app } = context;
+  const status = outlet.querySelector("[data-shopping-status]");
+  const buttons = outlet.querySelectorAll(
+    "[data-obtain-part], [data-shop-missing], [data-start-alternative], [data-retry-missing-refresh]",
+  );
+  buttons.forEach((control) => (control.disabled = true));
+  status.textContent =
+    "Regenerating your guide and firmware with your complete parts list…";
+  const request = beginScopedRequest(context, current.photo?.revision);
+  try {
+    const plan = await requestHardwarePlan({
+      idea: ideaText(current.idea),
+      confirmedParts: updated.confirmedParts,
+      signal: request.controller.signal,
+    });
+    if (!isScopedRequestCurrent(context, request, current.photo?.revision)) return;
+    await app.replaceProject({
+      ...updated,
+      feasibility: feasibilityRecord(plan),
+      wiring: { steps: plan.wiringSteps },
+      firmware: plan.firmware,
+      tests: null,
+      publish: null,
+      progress: {
+        completedRoutes: (current.progress?.completedRoutes || []).filter((path) =>
+          [
+            "/build/new",
+            "/build/parts/upload",
+            "/build/parts/review",
+          ].includes(path),
+        ),
+      },
+      updatedAt: new Date().toISOString(),
+    });
+    if (!isScopedRequestCurrent(context, request, current.photo?.revision)) return;
+    app.navigation.navigate(
+      plan.feasibility.status === "missing"
+        ? "/build/feasibility/missing"
+        : "/build/feasibility/ready",
+      { replace: replaceRoute },
+    );
+  } catch (error) {
+    if (request.controller.signal.aborted || error?.name === "AbortError") return;
+    status.textContent = `I couldn’t refresh the build yet: ${error.message}`;
+    buttons.forEach((control) => (control.disabled = false));
+  } finally {
+    if (context.runtime.requestAbort === request.controller) {
+      context.runtime.requestAbort = null;
+    }
   }
 }
 
