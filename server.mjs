@@ -341,6 +341,7 @@ async function compileFirmware(req, res, env) {
       String(ARDUINO_COMPILE_JOBS),
       "--fqbn",
       fqbn,
+      ...(env.ARDUINO_BUILD_CACHE_PATH ? ["--build-cache-path", env.ARDUINO_BUILD_CACHE_PATH] : []),
       "--output-dir",
       outputDir,
       "--export-binaries",

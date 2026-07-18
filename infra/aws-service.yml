@@ -1,0 +1,67 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Always-warm Makeable ESP32 API on AWS App Runner
+
+Parameters:
+  ImageIdentifier:
+    Type: String
+  EcrAccessRoleArn:
+    Type: String
+  InstanceRoleArn:
+    Type: String
+  OpenAISecretArn:
+    Type: String
+  DeepgramSecretArn:
+    Type: String
+
+Resources:
+  AutoScaling:
+    Type: AWS::AppRunner::AutoScalingConfiguration
+    Properties:
+      AutoScalingConfigurationName: makeable-esp32-single-instance
+      MinSize: 1
+      MaxSize: 1
+      MaxConcurrency: 2
+
+  Service:
+    Type: AWS::AppRunner::Service
+    Properties:
+      ServiceName: makeable-esp32-api
+      AutoScalingConfigurationArn: !GetAtt AutoScaling.AutoScalingConfigurationArn
+      SourceConfiguration:
+        AutoDeploymentsEnabled: true
+        AuthenticationConfiguration:
+          AccessRoleArn: !Ref EcrAccessRoleArn
+        ImageRepository:
+          ImageIdentifier: !Ref ImageIdentifier
+          ImageRepositoryType: ECR
+          ImageConfiguration:
+            Port: "10000"
+            RuntimeEnvironmentVariables:
+              NODE_ENV: production
+              ALLOWED_ORIGINS: https://makeable.build,https://www.makeable.build
+              MAX_CONCURRENT_COMPILES: "1"
+              ARDUINO_COMPILE_JOBS: "1"
+              COMPILE_TIMEOUT_MS: "300000"
+              OPENAI_MODEL: gpt-5.6-sol
+              OPENAI_REASONING_MODEL: gpt-5.6-sol
+              OPENAI_REASONING_EFFORT: high
+            RuntimeEnvironmentSecrets:
+              OPENAI_API_KEY: !Ref OpenAISecretArn
+              DEEPGRAM_API_KEY: !Ref DeepgramSecretArn
+      InstanceConfiguration:
+        Cpu: "1 vCPU"
+        Memory: "2 GB"
+        InstanceRoleArn: !Ref InstanceRoleArn
+      HealthCheckConfiguration:
+        Protocol: HTTP
+        Path: /api/health
+        Interval: 10
+        Timeout: 5
+        HealthyThreshold: 1
+        UnhealthyThreshold: 5
+
+Outputs:
+  ServiceArn:
+    Value: !GetAtt Service.ServiceArn
+  ServiceUrl:
+    Value: !GetAtt Service.ServiceUrl

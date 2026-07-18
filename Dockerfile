@@ -6,6 +6,7 @@ ARG ESP32_CORE_VERSION=3.3.5
 ENV NODE_ENV=production \
     PORT=10000 \
     ARDUINO_CLI_PATH=/usr/local/bin/arduino-cli \
+    ARDUINO_BUILD_CACHE_PATH=/opt/arduino/cache \
     ARDUINO_DIRECTORIES_DATA=/opt/arduino/data \
     ARDUINO_DIRECTORIES_DOWNLOADS=/opt/arduino/downloads \
     ARDUINO_DIRECTORIES_USER=/opt/arduino/user
@@ -30,12 +31,33 @@ RUN apt-get update \
       "Adafruit GFX Library" \
       "Adafruit SSD1306" \
       "ArduinoJson" \
-      "PubSubClient"
+      "PubSubClient" \
+    && rm -rf /opt/arduino/downloads/*
 
 # The ESP32 build recipes invoke Python at compile time.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 \
     && rm -rf /var/lib/apt/lists/*
+
+# Precompile the ESP32 cores into a shared cache. This moves the slowest part of
+# a user's first generation into the image build and keeps every live instance
+# ready for all supported ESP32-family targets.
+RUN mkdir -p /opt/arduino/cache /tmp/MakeableWarmup \
+    && printf 'void setup() {}\nvoid loop() {}\n' > /tmp/MakeableWarmup/MakeableWarmup.ino \
+    && for fqbn in \
+      esp32:esp32:esp32 \
+      esp32:esp32:esp32s2 \
+      esp32:esp32:esp32s3 \
+      esp32:esp32:esp32c3 \
+      esp32:esp32:esp32c6; do \
+        arduino-cli compile \
+          --jobs 2 \
+          --fqbn "$fqbn" \
+          --build-cache-path /opt/arduino/cache \
+          /tmp/MakeableWarmup; \
+      done \
+    && rm -rf /tmp/MakeableWarmup \
+    && chown -R node:node /opt/arduino/cache
 
 ENV ARDUINO_COMPILE_JOBS=1 \
     MAX_CONCURRENT_COMPILES=1 \

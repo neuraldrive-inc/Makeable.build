@@ -1,0 +1,126 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Makeable ESP32 compiler build and App Runner access resources
+
+Parameters:
+  RepositoryUrl:
+    Type: String
+    Default: https://github.com/neuraldrive-inc/Makeable.build.git
+  RepositoryBranch:
+    Type: String
+    Default: codex/hosted-flashing
+
+Resources:
+  CompilerRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: makeable-esp32-api
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      ImageTagMutability: MUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"Keep five images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":5},"action":{"type":"expire"}}]}'
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: MakeableCodeBuildRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: MakeableImageBuild
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource: !GetAtt CompilerRepository.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/makeable-esp32-image:*
+
+  ImageBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: makeable-esp32-image
+      Description: Builds the warm ESP32 compiler image and pushes it to ECR
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      TimeoutInMinutes: 60
+      QueuedTimeoutInMinutes: 30
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Source:
+        Type: GITHUB
+        Location: !Ref RepositoryUrl
+        GitCloneDepth: 1
+        BuildSpec: buildspec.aws.yml
+      SourceVersion: !Sub refs/heads/${RepositoryBranch}
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_LARGE
+        Image: aws/codebuild/standard:7.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ECR_REPOSITORY_URI
+            Type: PLAINTEXT
+            Value: !GetAtt CompilerRepository.RepositoryUri
+
+  AppRunnerEcrAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: MakeableAppRunnerEcrAccessRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: build.apprunner.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+
+  AppRunnerInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: MakeableAppRunnerInstanceRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: tasks.apprunner.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ReadMakeableSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:makeable/*
+
+Outputs:
+  EcrRepositoryUri:
+    Value: !GetAtt CompilerRepository.RepositoryUri
+  BuildProjectName:
+    Value: !Ref ImageBuildProject
+  AppRunnerEcrAccessRoleArn:
+    Value: !GetAtt AppRunnerEcrAccessRole.Arn
+  AppRunnerInstanceRoleArn:
+    Value: !GetAtt AppRunnerInstanceRole.Arn
