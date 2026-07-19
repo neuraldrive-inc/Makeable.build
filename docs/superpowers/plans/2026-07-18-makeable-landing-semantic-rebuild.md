@@ -98,13 +98,16 @@ test("mobile signup enters sticky mode only after its source position leaves", a
   await expect(signup).toHaveClass(/is-mobile-sticky/);
   await expect(signup).toHaveCSS("position", "fixed");
 
-  const hidden = await page.evaluate(() => {
-    const card = document.querySelector('[data-story-chapter="test"]');
+  const clearance = await page.evaluate(() => {
     const signup = document.querySelector(".hero-signup");
-    return card.getBoundingClientRect().bottom >
-      document.documentElement.scrollHeight - signup.getBoundingClientRect().height;
+    return {
+      paddingBottom: parseFloat(getComputedStyle(document.body).paddingBottom),
+      signupHeight: signup.getBoundingClientRect().height,
+    };
   });
-  expect(hidden).toBe(true);
+  expect(clearance.paddingBottom).toBeGreaterThanOrEqual(
+    clearance.signupHeight + 12,
+  );
 });
 ```
 
