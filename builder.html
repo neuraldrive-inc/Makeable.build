@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f7f0e4" />
+    <base href="/" />
+    <title>Makeable</title>
+    <link rel="icon" href="./assets/icons/lucide/sparkles.svg" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to project builder</a>
+
+    <header class="app-header" data-makeable-shell>
+      <a class="makeable-brand" href="/" aria-label="Makeable home">
+        <span aria-hidden="true">Makeable</span>
+        <span class="visually-hidden">Makeable home</span>
+        <img
+          class="brand-spark"
+          src="./assets/icons/lucide/sparkles.svg"
+          alt=""
+          width="24"
+          height="24"
+          aria-hidden="true"
+        />
+      </a>
+
+      <nav class="progress-rail" aria-label="Build progress">
+        <ol>
+          <li class="progress-step progress-step--describe" data-progress-step="describe" aria-current="step">
+            <a class="progress-action" data-progress-action aria-disabled="true" tabindex="-1">
+              <span class="progress-number" aria-hidden="true">1</span>
+              <img src="./assets/icons/lucide/message-circle.svg" alt="" width="30" height="30" aria-hidden="true" />
+              <span class="progress-label">Describe</span>
+            </a>
+            <span class="progress-complete" aria-hidden="true">
+              <img src="./assets/icons/lucide/check.svg" alt="" width="20" height="20" />
+            </span>
+          </li>
+          <li class="progress-step progress-step--scan" data-progress-step="scan">
+            <a class="progress-action" data-progress-action aria-disabled="true" tabindex="-1">
+              <span class="progress-number" aria-hidden="true">2</span>
+              <img src="./assets/icons/lucide/camera.svg" alt="" width="30" height="30" aria-hidden="true" />
+              <span class="progress-label">Scan Parts</span>
+            </a>
+            <span class="progress-complete" aria-hidden="true">
+              <img src="./assets/icons/lucide/check.svg" alt="" width="20" height="20" />
+            </span>
+          </li>
+          <li class="progress-step progress-step--build" data-progress-step="build">
+            <a class="progress-action" data-progress-action aria-disabled="true" tabindex="-1">
+              <span class="progress-number" aria-hidden="true">3</span>
+              <img src="./assets/icons/lucide/code-xml.svg" alt="" width="30" height="30" aria-hidden="true" />
+              <span class="progress-label">Build + Code</span>
+            </a>
+            <span class="progress-complete" aria-hidden="true">
+              <img src="./assets/icons/lucide/check.svg" alt="" width="20" height="20" />
+            </span>
+          </li>
+          <li class="progress-step progress-step--test" data-progress-step="test">
+            <a class="progress-action" data-progress-action aria-disabled="true" tabindex="-1">
+              <span class="progress-number" aria-hidden="true">4</span>
+              <img src="./assets/icons/lucide/zap.svg" alt="" width="30" height="30" aria-hidden="true" />
+              <span class="progress-label">Test</span>
+            </a>
+            <span class="progress-complete" aria-hidden="true">
+              <img src="./assets/icons/lucide/check.svg" alt="" width="20" height="20" />
+            </span>
+          </li>
+          <li class="progress-step progress-step--publish" data-progress-step="publish">
+            <a class="progress-action" data-progress-action aria-disabled="true" tabindex="-1">
+              <span class="progress-number" aria-hidden="true">5</span>
+              <img src="./assets/icons/lucide/globe-2.svg" alt="" width="30" height="30" aria-hidden="true" />
+              <span class="progress-label">Publish</span>
+            </a>
+            <span class="progress-complete" aria-hidden="true">
+              <img src="./assets/icons/lucide/check.svg" alt="" width="20" height="20" />
+            </span>
+          </li>
+        </ol>
+      </nav>
+    </header>
+
+    <main class="app-main" id="main-content" tabindex="-1">
+      <section class="screen-outlet" data-screen-outlet aria-labelledby="makeable-heading">
+        <h1 class="visually-hidden" id="makeable-heading" data-app-heading>Makeable</h1>
+        <p class="app-status" id="appStatus" role="status" aria-live="polite">Loading Makeable…</p>
+        <noscript>
+          <p class="app-notice">Makeable needs JavaScript to guide your hardware build.</p>
+        </noscript>
+      </section>
+    </main>
+
+    <script src="./config.local.js"></script>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

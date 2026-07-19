@@ -1,0 +1,110 @@
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const GOOGLE_INTENTS = new Set(["waitlist", "pilot"]);
+
+export function createEmailWaitlistRecord(body, options = {}) {
+  if (!isPlainObject(body)) return invalid("Enter a valid email address.");
+  if (
+    Object.keys(body).length !== 1 ||
+    !Object.prototype.hasOwnProperty.call(body, "email")
+  ) {
+    return invalid("The waitlist only accepts an email address.");
+  }
+  const email = normalizeEmail(body.email);
+  if (!email) return invalid("Enter a valid email address.");
+  return {
+    ok: true,
+    value: {
+      email,
+      source: "email",
+      createdAt: timestamp(options.now),
+    },
+  };
+}
+
+export function createGoogleAcquisitionResult(identity, intent, options = {}) {
+  if (!GOOGLE_INTENTS.has(intent)) {
+    return invalid("This Google sign-in destination is not supported.");
+  }
+  const email = normalizeEmail(identity?.email);
+  const subject =
+    typeof identity?.sub === "string" ? identity.sub.trim().slice(0, 255) : "";
+  if (!email || identity?.email_verified !== true || !subject) {
+    return {
+      ok: false,
+      status: 401,
+      error: "Google could not verify this email address.",
+    };
+  }
+  const name = cleanText(identity.name, 120);
+  const picture = cleanPicture(identity.picture);
+  const user = { email, name, picture };
+
+  if (intent === "pilot") {
+    return {
+      ok: true,
+      value: {
+        intent,
+        user,
+        next: "/build/new",
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      intent,
+      user,
+      record: {
+        email,
+        source: "google",
+        createdAt: timestamp(options.now),
+        googleSubject: subject,
+        name,
+        picture,
+      },
+    },
+  };
+}
+
+function normalizeEmail(value) {
+  if (typeof value !== "string") return "";
+  const email = value.trim().toLowerCase();
+  if (!email || email.length > 254 || !EMAIL_PATTERN.test(email)) return "";
+  return email;
+}
+
+function cleanText(value, maxLength) {
+  if (typeof value !== "string") return "";
+  return value.trim().slice(0, maxLength);
+}
+
+function cleanPicture(value) {
+  if (typeof value !== "string") return "";
+  const picture = value.trim();
+  if (!picture || picture.length > 2048) return "";
+  try {
+    const url = new URL(picture);
+    return url.protocol === "https:" ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function timestamp(value) {
+  const date = value instanceof Date ? value : new Date(value ?? Date.now());
+  return date.toISOString();
+}
+
+function invalid(error) {
+  return { ok: false, status: 400, error };
+}
+
+function isPlainObject(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.getPrototypeOf(value) === Object.prototype,
+  );
+}

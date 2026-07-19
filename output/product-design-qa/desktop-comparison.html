@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Makeable landing visual QA</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { min-height: 100%; margin: 0; background: #181614; color: white; }
+      body { padding: 18px; font-family: system-ui, sans-serif; }
+      main { display: grid; gap: 18px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      figure { margin: 0; overflow: hidden; border: 1px solid #4a4540; border-radius: 10px; background: #282421; }
+      figcaption { padding: 10px 14px; font-size: 14px; font-weight: 750; }
+      img { display: block; width: 100%; height: auto; }
+      @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <figure>
+        <figcaption>Approved reference · 1536 × 1024</figcaption>
+        <img src="./approved-reference.png" alt="Approved Makeable landing reference" />
+      </figure>
+      <figure>
+        <figcaption>Semantic implementation · 1536 × 1024</figcaption>
+        <img src="./landing-desktop-viewport.png" alt="Current Makeable landing implementation" />
+      </figure>
+    </main>
+  </body>
+</html>

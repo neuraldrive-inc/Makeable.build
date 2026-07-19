@@ -40,6 +40,41 @@ All 11 approved routes were captured at all three sizes. The desktop captures we
 - Desktop/tablet/mobile: no unintended horizontal document overflow; code is the only intentionally scrollable region
 - Final independent implementation review: clean, with no unresolved P0, P1, or P2 findings
 
+## Landing page and pilot entry
+
+- Public landing page checked at 1440 × 1024, 834 × 1194, and 390 × 844.
+- Pilot entry checked at the same three viewports.
+- Final landing reference:
+  `output/product-design-qa/reference.png`.
+- Final implementation capture:
+  `output/product-design-qa/final-split-top.png`.
+- Side-by-side review:
+  `output/product-design-qa/compare.html`.
+- The desktop page matches the approved split composition: a fixed cream
+  conversion rail occupies the left side for the full scroll, while the
+  interactive workbench comparison and Recognize, Connect, and Test stages
+  scroll vertically on the right.
+- The headline, August 9 launch poster, and oversized Google waitlist action
+  remain visible at the start, middle, and end of the desktop journey.
+- The workbench photo preserves one fixed 4:3 coordinate system. Its
+  before/after divider reveals recognition over the exact same pixels without
+  resizing or recropping the photo or annotations, and supports mouse, touch,
+  and keyboard input.
+- Tablet and mobile reflow to a compact sticky conversion row above the same
+  vertical story, with exact 20px mobile gutters and no horizontal overflow.
+- Public signup and pilot entry are both Google-only. Mocked Google
+  verification/redirect, missing Google configuration, focus, live errors,
+  reduced motion, and no-overflow behavior are covered.
+- Axe found zero serious or critical issues on the landing, post-signup
+  success, and pilot states. The post-signup Share action meets the 48px touch
+  target and contrast requirements.
+- Final landing verification: 63 browser tests passed across desktop, tablet,
+  and mobile; the complete 127-test unit suite and build checks also passed.
+- The same-view side-by-side comparison found no unresolved P0, P1, or P2
+  differences. The intentionally larger right-side stages support the
+  requested scrolling product story instead of compressing all three screens
+  into one static viewport.
+
 ## Accepted intentional deviations
 
 - The approved plan requires hardware truth, so detected ESP32/board names replace illustrative Uno labels.

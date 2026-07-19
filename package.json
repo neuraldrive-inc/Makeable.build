@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "build": "node --check app.js && node --check server.mjs && node --check netlify/functions/api.mjs && node --check src/makeable/actions.js && node --check src/makeable/content.js && node --check src/makeable/render.js && node --check src/makeable/router.js && node --check src/makeable/screens.js && node --check src/makeable/state.js",
+    "build": "node --check app.js && node --check landing.js && node --check server.mjs && node --check netlify/functions/api.mjs && node --check src/makeable/acquisition.js && node --check src/makeable/actions.js && node --check src/makeable/content.js && node --check src/makeable/render.js && node --check src/makeable/router.js && node --check src/makeable/screens.js && node --check src/makeable/state.js",
     "test": "npm run test:unit && npm run test:browser",
     "test:unit": "node --test tests/unit/*.test.js",
     "test:browser": "playwright test",
@@ -16,6 +16,7 @@
     "@playwright/test": "^1.61.1"
   },
   "dependencies": {
-    "esptool-js": "0.5.7"
+    "esptool-js": "0.5.7",
+    "google-auth-library": "^10.3.0"
   }
 }

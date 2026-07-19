@@ -1,14 +1,19 @@
 [build]
   publish = "."
   functions = "netlify/functions"
-  command = "node --check app.js && node --check server.mjs && node --check netlify/functions/api.mjs"
+  command = "npm run build"
 
 [functions]
   node_bundler = "esbuild"
 
 [[redirects]]
   from = "/build/*"
-  to = "/index.html"
+  to = "/builder.html"
+  status = 200
+
+[[redirects]]
+  from = "/pilot"
+  to = "/pilot.html"
   status = 200
 
 [[headers]]

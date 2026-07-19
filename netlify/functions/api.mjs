@@ -11,6 +11,11 @@ import {
   validateGitHubUploadRequest,
   verifyPublishCapability,
 } from "../../src/makeable/server-contract.js";
+import {
+  createEmailWaitlistRecord,
+  createGoogleAcquisitionResult,
+} from "../../src/makeable/acquisition.js";
+import { OAuth2Client } from "google-auth-library";
 
 export default async function handler(req) {
   try {
@@ -27,6 +32,14 @@ export default async function handler(req) {
 
     if (url.pathname === "/api/deepgram/token" && req.method === "POST") {
       return createDeepgramToken(env);
+    }
+
+    if (url.pathname === "/api/waitlist" && req.method === "POST") {
+      return createWaitlistSignup(req, env);
+    }
+
+    if (url.pathname === "/api/auth/google" && req.method === "POST") {
+      return completeGoogleAcquisition(req, env);
     }
 
     if (url.pathname === "/api/openai/responses" && req.method === "POST") {
@@ -85,6 +98,7 @@ export default async function handler(req) {
         hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
         hasDeepgramKey: Boolean(env.DEEPGRAM_API_KEY),
         hasGithubToken: Boolean(env.GITHUB_TOKEN),
+        hasGoogleClientId: Boolean(env.GOOGLE_CLIENT_ID),
         firmwareCompileSupported: false,
       });
     }
@@ -123,6 +137,9 @@ function getEnv() {
     "GITHUB_TOKEN",
     "GITHUB_OWNER",
     "ARDUINO_FQBN",
+    "GOOGLE_CLIENT_ID",
+    "WAITLIST_WEBHOOK_URL",
+    "WAITLIST_WEBHOOK_SECRET",
   ];
   return Object.fromEntries(keys.map((key) => [key, envValue(key)]));
 }
@@ -146,6 +163,119 @@ function publicConfigScript(env) {
 async function createDeepgramToken(env) {
   const result = await grantDeepgramToken(env.DEEPGRAM_API_KEY);
   return jsonResponse(result.body, result.status, { "Cache-Control": "no-store" });
+}
+
+async function createWaitlistSignup(req, env) {
+  const validation = createEmailWaitlistRecord(await safeRequestJson(req));
+  if (!validation.ok) {
+    return jsonResponse({ error: validation.error }, validation.status);
+  }
+  const delivery = await deliverHostedWaitlistRecord(validation.value, env);
+  if (!delivery.ok) {
+    return jsonResponse({ error: delivery.error }, delivery.status);
+  }
+  return jsonResponse({ ok: true }, 200, { "Cache-Control": "no-store" });
+}
+
+async function completeGoogleAcquisition(req, env) {
+  if (!env.GOOGLE_CLIENT_ID) {
+    return jsonResponse({ error: "Google sign-in is not configured." }, 503);
+  }
+  const body = await safeRequestJson(req);
+  if (
+    !body ||
+    typeof body.credential !== "string" ||
+    !body.credential ||
+    body.credential.length > 16_384 ||
+    typeof body.intent !== "string" ||
+    Object.keys(body).some((key) => !["credential", "intent"].includes(key))
+  ) {
+    return jsonResponse({ error: "Google sign-in request is invalid." }, 400);
+  }
+
+  let identity;
+  try {
+    const client = new OAuth2Client(env.GOOGLE_CLIENT_ID);
+    const ticket = await client.verifyIdToken({
+      idToken: body.credential,
+      audience: env.GOOGLE_CLIENT_ID,
+    });
+    identity = ticket.getPayload();
+  } catch {
+    return jsonResponse(
+      { error: "Google could not verify this sign-in." },
+      401,
+      { "Cache-Control": "no-store" },
+    );
+  }
+
+  const result = createGoogleAcquisitionResult(identity, body.intent);
+  if (!result.ok) {
+    return jsonResponse({ error: result.error }, result.status);
+  }
+  if (result.value.record) {
+    const delivery = await deliverHostedWaitlistRecord(result.value.record, env);
+    if (!delivery.ok) {
+      return jsonResponse({ error: delivery.error }, delivery.status);
+    }
+  }
+  return jsonResponse(
+    {
+      ok: true,
+      user: result.value.user,
+      next: result.value.next,
+    },
+    200,
+    { "Cache-Control": "no-store" },
+  );
+}
+
+async function deliverHostedWaitlistRecord(record, env) {
+  if (!env.WAITLIST_WEBHOOK_URL) {
+    return {
+      ok: false,
+      status: 503,
+      error: "Waitlist storage is not configured for this deployment.",
+    };
+  }
+  let url;
+  try {
+    url = new URL(env.WAITLIST_WEBHOOK_URL);
+    if (url.protocol !== "https:") throw new Error("HTTPS required");
+  } catch {
+    return {
+      ok: false,
+      status: 503,
+      error: "Waitlist storage is not configured for this deployment.",
+    };
+  }
+  try {
+    const headers = { "Content-Type": "application/json" };
+    if (env.WAITLIST_WEBHOOK_SECRET) {
+      headers.Authorization = `Bearer ${env.WAITLIST_WEBHOOK_SECRET}`;
+    }
+    const upstream = await fetch(url.href, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(record),
+    });
+    if (!upstream.ok) throw new Error("Waitlist upstream rejected the record");
+    return { ok: true };
+  } catch {
+    return {
+      ok: false,
+      status: 502,
+      error: "Waitlist signup could not be saved. Please try again.",
+    };
+  }
+}
+
+async function safeRequestJson(req) {
+  try {
+    return await req.json();
+  } catch {
+    return {};
+  }
 }
 
 async function proxyOpenAI(req, env) {

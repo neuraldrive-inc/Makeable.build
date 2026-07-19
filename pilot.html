@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f7f0e4" />
+    <title>Pilot access · Makeable</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="/assets/icons/lucide/sparkles.svg" />
+    <link rel="preconnect" href="https://accounts.google.com" />
+    <link rel="stylesheet" href="/styles/landing.css" />
+  </head>
+  <body class="landing-page pilot-page">
+    <a class="landing-skip" href="#pilot-main">Skip to pilot access</a>
+    <header class="landing-header pilot-header">
+      <a class="landing-brand" href="/" aria-label="Makeable home">
+        <span>Makeable</span>
+        <img
+          src="/assets/icons/lucide/sparkles.svg"
+          alt=""
+          width="24"
+          height="24"
+          aria-hidden="true"
+        />
+      </a>
+      <p class="pilot-label">
+        <span aria-hidden="true">✦</span>
+        Private pilot
+      </p>
+    </header>
+
+    <main class="pilot-main" id="pilot-main">
+      <section class="pilot-card" aria-labelledby="pilot-title">
+        <span class="paper-tape paper-tape--blue pilot-tape" aria-hidden="true"></span>
+        <div class="pilot-copy">
+          <p class="eyebrow">
+            <span class="eyebrow-number">P</span>
+            Pilot access
+          </p>
+          <h1 id="pilot-title">Your pilot bench is ready.</h1>
+          <p>
+            Sign in with Google, put your electronics in one photo, and start
+            building with Makeable.
+          </p>
+          <div class="google-slot google-slot--pilot" data-google-slot>
+            <button class="google-fallback" type="button" data-google-fallback>
+              <img
+                src="/assets/icons/google-g.svg"
+                alt=""
+                width="24"
+                height="24"
+                aria-hidden="true"
+              />
+              Continue with Google
+            </button>
+          </div>
+          <div class="signup-status" data-signup-status role="status" aria-live="polite"></div>
+          <p class="pilot-share-note">
+            <img
+              src="/assets/icons/lucide/share-2.svg"
+              alt=""
+              width="21"
+              height="21"
+              aria-hidden="true"
+            />
+            Anyone with this link can join the pilot.
+          </p>
+        </div>
+
+        <div class="pilot-path" aria-label="The five Makeable project stages">
+          <p class="annotation">From this…</p>
+          <div class="pilot-parts" aria-hidden="true">
+            <span class="part part--board"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+            <span class="part part--sensor"></span>
+            <span class="part part--display"></span>
+          </div>
+          <div class="pilot-arrow" aria-hidden="true">↘</div>
+          <ol>
+            <li class="build-stage--describe">Describe</li>
+            <li class="build-stage--scan">Scan</li>
+            <li class="build-stage--build">Build</li>
+            <li class="build-stage--test">Test</li>
+            <li class="build-stage--publish">Share</li>
+          </ol>
+          <p class="annotation pilot-done">…to something that works. ✓</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="landing-footer pilot-footer">
+      <a href="/">Back to Makeable</a>
+      <p>Forward this pilot link to another builder.</p>
+    </footer>
+
+    <script src="/config.local.js"></script>
+    <script type="module" src="/landing.js"></script>
+  </body>
+</html>
