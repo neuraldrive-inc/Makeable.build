@@ -3,6 +3,8 @@ const config = window.MAKEABLE_CONFIG || {};
 const status = document.querySelector("[data-signup-status]");
 const googleSlot = document.querySelector("[data-google-slot]");
 const googleFallback = document.querySelector("[data-google-fallback]");
+let googleInitialized = false;
+let googlePromptPending = false;
 
 setupWorkbenchComparison();
 setupBuildStory();
@@ -23,7 +25,13 @@ for (const link of document.querySelectorAll('a[href="#join"]')) {
 googleFallback?.addEventListener("click", () => {
   if (config.googleClientId) {
     setStatus("Opening Google sign-in…", "info");
-    loadGoogleIdentity();
+    googlePromptPending = true;
+    if (window.google?.accounts?.id) {
+      initializeGoogleIdentity();
+      openGooglePrompt();
+    } else {
+      loadGoogleIdentity();
+    }
     return;
   }
   const isLocal =
@@ -44,7 +52,7 @@ if (config.googleClientId && googleSlot) loadGoogleIdentity();
 function loadGoogleIdentity() {
   if (!googleSlot || !config.googleClientId) return;
   if (window.google?.accounts?.id) {
-    renderGoogleButton();
+    initializeGoogleIdentity();
     return;
   }
   if (document.querySelector('script[data-google-identity]')) return;
@@ -54,8 +62,12 @@ function loadGoogleIdentity() {
   script.async = true;
   script.defer = true;
   script.dataset.googleIdentity = "true";
-  script.addEventListener("load", renderGoogleButton);
+  script.addEventListener("load", () => {
+    initializeGoogleIdentity();
+    if (googlePromptPending) openGooglePrompt();
+  });
   script.addEventListener("error", () => {
+    googlePromptPending = false;
     setStatus(
       isPilot
         ? "Google sign-in could not load. Check your connection and try again."
@@ -66,23 +78,37 @@ function loadGoogleIdentity() {
   document.head.append(script);
 }
 
-function renderGoogleButton() {
-  if (!window.google?.accounts?.id || !googleSlot || !config.googleClientId) return;
-  googleSlot.replaceChildren();
+function initializeGoogleIdentity() {
+  if (
+    googleInitialized ||
+    !window.google?.accounts?.id ||
+    !googleSlot ||
+    !config.googleClientId
+  ) {
+    return;
+  }
   window.google.accounts.id.initialize({
     client_id: config.googleClientId,
     callback: handleGoogleCredential,
     auto_select: false,
     cancel_on_tap_outside: true,
+    use_fedcm_for_prompt: true,
   });
-  window.google.accounts.id.renderButton(googleSlot, {
-    type: "standard",
-    theme: "outline",
-    size: "large",
-    shape: "rectangular",
-    text: "continue_with",
-    logo_alignment: "left",
-    width: Math.min(390, Math.max(240, Math.round(googleSlot.clientWidth))),
+  googleInitialized = true;
+}
+
+function openGooglePrompt() {
+  if (!googleInitialized || !window.google?.accounts?.id?.prompt) return;
+  googlePromptPending = false;
+  window.google.accounts.id.prompt((notification) => {
+    const unavailable =
+      notification?.isNotDisplayed?.() || notification?.isSkippedMoment?.();
+    if (unavailable) {
+      setStatus(
+        "Google sign-in could not open. Check your browser settings and try again.",
+        "error",
+      );
+    }
   });
 }
 
@@ -228,10 +254,11 @@ function setupMobileSignup() {
   const signup = anchor?.querySelector(".hero-signup");
   if (!anchor || !signup || !("IntersectionObserver" in window)) return;
 
-  const mobile = window.matchMedia("(max-width: 700px)");
+  const mobile = window.matchMedia("(max-width: 1279px)");
   const clearStickyState = () => {
     signup.classList.remove("is-mobile-sticky");
     document.body.classList.remove("has-mobile-sticky-signup");
+    document.body.style.removeProperty("--sticky-signup-clearance");
   };
   const update = (entry) => {
     if (!mobile.matches) {
@@ -239,14 +266,21 @@ function setupMobileSignup() {
       return;
     }
 
-    const shouldStick =
-      !entry.isIntersecting && entry.boundingClientRect.bottom < 0;
+    const shouldStick = entry.intersectionRatio < 0.98;
     signup.classList.toggle("is-mobile-sticky", shouldStick);
     document.body.classList.toggle("has-mobile-sticky-signup", shouldStick);
+    if (shouldStick) {
+      document.body.style.setProperty(
+        "--sticky-signup-clearance",
+        `${Math.ceil(signup.getBoundingClientRect().height + 12)}px`,
+      );
+    } else {
+      document.body.style.removeProperty("--sticky-signup-clearance");
+    }
   };
 
   const observer = new IntersectionObserver(([entry]) => update(entry), {
-    threshold: 0,
+    threshold: [0, 0.98, 1],
   });
   observer.observe(anchor);
   mobile.addEventListener("change", () => {

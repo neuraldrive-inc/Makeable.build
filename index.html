@@ -33,12 +33,13 @@
 
     <header class="waitlist-nav">
       <a class="makeable-wordmark" href="/" aria-label="Makeable home">
-        <span class="makeable-wordmark-text">Makeable</span>
+        <span class="makeable-wordmark-text sr-only">Makeable</span>
         <img
-          src="/assets/icons/lucide/sparkles.svg"
+          class="makeable-wordmark-art"
+          src="/assets/landing/makeable-wordmark-reference.png"
           alt=""
-          width="26"
-          height="26"
+          width="214"
+          height="64"
           aria-hidden="true"
         />
       </a>
@@ -56,16 +57,26 @@
               <h1 id="hero-title">
                 <span>Turn ideas into</span>
                 <span>working physical</span>
-                <span class="hero-underlined">products in hours.</span>
+                <span class="hero-underlined">
+                  products in hours.
+                  <span class="hero-underline-art" aria-hidden="true">
+                    <img
+                      src="/assets/landing/hero-underline-reference.png"
+                      alt=""
+                      width="242"
+                      height="38"
+                    />
+                  </span>
+                </span>
               </h1>
-              <img
-                class="hero-sparkle"
-                src="/assets/icons/lucide/sparkles.svg"
-                alt=""
-                width="54"
-                height="54"
-                aria-hidden="true"
-              />
+              <span class="hero-marker-rays" aria-hidden="true">
+                <img
+                  src="/assets/landing/hero-rays-reference.png"
+                  alt=""
+                  width="70"
+                  height="76"
+                />
+              </span>
             </div>
             <p class="hero-lede">
               Show Makeable your parts. Get the wiring, code, and tests to make
@@ -77,15 +88,51 @@
             class="launch-tag launch-poster"
             aria-label="Early access opens August 9, 2026"
           >
+            <img
+              class="launch-tape"
+              src="/assets/landing/blue-grid-tape.png"
+              alt=""
+              width="143"
+              height="70"
+              aria-hidden="true"
+            />
             <span class="launch-poster-kicker">Early access opens</span>
             <strong>August 9,</strong>
-            <strong>2026</strong>
+            <strong class="launch-year">
+              2026
+              <span class="launch-year-rays" aria-hidden="true">
+                <img
+                  src="/assets/icons/lucide/sparkles.svg"
+                  alt=""
+                  width="34"
+                  height="34"
+                />
+              </span>
+            </strong>
           </div>
 
           <div class="hero-signup-anchor" data-signup-anchor>
             <section class="hero-signup" id="join" aria-labelledby="signup-title">
               <div data-signup-content>
-                <h2 id="signup-title">Join the waitlist</h2>
+                <span class="launch-arrow" aria-hidden="true">
+                  <img
+                    src="/assets/landing/hand-arrow-right.png"
+                    alt=""
+                    width="86"
+                    height="86"
+                  />
+                </span>
+                <h2 id="signup-title">
+                  Join the waitlist
+                  <span class="hand-underline hand-underline--join" aria-hidden="true">
+                    <img
+                      src="/assets/landing/hero-underline-reference.png"
+                      alt=""
+                      width="242"
+                      height="38"
+                    />
+                  </span>
+                </h2>
                 <div class="google-slot" data-google-slot>
                   <button class="google-fallback" type="button" data-google-fallback>
                     <img
@@ -98,7 +145,25 @@
                     Continue with Google
                   </button>
                 </div>
-                <p class="signup-note">One Google tap. You’re on the list.</p>
+                <p class="signup-note">
+                  One Google tap. You’re on the list.
+                  <span class="hand-underline hand-underline--note" aria-hidden="true">
+                    <img
+                      src="/assets/landing/hero-underline-reference.png"
+                      alt=""
+                      width="242"
+                      height="38"
+                    />
+                  </span>
+                  <span class="signup-note-rays" aria-hidden="true">
+                    <img
+                      src="/assets/icons/lucide/sparkles.svg"
+                      alt=""
+                      width="28"
+                      height="28"
+                    />
+                  </span>
+                </p>
               </div>
               <div
                 class="signup-status"
@@ -130,7 +195,7 @@
         <div
           class="comparison paper-card"
           data-comparison
-          style="--comparison-reveal: 50%"
+          style="--comparison-reveal: 44.3%"
         >
           <div class="comparison-label comparison-label--before">Your desk</div>
           <div class="comparison-label comparison-label--after">Makeable sees</div>
@@ -157,21 +222,21 @@
                 <span class="part-outline part-outline--board"></span>
                 <img
                   class="part-arrow part-arrow--display"
-                  src="/assets/icons/lucide/arrow-left.svg"
+                  src="/assets/landing/hand-arrow-right.png"
                   alt=""
                   width="28"
                   height="28"
                 />
                 <img
                   class="part-arrow part-arrow--sensor"
-                  src="/assets/icons/lucide/arrow-left.svg"
+                  src="/assets/landing/hand-arrow-right.png"
                   alt=""
                   width="28"
                   height="28"
                 />
                 <img
                   class="part-arrow part-arrow--board"
-                  src="/assets/icons/lucide/arrow-left.svg"
+                  src="/assets/landing/hand-arrow-right.png"
                   alt=""
                   width="28"
                   height="28"
@@ -208,7 +273,8 @@
               type="range"
               min="0"
               max="100"
-              value="50"
+              value="44.3"
+              step="0.1"
               aria-label="Reveal Makeable part recognition"
               data-comparison-range
             />
@@ -232,7 +298,7 @@
                 <span class="story-number">01</span>
                 <h2>Recognize</h2>
                 <img
-                  src="/assets/icons/lucide/arrow-right.svg"
+                  src="/assets/landing/hand-arrow-right.png"
                   alt=""
                   width="42"
                   height="42"
@@ -271,7 +337,7 @@
                 <span class="story-number">02</span>
                 <h2>Connect</h2>
                 <img
-                  src="/assets/icons/lucide/arrow-right.svg"
+                  src="/assets/landing/hand-arrow-right.png"
                   alt=""
                   width="42"
                   height="42"
@@ -310,7 +376,7 @@
               <p class="story-caption">We’ll test everything.</p>
               <img
                 class="story-copy-arrow"
-                src="/assets/icons/lucide/arrow-right.svg"
+                src="/assets/landing/hand-arrow-right.png"
                 alt=""
                 width="44"
                 height="44"

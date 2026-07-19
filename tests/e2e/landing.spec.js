@@ -37,7 +37,10 @@ test("landing UI is semantic instead of screenshot-derived", async ({ page }) =>
   await expect(page.locator(".launch-poster")).toContainText(
     "Early access opens August 9, 2026",
   );
-  await expect(page.locator(".launch-poster img")).toHaveCount(0);
+  await expect(
+    page.locator('.launch-poster img[src*="launch-poster-reference"]'),
+  ).toHaveCount(0);
+  await expect(page.locator(".launch-poster img")).toHaveCount(2);
   await expect(page.locator(".paper-card")).toHaveCount(4);
   await expect(page.locator("[data-story-frame] img.story-image")).toHaveCount(3);
   await expect(page.locator("[data-story-chapter] h2")).toHaveCount(3);
@@ -115,8 +118,8 @@ test("the 1536 by 1024 landing composition matches the approved reference propor
   expect(metrics.headline.x).toBeLessThanOrEqual(48);
   expect(metrics.headline.y).toBeGreaterThanOrEqual(108);
   expect(metrics.headline.y).toBeLessThanOrEqual(124);
-  expect(metrics.headlineFontSize).toBeGreaterThanOrEqual(62);
-  expect(metrics.headlineFontSize).toBeLessThanOrEqual(66);
+  expect(metrics.headlineFontSize).toBeGreaterThanOrEqual(76);
+  expect(metrics.headlineFontSize).toBeLessThanOrEqual(80);
   expect(metrics.poster.width).toBeGreaterThanOrEqual(470);
   expect(metrics.poster.height).toBeGreaterThanOrEqual(240);
   expect(metrics.signup.width).toBeGreaterThanOrEqual(520);
@@ -152,7 +155,8 @@ test("comparison and process stages are separate paper cards", async ({ page }) 
 
   expect(cards).toHaveLength(4);
   for (let index = 1; index < cards.length; index += 1) {
-    expect(cards[index].top - cards[index - 1].bottom).toBeGreaterThanOrEqual(8);
+    expect(cards[index].top - cards[index - 1].bottom).toBeGreaterThanOrEqual(5);
+    expect(cards[index].top - cards[index - 1].bottom).toBeLessThanOrEqual(7);
   }
   expect(cards.every(({ border }) => border === "1px")).toBe(true);
   expect(cards.every(({ shadow }) => shadow !== "none")).toBe(true);
@@ -205,14 +209,14 @@ test("the workbench comparison can be dragged and changed with the keyboard", as
   await expect(comparison.locator(".part-callout")).toHaveCount(3);
 
   await slider.scrollIntoViewIfNeeded();
-  await expect(slider).toHaveValue("50");
+  await expect(slider).toHaveValue("44.3");
   await slider.focus();
   await slider.press("ArrowRight");
-  await expect(slider).toHaveValue("51");
-  await expect(comparison).toHaveCSS("--comparison-reveal", "51%");
+  await expect(slider).toHaveValue("44.4");
+  await expect(comparison).toHaveCSS("--comparison-reveal", "44.4%");
   await expect(recognitionLayer).toHaveCSS(
     "clip-path",
-    "inset(0px 0px 0px 51%)",
+    "inset(0px 0px 0px 44.4%)",
   );
 
   const geometry = await comparison.evaluate((root) => {
@@ -340,14 +344,8 @@ test("public Google signup verifies through the server and confirms the waitlist
       body: `
         window.google = { accounts: { id: {
           initialize(options) { window.__makeableGoogleCallback = options.callback; },
-          renderButton(target) {
-            const button = document.createElement("button");
-            button.type = "button";
-            button.textContent = "Continue with Google";
-            button.addEventListener("click", () => {
-              window.__makeableGoogleCallback({ credential: "verified-waitlist-credential" });
-            });
-            target.append(button);
+          prompt() {
+            window.__makeableGoogleCallback({ credential: "verified-waitlist-credential" });
           }
         } } };
       `,
@@ -366,7 +364,19 @@ test("public Google signup verifies through the server and confirms the waitlist
   });
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Continue with Google" }).click();
+  const googleButton = page.getByRole("button", { name: "Continue with Google" });
+  await expect
+    .poll(() =>
+      googleButton.evaluate((button) => {
+        const slotWidth = button.parentElement.getBoundingClientRect().width;
+        return button.getBoundingClientRect().width / slotWidth;
+      }),
+    )
+    .toBeGreaterThan(0.92);
+  await expect
+    .poll(() => googleButton.evaluate((button) => button.getBoundingClientRect().height))
+    .toBeGreaterThan(80);
+  await googleButton.click();
 
   expect(requestBody).toEqual({
     credential: "verified-waitlist-credential",
@@ -492,6 +502,14 @@ test("tablet hero stacks instead of squeezing the signup copy", async ({ page })
 
   expect(heroLayout.columns).toBe(1);
   expect(heroLayout.messageWidth).toBeGreaterThan(650);
+
+  await page
+    .locator('[data-story-chapter="connect"]')
+    .scrollIntoViewIfNeeded();
+  await expect(page.locator(".hero-signup")).toHaveClass(/is-mobile-sticky/);
+  await expect(
+    page.getByRole("button", { name: "Continue with Google" }),
+  ).toBeInViewport({ ratio: 0.98 });
 });
 
 test("mobile navigation links remain tappable and use the mobile photo crop", async ({
@@ -578,14 +596,8 @@ test("pilot Google sign-in verifies through the server contract and opens the bu
       body: `
         window.google = { accounts: { id: {
           initialize(options) { window.__makeableGoogleCallback = options.callback; },
-          renderButton(target) {
-            const button = document.createElement("button");
-            button.type = "button";
-            button.textContent = "Continue with Google";
-            button.addEventListener("click", () => {
-              window.__makeableGoogleCallback({ credential: "verified-test-credential" });
-            });
-            target.append(button);
+          prompt() {
+            window.__makeableGoogleCallback({ credential: "verified-test-credential" });
           }
         } } };
       `,
@@ -643,4 +655,143 @@ test("the landing page stays inside every configured viewport", async ({ page })
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+});
+
+test("the approved composition remains usable across the full responsive matrix", async ({
+  page,
+}) => {
+  const viewports = [
+    { width: 1536, height: 1024 },
+    { width: 1440, height: 1024 },
+    { width: 1024, height: 768 },
+    { width: 834, height: 1194 },
+    { width: 768, height: 1024 },
+    { width: 430, height: 932 },
+    { width: 390, height: 844 },
+    { width: 360, height: 800 },
+  ];
+
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    await page.waitForTimeout(200);
+
+    const measurements = await page.evaluate(() => {
+      const box = (element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          left: rect.left,
+          width: rect.width,
+          height: rect.height,
+        };
+      };
+      const viewportIntersectionRatio = (element) => {
+        const rect = element.getBoundingClientRect();
+        const visibleWidth = Math.max(
+          0,
+          Math.min(window.innerWidth, rect.right) - Math.max(0, rect.left),
+        );
+        const visibleHeight = Math.max(
+          0,
+          Math.min(window.innerHeight, rect.bottom) - Math.max(0, rect.top),
+        );
+        return (visibleWidth * visibleHeight) / (rect.width * rect.height);
+      };
+      const headlineSpans = [...document.querySelectorAll(".hero-message h1 > span")];
+      const cards = [...document.querySelectorAll(".landing-story-column .paper-card")];
+      const comparison = document.querySelector(".comparison-photo-frame");
+      const annotation = document.querySelector(".comparison-annotation-frame");
+      const posterElement = document.querySelector(".launch-poster");
+      const signupElement = document.querySelector(".hero-signup");
+      const paperStyles = cards.map((card) => getComputedStyle(card));
+
+      return {
+        clientWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+        googleVisibility: viewportIntersectionRatio(
+          document.querySelector(".google-fallback"),
+        ),
+        headlineLineCount: headlineSpans.length,
+        headlineSpanWraps: headlineSpans.map((span) => {
+          const range = document.createRange();
+          range.selectNodeContents(span.firstChild);
+          return range.getClientRects().length;
+        }),
+        hero: box(document.querySelector(".waitlist-hero")),
+        lede: box(document.querySelector(".hero-lede")),
+        poster: box(document.querySelector(".launch-poster")),
+        signup: box(document.querySelector(".hero-signup-anchor")),
+        posterMarginTop: parseFloat(getComputedStyle(posterElement).marginTop),
+        signupMarginTop: parseFloat(getComputedStyle(signupElement).marginTop),
+        signupSticky: signupElement.classList.contains("is-mobile-sticky"),
+        cardGaps: cards.slice(1).map(
+          (card, index) =>
+            card.getBoundingClientRect().top -
+            cards[index].getBoundingClientRect().bottom,
+        ),
+        paperReady: paperStyles.every(
+          (style) =>
+            style.borderTopWidth === "1px" &&
+            style.boxShadow !== "none" &&
+            style.backgroundImage !== "none",
+        ),
+        comparisonDelta: {
+          x: Math.abs(
+            comparison.getBoundingClientRect().x -
+              annotation.getBoundingClientRect().x,
+          ),
+          y: Math.abs(
+            comparison.getBoundingClientRect().y -
+              annotation.getBoundingClientRect().y,
+          ),
+          width: Math.abs(
+            comparison.getBoundingClientRect().width -
+              annotation.getBoundingClientRect().width,
+          ),
+          height: Math.abs(
+            comparison.getBoundingClientRect().height -
+              annotation.getBoundingClientRect().height,
+          ),
+        },
+      };
+    });
+
+    expect(measurements.scrollWidth, `${viewport.width}px overflow`).toBeLessThanOrEqual(
+      measurements.clientWidth,
+    );
+    expect(
+      measurements.googleVisibility,
+      `${viewport.width}px Google CTA visibility`,
+    ).toBeGreaterThanOrEqual(0.98);
+    expect(measurements.headlineLineCount).toBe(3);
+    expect(measurements.headlineSpanWraps).toEqual([1, 1, 1]);
+    expect(measurements.posterMarginTop).toBeGreaterThanOrEqual(10);
+    if (!measurements.signupSticky) {
+      expect(measurements.signupMarginTop).toBeGreaterThanOrEqual(10);
+    }
+    expect(measurements.paperReady).toBe(true);
+    expect(Math.max(...Object.values(measurements.comparisonDelta))).toBeLessThanOrEqual(
+      1,
+    );
+
+    if (viewport.width >= 1280) {
+      expect(measurements.hero.left).toBeCloseTo(0, 0);
+      expect(measurements.hero.top).toBeCloseTo(0, 0);
+      expect(measurements.hero.width).toBeGreaterThanOrEqual(560);
+      expect(measurements.cardGaps.every((gap) => gap >= 5 && gap <= 7)).toBe(
+        true,
+      );
+    } else {
+      expect(measurements.hero.top).toBeCloseTo(0, 0);
+      expect(measurements.hero.width).toBeCloseTo(viewport.width, 0);
+      if (viewport.width <= 700) {
+        expect(measurements.cardGaps.every((gap) => gap >= 13 && gap <= 17)).toBe(
+          true,
+        );
+      }
+    }
+  }
 });

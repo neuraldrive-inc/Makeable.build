@@ -2,86 +2,100 @@
 
 ## Source truth
 
-- Approved screen references: `Makeable figma/final-1440x1024/*.png`
-- Design tokens and responsive specifications: `Makeable figma/tokens/` and `Makeable figma/specs/`
-- Implementation screenshots and combined comparisons: `design-qa-evidence/postfix/`
+- Approved Makeable product screens: `Makeable figma/final-1440x1024/*.png`
+- Landing-page reference: `output/product-design-qa/approved-reference.png`
+- Landing implementation capture: `output/product-design-qa/landing-desktop-final-candidate.png`
+- Combined landing comparison:
+  `output/product-design-qa/desktop-comparison.html`
+- Design tokens and responsive specifications: `Makeable figma/tokens/` and
+  `Makeable figma/specs/`
 
-## Viewports checked
+## Landing-page comparison history
 
-- Desktop: 1440 × 1024
-- Tablet: 834 × 1194
-- Mobile: 390 × 844
+1. The first pass reproduced the split conversion rail and workbench story but
+   used a generic wordmark, a star instead of marker rays, a single underline,
+   ordinary rounded cards, loose stage spacing, and a 50% comparison divider.
+2. Geometry was recalibrated against the approved 1536 × 1024 source. The rail
+   is now 608px; the comparison ends at 394px; Recognize, Connect, and Test
+   begin at 400px, 596px, and 772px; the reveal begins at 44.3%.
+3. The left rail was rebuilt with the exact Makeable lockup, three marker
+   strokes, a real double underline, a centered torn launch poster, oversized
+   Google CTA, hand underline details, and the approved August 9, 2026 date.
+4. The process scenes now use vivid approved pink/blue/green banners, torn
+   paper boundaries, six-pixel desktop seams, corrected Connect/Test column
+   ratios, and the same hardware crops as the approved source.
+5. The final reference and implementation were viewed together at the same
+   1536 × 1024 scale. The changed headline copy is intentional:
+   `Turn ideas into working physical products in hours.` No unresolved P0, P1,
+   or P2 layout, typography, spacing, imagery, paper, or interaction issue
+   remains.
 
-All 11 approved routes were captured at all three sizes. The desktop captures were paired side by side with their matching approved references in the `*-comparison.png` files. Focused geometry metrics were also recorded for the missing-parts desktop route because its heading and primary action sit at the top and bottom edges of the approved composition.
+## Responsive verification
 
-## Comparison history
+The same semantic implementation was checked at:
 
-1. Full-route comparisons found no P0 or P1 visual failures. The first desktop pass exposed a P2 clipped heading on `/build/feasibility/missing`; desktop SPA navigation was corrected so the heading now starts at `y: 58px`.
-2. The corrected comparison then exposed a P2 primary action below the 1440 × 1024 frame. A desktop-height compaction rule moved `Shop missing parts` to `y: 951px`, fully inside the viewport, without changing tablet or mobile reflow.
-3. The final combined comparison shows the complete heading, both inventory columns, alternative-project cards, and primary action. There is no horizontal overflow, broken imagery, or console error.
+- 1536 × 1024
+- 1440 × 1024
+- 1024 × 768
+- 834 × 1194
+- 768 × 1024
+- 430 × 932
+- 390 × 844
+- 360 × 800
 
-## Interaction coverage
+Results:
 
-- Describe idea, example prompts, voice affordance, and sketch attachment
-- Drag/drop, file picker, camera capture, compression, and orientation
-- Part annotation selection, rename, delete, bounds editing, and confidence confirmation
-- Ready and missing-parts feasibility branches, external searches, and alternative projects
-- Persisted assembly progress, Back, and numbered step controls
-- Firmware views, editing, copy, download, local compile/flash, cancellation, and retry
-- Sequential automatic diagnostics, safe Stop Test cleanup, manual evidence, repair, and retry
-- Repository validation, public/private selection, GitHub create/update recovery, ZIP export, sharing, and starting another build
-- History routing, direct loads, route guards, state invalidation, and responsive progress rail
-- Keyboard navigation, focus treatment, live regions, reduced motion, accessible labels, and touch targets
+- No horizontal document overflow at any checked size.
+- The headline remains exactly three lines with no internal line wrapping.
+- Tablet and mobile use one-column flow instead of a squeezed split layout.
+- The Google action is at least 98% visible on entry at every checked size.
+- At tablet and mobile sizes it becomes a bottom-safe sticky action whenever
+  the source CTA is no longer fully visible.
+- The before/after slider keeps the photo and annotation frames aligned within
+  one pixel at every checked size.
+- Mobile keeps 20px gutters, a true 4:3 comparison card, 16px story seams, and
+  complete one-column process cards.
 
-## Runtime and console checks
+## Interaction and accessibility coverage
 
-- Browser test matrix: desktop, tablet, and mobile paths with mocked AI, camera, serial, firmware, and GitHub services
-- Visual captures: zero page errors and zero console errors
-- Desktop/tablet/mobile: no unintended horizontal document overflow; code is the only intentionally scrollable region
-- Final independent implementation review: clean, with no unresolved P0, P1, or P2 findings
+- One semantic Google waitlist action; no email field or duplicate CTA.
+- The configured Google Identity state preserves the same oversized semantic
+  CTA and opens Google through the credential prompt instead of replacing it
+  with a small third-party iframe button.
+- Same-image pointer, touch, and keyboard comparison slider.
+- Recognition callouts remain fully visible at the approved 44.3% reveal, and
+  real hand-drawn raster arrows replace generic interface arrows.
+- Google configuration errors, verified signup success, and pilot redirect.
+- Tablet/mobile sticky CTA behavior and safe bottom clearance.
+- Focus treatment, live status messaging, reduced motion, labels, and touch
+  targets.
+- Axe reports zero serious or critical violations on landing and pilot pages.
 
-## Landing page and pilot entry
+## Product-flow coverage
 
-- Public landing page checked at 1440 × 1024, 834 × 1194, and 390 × 844.
-- Pilot entry checked at the same three viewports.
-- Final landing reference:
-  `output/product-design-qa/reference.png`.
-- Final implementation capture:
-  `output/product-design-qa/final-split-top.png`.
-- Side-by-side review:
-  `output/product-design-qa/compare.html`.
-- The desktop page matches the approved split composition: a fixed cream
-  conversion rail occupies the left side for the full scroll, while the
-  interactive workbench comparison and Recognize, Connect, and Test stages
-  scroll vertically on the right.
-- The headline, August 9 launch poster, and oversized Google waitlist action
-  remain visible at the start, middle, and end of the desktop journey.
-- The workbench photo preserves one fixed 4:3 coordinate system. Its
-  before/after divider reveals recognition over the exact same pixels without
-  resizing or recropping the photo or annotations, and supports mouse, touch,
-  and keyboard input.
-- Tablet and mobile reflow to a compact sticky conversion row above the same
-  vertical story, with exact 20px mobile gutters and no horizontal overflow.
-- Public signup and pilot entry are both Google-only. Mocked Google
-  verification/redirect, missing Google configuration, focus, live errors,
-  reduced motion, and no-overflow behavior are covered.
-- Axe found zero serious or critical issues on the landing, post-signup
-  success, and pilot states. The post-signup Share action meets the 48px touch
-  target and contrast requirements.
-- Final landing verification: 63 browser tests passed across desktop, tablet,
-  and mobile; the complete 127-test unit suite and build checks also passed.
-- The same-view side-by-side comparison found no unresolved P0, P1, or P2
-  differences. The intentionally larger right-side stages support the
-  requested scrolling product story instead of compressing all three screens
-  into one static viewport.
+- Describe, example prompts, voice affordance, and sketch attachment.
+- File, drag/drop, and camera part capture.
+- Part correction and both feasibility branches.
+- Assembly, firmware editing, compile/flash, diagnostics, and manual testing.
+- GitHub publish, recovery, ZIP export, share, and Start Another Build.
+- History routing, direct loads, route guards, persistence, and invalidation.
+
+## Verification results
+
+- Build checks: passed.
+- Unit suite: 127 passed.
+- Complete browser, interaction, responsive, and accessibility suite: 189 passed.
+- Final browser console review: no landing-page errors.
+- Final combined reference review: passed.
 
 ## Accepted intentional deviations
 
-- The approved plan requires hardware truth, so detected ESP32/board names replace illustrative Uno labels.
-- User-supplied parts and evidence photos replace fabricated hardware imagery where the flow owns real evidence.
-- Licensed Lucide icons are used where the flattened references did not provide reusable source illustrations.
-- Missing parts use compatible external searches rather than fake live prices or checkout.
-- Publish and Success label an untested source image as `Original parts photo`; `Tested & working` appears only when manual evidence exists.
-- Hosted mode remains honest about browser flashing limitations; local Makeable uses Arduino CLI and Web Serial.
+- The landing headline uses the user-approved product statement instead of the
+  earlier mockup copy.
+- Real detected ESP32/board names replace illustrative Makeable Uno labels.
+- User-supplied evidence replaces fabricated hardware imagery where the build
+  flow owns real evidence.
+- Hosted mode remains honest about browser flashing limitations; local
+  Makeable uses Arduino CLI and Web Serial.
 
 final result: passed
