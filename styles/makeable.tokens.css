@@ -1,0 +1,35 @@
+:root {
+  --makeable-color-cream: #f7f0e4;
+  --makeable-color-paper: #fffdf8;
+  --makeable-color-ink: #111111;
+  --makeable-color-coral: #f15a44;
+  --makeable-color-hot-pink: #f43b88;
+  --makeable-color-periwinkle: #8c8cf4;
+  --makeable-color-mint: #9fdcc9;
+  --makeable-color-lemon: #ffd43b;
+  --makeable-color-blue: #5b6dff;
+  --makeable-color-green: #379b72;
+  --makeable-color-gray: #8b887f;
+  --makeable-color-pale-paper: #f2e8d9;
+  --makeable-background-canvas: var(--makeable-color-cream);
+  --makeable-background-paper: var(--makeable-color-paper);
+  --makeable-background-subtle: var(--makeable-color-pale-paper);
+  --makeable-text-primary: var(--makeable-color-ink);
+  --makeable-text-secondary: var(--makeable-color-gray);
+  --makeable-action-primary: var(--makeable-color-coral);
+  --makeable-step-scan: var(--makeable-color-hot-pink);
+  --makeable-step-build: var(--makeable-color-periwinkle);
+  --makeable-step-test: var(--makeable-color-mint);
+  --makeable-step-publish: var(--makeable-color-lemon);
+  --makeable-status-success: var(--makeable-color-green);
+  --makeable-space-4: 4px; --makeable-space-8: 8px; --makeable-space-12: 12px;
+  --makeable-space-16: 16px; --makeable-space-24: 24px; --makeable-space-32: 32px;
+  --makeable-space-48: 48px; --makeable-space-64: 64px;
+  --makeable-radius-sm: 6px; --makeable-radius-md: 12px; --makeable-radius-lg: 18px; --makeable-radius-pill: 999px;
+  --makeable-font-display: "Fredoka", sans-serif;
+  --makeable-font-body: "Nunito Sans", sans-serif;
+  --makeable-font-annotation: "Shantell Sans", cursive;
+  --makeable-font-code: "Roboto Mono", monospace;
+  --makeable-shadow-paper: 0 6px 16px rgb(0 0 0 / 10%);
+  --makeable-shadow-pressed: 3px 3px 0 rgb(0 0 0 / 85%);
+}

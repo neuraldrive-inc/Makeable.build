@@ -18,7 +18,7 @@ The interface should feel like a smart friend has laid a personalized build guid
 - Wiring is presented one physical connection at a time.
 - Firmware generation and flashing preserve the existing Arduino CLI and Web Serial paths.
 - Testing covers both machine-observable evidence and a simple human confirmation.
-- Publishing packages the guide, code, parts list, and test outcome.
+- Publishing packages the guide, parts list, and test outcome while firmware stays sealed inside Makeable.
 - The UI remains recognizably Makeable at every state: cream paper, torn edges, tape, doodles, warm color, and friendly copy.
 
 ## 3. Reference-image ledger

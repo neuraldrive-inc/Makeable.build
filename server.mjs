@@ -16,6 +16,10 @@ import {
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { WebSocket, WebSocketServer } from "ws";
 import { getBoardProfile, supportedBoardSummary } from "./lib/board-profiles.mjs";
+import {
+  createPublishCapability,
+  verifyPublishCapability,
+} from "./lib/publish-capability.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -55,6 +59,14 @@ const mimeTypes = new Map([
   [".jpeg", "image/jpeg"],
   [".webp", "image/webp"],
   [".ico", "image/x-icon"],
+  [".woff", "font/woff"],
+  [".woff2", "font/woff2"],
+]);
+const publicRootFiles = new Set(["index.html", "app.js", "styles.css"]);
+const publicDirectoryRoots = new Map([
+  ["assets", path.join(__dirname, "assets")],
+  ["src", path.join(__dirname, "src", "makeable")],
+  ["styles", path.join(__dirname, "styles")],
 ]);
 
 const server = createServer(async (req, res) => {
@@ -117,13 +129,13 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/api/github/repos" && req.method === "POST") {
       const user = await requireUser(req, res, env);
       if (!user) return;
-      return createGitHubRepo(req, res, env);
+      return createGitHubRepo(req, res, env, user);
     }
 
     if (url.pathname === "/api/github/upload-file" && req.method === "POST") {
       const user = await requireUser(req, res, env);
       if (!user) return;
-      return uploadGitHubFile(req, res, env);
+      return uploadGitHubFile(req, res, env, user);
     }
 
     if (url.pathname === "/api/health") {
@@ -584,17 +596,8 @@ function publicConfigScript(env) {
 }
 
 async function serveStatic(pathname, res) {
-  const safePath = pathname === "/" ? "/index.html" : decodeURIComponent(pathname);
-  const filePath = path.normalize(path.join(__dirname, safePath));
-  const relativePath = path.relative(__dirname, filePath);
-
-  if (
-    relativePath.startsWith("..") ||
-    path.isAbsolute(relativePath) ||
-    path.basename(filePath).startsWith(".")
-  ) {
-    return sendText(res, "Not found", "text/plain; charset=utf-8", 404);
-  }
+  const filePath = resolvePublicFile(pathname);
+  if (!filePath) return sendText(res, "Not found", "text/plain; charset=utf-8", 404);
 
   try {
     const data = await readFile(filePath);
@@ -604,6 +607,39 @@ async function serveStatic(pathname, res) {
   } catch {
     sendText(res, "Not found", "text/plain; charset=utf-8", 404);
   }
+}
+
+function resolvePublicFile(pathname) {
+  let decoded;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return "";
+  }
+  const segments = decoded.split(/[\\/]+/).filter(Boolean);
+  if (segments.some((segment) => segment.startsWith("."))) return "";
+  if (pathname === "/" || pathname.startsWith("/build/")) {
+    return path.join(__dirname, "index.html");
+  }
+  if (segments.length === 1 && publicRootFiles.has(segments[0])) {
+    return path.join(__dirname, segments[0]);
+  }
+
+  const [publicRoot, ...relativeSegments] = segments;
+  const allowedRoot =
+    publicRoot === "src"
+      ? relativeSegments.shift() === "makeable"
+        ? publicDirectoryRoots.get("src")
+        : ""
+      : publicDirectoryRoots.get(publicRoot);
+  if (!allowedRoot || !relativeSegments.length) return "";
+
+  const filePath = path.resolve(allowedRoot, ...relativeSegments);
+  const relativePath = path.relative(allowedRoot, filePath);
+  if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    return "";
+  }
+  return filePath;
 }
 
 async function proxyOpenAI(req, res, env) {
@@ -886,7 +922,7 @@ async function firmwareImage(filePath, address, label) {
   };
 }
 
-async function createGitHubRepo(req, res, env) {
+async function createGitHubRepo(req, res, env, user) {
   if (!env.GITHUB_TOKEN) {
     return sendJson(res, { error: "GITHUB_TOKEN is missing in .env" }, 401);
   }
@@ -901,10 +937,27 @@ async function createGitHubRepo(req, res, env) {
       auto_init: false,
     }),
   });
-  return pipeJson(upstream, res);
+  const text = await upstream.text();
+  if (!upstream.ok) {
+    res.writeHead(upstream.status, {
+      "Content-Type": upstream.headers.get("content-type") || "application/json; charset=utf-8",
+    });
+    res.end(text);
+    return;
+  }
+  const repository = JSON.parse(text);
+  const owner = String(repository?.owner?.login || env.GITHUB_OWNER || "");
+  const repositoryName = String(repository?.name || body.name || "");
+  return sendJson(res, {
+    ...repository,
+    publishCapability: createPublishCapability(
+      { userId: user.userId, owner, repositoryName },
+      env.GITHUB_TOKEN,
+    ),
+  }, upstream.status);
 }
 
-async function uploadGitHubFile(req, res, env) {
+async function uploadGitHubFile(req, res, env, user) {
   if (!env.GITHUB_TOKEN) {
     return sendJson(res, { error: "GITHUB_TOKEN is missing in .env" }, 401);
   }
@@ -914,6 +967,15 @@ async function uploadGitHubFile(req, res, env) {
   const filePath = body.path;
   if (!owner || !repo || !filePath) {
     return sendJson(res, { error: "owner, repo, and path are required" }, 400);
+  }
+  if (
+    !verifyPublishCapability(
+      body.publishCapability,
+      { userId: user.userId, owner, repositoryName: repo },
+      env.GITHUB_TOKEN,
+    )
+  ) {
+    return sendJson(res, { error: "This GitHub upload authorization is missing or expired." }, 403);
   }
 
   const encodedPath = filePath.split("/").map(encodeURIComponent).join("/");

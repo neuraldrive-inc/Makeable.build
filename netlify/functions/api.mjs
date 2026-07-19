@@ -8,7 +8,7 @@ export default async function handler(req) {
     }
 
     if (url.pathname === "/api/config") {
-      return jsonResponse(publicConfig(env));
+      return jsonResponse(await resolvedPublicConfig(env));
     }
 
     if (url.pathname === "/api/openai/responses" && req.method === "POST") {
@@ -37,11 +37,11 @@ export default async function handler(req) {
     }
 
     if (url.pathname === "/api/github/repos" && req.method === "POST") {
-      return createGitHubRepo(req, env);
+      return proxyMakeableApi(req, env);
     }
 
     if (url.pathname === "/api/github/upload-file" && req.method === "POST") {
-      return uploadGitHubFile(req, env);
+      return proxyMakeableApi(req, env);
     }
 
     if (url.pathname === "/api/health") {
@@ -111,13 +111,35 @@ function publicConfig(env) {
   };
 }
 
+async function resolvedPublicConfig(env) {
+  const local = publicConfig(env);
+  if (!local.apiBaseUrl) return local;
+  try {
+    const response = await fetch(`${local.apiBaseUrl}/api/config`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return local;
+    const backend = await response.json();
+    return { ...local, ...backend, apiBaseUrl: local.apiBaseUrl };
+  } catch {
+    return local;
+  }
+}
+
 async function proxyMakeableApi(req, env) {
   const base = String(env.MAKEABLE_API_BASE_URL || "").replace(/\/$/, "");
   if (!base) return jsonResponse({ error: "The hosted firmware service is not configured." }, 503);
   const inputUrl = new URL(req.url);
+  const headers = new Headers({
+    "Content-Type": req.headers.get("content-type") || "application/json",
+  });
+  const authorization = req.headers.get("authorization");
+  const generationId = req.headers.get("x-makeable-generation-id");
+  if (authorization) headers.set("Authorization", authorization);
+  if (generationId) headers.set("X-Makeable-Generation-Id", generationId);
   const upstream = await fetch(`${base}${inputUrl.pathname}${inputUrl.search}`, {
     method: req.method,
-    headers: { "Content-Type": req.headers.get("content-type") || "application/json" },
+    headers,
     body: req.method === "GET" || req.method === "HEAD" ? undefined : await req.text(),
   });
   return new Response(await upstream.arrayBuffer(), {
@@ -255,77 +277,6 @@ function upstreamErrorJson(status, text) {
   }
   const message = parsed.error?.message || parsed.message || parsed.error || `OpenAI returned HTTP ${status}`;
   return JSON.stringify({ error: message, upstreamStatus: status });
-}
-
-async function createGitHubRepo(req, env) {
-  if (!env.GITHUB_TOKEN) {
-    return jsonResponse({ error: "GITHUB_TOKEN is missing in Netlify environment variables" }, 401);
-  }
-  const body = await req.json();
-  const upstream = await fetch("https://api.github.com/user/repos", {
-    method: "POST",
-    headers: githubHeaders(env),
-    body: JSON.stringify({
-      name: body.name,
-      description: body.description || "Hardware project generated with Makeable",
-      private: Boolean(body.private),
-      auto_init: false,
-    }),
-  });
-  return pipeJson(upstream);
-}
-
-async function uploadGitHubFile(req, env) {
-  if (!env.GITHUB_TOKEN) {
-    return jsonResponse({ error: "GITHUB_TOKEN is missing in Netlify environment variables" }, 401);
-  }
-  const body = await req.json();
-  const owner = body.owner || env.GITHUB_OWNER;
-  const repo = body.repo;
-  const filePath = body.path;
-  if (!owner || !repo || !filePath) {
-    return jsonResponse({ error: "owner, repo, and path are required" }, 400);
-  }
-
-  const encodedPath = filePath.split("/").map(encodeURIComponent).join("/");
-  const branchQuery = body.branch ? `?ref=${encodeURIComponent(body.branch)}` : "";
-  let sha;
-  const existing = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}${branchQuery}`,
-    { headers: githubHeaders(env) },
-  );
-  if (existing.ok) {
-    const existingJson = await existing.json();
-    sha = existingJson.sha;
-  } else if (existing.status !== 404) {
-    return pipeJson(existing);
-  }
-
-  const payload = {
-    message: body.message || `Update ${filePath}`,
-    content: Buffer.from(body.content || "", "utf8").toString("base64"),
-    ...(body.branch ? { branch: body.branch } : {}),
-    ...(sha ? { sha } : {}),
-  };
-
-  const upstream = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`,
-    {
-      method: "PUT",
-      headers: githubHeaders(env),
-      body: JSON.stringify(payload),
-    },
-  );
-  return pipeJson(upstream);
-}
-
-function githubHeaders(env) {
-  return {
-    Accept: "application/vnd.github+json",
-    Authorization: `Bearer ${env.GITHUB_TOKEN}`,
-    "Content-Type": "application/json",
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
 }
 
 async function pipeJson(upstream) {

@@ -1,0 +1,19 @@
+{
+  "product": "Makeable",
+  "figma": "https://www.figma.com/design/9venqrASomMyHA6E3OCRUJ",
+  "referenceSize": { "width": 1440, "height": 1024 },
+  "devices": { "desktop": [1440, 1024], "tablet": [834, 1194], "mobile": [390, 844] },
+  "screens": [
+    { "id": "01", "route": "/build/new", "asset": "final-1440x1024/01-describe.png", "step": "prompt", "next": "02a" },
+    { "id": "02a", "route": "/build/parts/upload", "asset": "final-1440x1024/02a-upload-parts.png", "step": "scan", "next": "02b" },
+    { "id": "02b", "route": "/build/parts/review", "asset": "final-1440x1024/02b-scan-parts-annotated.png", "step": "scan", "next": ["03a", "03b"] },
+    { "id": "03a", "route": "/build/feasibility/ready", "asset": "final-1440x1024/03a-feasibility-ready.png", "branch": "buildable", "next": "04" },
+    { "id": "03b", "route": "/build/feasibility/missing", "asset": "final-1440x1024/03b-feasibility-missing.png", "branch": "missing-parts", "actions": ["shop", "alternatives"] },
+    { "id": "04", "route": "/build/assemble", "asset": "final-1440x1024/04-assemble-step.png", "step": "build", "next": "05" },
+    { "id": "05", "route": "/build/code", "asset": "final-1440x1024/05-load-code.png", "step": "build", "next": "06a" },
+    { "id": "06a", "route": "/build/test/automatic", "asset": "final-1440x1024/06a-test-automatic.png", "step": "test", "next": "06b" },
+    { "id": "06b", "route": "/build/test/manual", "asset": "final-1440x1024/06b-test-your-turn.png", "step": "test", "next": "07a" },
+    { "id": "07a", "route": "/build/publish/connect", "asset": "final-1440x1024/07a-publish-connect.png", "step": "publish", "next": "07b" },
+    { "id": "07b", "route": "/build/publish/success", "asset": "final-1440x1024/07b-publish-success.png", "step": "publish", "terminal": true }
+  ]
+}
