@@ -3,4 +3,10 @@
   <url>
     <loc>https://makeable.build/</loc>
   </url>
+  <url>
+    <loc>https://makeable.build/privacy/</loc>
+  </url>
+  <url>
+    <loc>https://makeable.build/terms/</loc>
+  </url>
 </urlset>

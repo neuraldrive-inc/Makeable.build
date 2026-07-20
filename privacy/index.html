@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f7f1e8" />
+    <meta name="robots" content="index, follow" />
+    <title>Privacy · Makeable</title>
+    <meta
+      name="description"
+      content="How Makeable handles Google sign-in, waitlist emails, and pilot communications."
+    />
+    <link rel="canonical" href="https://makeable.build/privacy/" />
+    <link rel="icon" href="/assets/icons/lucide/sparkles.svg" />
+    <link rel="stylesheet" href="/styles/legal.css" />
+  </head>
+  <body>
+    <div class="legal-shell">
+      <header class="legal-nav">
+        <a class="makeable-wordmark" href="/" aria-label="Makeable home">
+          <span class="makeable-wordmark-text" aria-hidden="true">Makeable</span>
+          <span class="makeable-logo-spark" aria-hidden="true"></span>
+        </a>
+        <a class="legal-link" href="/terms/">Terms</a>
+      </header>
+
+      <main class="legal-main">
+        <section class="legal-card" aria-labelledby="privacy-title">
+          <div class="legal-banner">
+            <div>
+              <p class="legal-kicker">Privacy</p>
+              <h1 id="privacy-title">What we collect and why</h1>
+            </div>
+            <span class="legal-chip">Short version: we keep only what we need.</span>
+          </div>
+
+          <div class="legal-body">
+            <p class="legal-updated">Last updated: July 20, 2026</p>
+            <p>
+              Google sign-in supplies your name, email address, profile image URL,
+              email verification status, and a stable Google account identifier.
+            </p>
+
+            <h2>How we use it</h2>
+            <p>
+              We store your email address in Makeable's waitlist storage so we can
+              manage the waitlist and send pilot-access communications. The current
+              hosted deployment uses Netlify Blobs. If we connect another waitlist
+              service, the record may be securely delivered to that service for the
+              same purpose. If you join through Google sign-in, we may also keep your
+              name and profile image to make the experience friendlier in the product.
+            </p>
+
+            <h2>What we do not do</h2>
+            <ul>
+              <li>We do not sell your email address or Google profile data.</li>
+              <li>We do not use the Google sign-in data for ad targeting.</li>
+              <li>We do not ask for more Google data than we need for the waitlist.</li>
+            </ul>
+
+            <h2>Retention and removal</h2>
+            <p>
+              We keep waitlist records until they are no longer needed for pilot
+              access or product communication. You can ask us to remove your
+              record at any time.
+            </p>
+
+            <div class="legal-callout">
+              <p>
+                Removal requests and privacy questions:
+                <a href="mailto:mohammedkhambhati2020@gmail.com">mohammedkhambhati2020@gmail.com</a>
+              </p>
+              <p>
+                Read the <a href="/terms/">Terms</a> for the early-access and acceptable-use rules.
+              </p>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="legal-footer">
+        <span>© <span data-current-year></span> Makeable</span>
+        <span>
+          <a href="/">Home</a> · <a href="/terms/">Terms</a>
+        </span>
+      </footer>
+    </div>
+
+    <script>
+      document.querySelectorAll("[data-current-year]").forEach((node) => {
+        node.textContent = new Date().getFullYear();
+      });
+    </script>
+  </body>
+</html>

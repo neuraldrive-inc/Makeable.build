@@ -31,14 +31,28 @@ test("the current production app stays packaged as a self-contained pilot", asyn
   for (const relativePath of [
     "landing.js",
     "styles/landing-v2.css",
+    "styles/legal.css",
     "assets/fonts/fredoka/fredoka.woff2",
     "assets/icons/google-g.svg",
     "assets/landing/desk-parts-v2.png",
     "robots.txt",
     "sitemap.xml",
+    "privacy/index.html",
+    "terms/index.html",
   ]) {
     await access(path.join(root, "dist", relativePath));
   }
+
+  const privacyHtml = await readFile(path.join(root, "dist", "privacy", "index.html"), "utf8");
+  const termsHtml = await readFile(path.join(root, "dist", "terms", "index.html"), "utf8");
+  assert.match(privacyHtml, /Google sign-in supplies your name, email address, profile image URL/);
+  assert.match(privacyHtml, /stable Google account identifier/);
+  assert.match(privacyHtml, /Netlify Blobs/);
+  assert.match(privacyHtml, /mohammedkhambhati2020@gmail\.com/);
+  assert.match(termsHtml, /Early access, not a finished product/);
+  assert.match(termsHtml, /acceptable-use rules/);
+  assert.match(landingHtml, /href="\/privacy\/"/);
+  assert.match(landingHtml, /href="\/terms\/"/);
 
   await assert.rejects(access(path.join(root, "dist", "app.js")));
   await assert.rejects(access(path.join(root, "dist", "styles.css")));

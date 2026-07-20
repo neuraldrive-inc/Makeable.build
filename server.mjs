@@ -704,12 +704,24 @@ async function serveStatic(url, res) {
     return;
   }
 
+  if (pathname === "/privacy/" || pathname === "/privacy") {
+    return serveFile("/privacy/index.html", res);
+  }
+
+  if (pathname === "/terms/" || pathname === "/terms") {
+    return serveFile("/terms/index.html", res);
+  }
+
   const safePath =
     pathname === "/"
       ? "/index.html"
       : pathname === "/pilot"
         ? "/pilot/index.html"
         : decodeURIComponent(pathname);
+  return serveFile(safePath, res);
+}
+
+async function serveFile(safePath, res) {
   const filePath = path.normalize(path.join(__dirname, safePath));
   const relativePath = path.relative(__dirname, filePath);
 
