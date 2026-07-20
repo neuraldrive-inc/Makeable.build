@@ -1,0 +1,215 @@
+:root {
+  color-scheme: light;
+  --legal-bg: #f7f1e8;
+  --legal-paper: rgba(255, 251, 245, 0.9);
+  --legal-ink: #322118;
+  --legal-muted: rgba(50, 33, 24, 0.72);
+  --legal-accent: #ef2d83;
+  --legal-accent-soft: rgba(239, 45, 131, 0.11);
+  --legal-border: rgba(104, 74, 55, 0.18);
+}
+
+@font-face {
+  font-family: "Fredoka";
+  src: url("/assets/fonts/fredoka/fredoka.woff2") format("woff2");
+  font-weight: 500 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Nunito Sans";
+  src: url("/assets/fonts/nunito-sans/nunito-sans.woff2") format("woff2");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(239, 45, 131, 0.08), transparent 30%),
+    radial-gradient(circle at top right, rgba(88, 180, 163, 0.08), transparent 28%),
+    var(--legal-bg);
+  color: var(--legal-ink);
+  font-family: "Nunito Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+a {
+  color: inherit;
+}
+
+.legal-shell {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+.legal-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 28px 24px 0;
+}
+
+.makeable-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--legal-ink);
+  font-family: Fredoka, ui-sans-serif, system-ui, sans-serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.makeable-wordmark-text {
+  letter-spacing: -0.02em;
+}
+
+.makeable-logo-spark {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: radial-gradient(circle at 35% 35%, #fff, #ffd6e7 28%, var(--legal-accent) 100%);
+  box-shadow: 0 0 0 1px rgba(239, 45, 131, 0.12);
+}
+
+.legal-link {
+  font-family: Fredoka, ui-sans-serif, system-ui, sans-serif;
+  text-decoration: none;
+  color: var(--legal-muted);
+}
+
+.legal-main {
+  width: min(920px, calc(100% - 32px));
+  margin: 36px auto 48px;
+  padding: 0;
+}
+
+.legal-card {
+  background: var(--legal-paper);
+  border: 1px solid var(--legal-border);
+  border-radius: 32px;
+  box-shadow: 0 20px 80px rgba(71, 37, 21, 0.1);
+  overflow: hidden;
+}
+
+.legal-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 24px;
+  background:
+    linear-gradient(90deg, rgba(239, 45, 131, 0.12), transparent 60%),
+    rgba(255, 255, 255, 0.35);
+  border-bottom: 1px solid var(--legal-border);
+}
+
+.legal-kicker {
+  margin: 0;
+  font-family: Fredoka, ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--legal-accent);
+}
+
+.legal-banner h1 {
+  margin: 4px 0 0;
+  font-family: Fredoka, ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(2.1rem, 4.2vw, 3.5rem);
+  line-height: 0.95;
+}
+
+.legal-chip {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(239, 45, 131, 0.09);
+  color: var(--legal-accent);
+  font-family: Fredoka, ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.95rem;
+}
+
+.legal-body {
+  padding: 24px;
+}
+
+.legal-updated {
+  margin-top: 0;
+  color: var(--legal-muted);
+  font-size: 0.92rem !important;
+}
+
+.legal-body p,
+.legal-body li {
+  font-size: 1.08rem;
+  line-height: 1.55;
+}
+
+.legal-body h2 {
+  margin: 28px 0 10px;
+  font-family: Fredoka, ui-sans-serif, system-ui, sans-serif;
+  font-size: 1.35rem;
+}
+
+.legal-body ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.legal-callout {
+  margin-top: 24px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(104, 74, 55, 0.12);
+}
+
+.legal-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 4px 28px;
+  color: var(--legal-muted);
+}
+
+.legal-footer a {
+  color: inherit;
+  text-decoration-thickness: 1px;
+}
+
+.legal-footer a:hover,
+.legal-footer a:focus-visible {
+  color: var(--legal-accent);
+}
+
+@media (max-width: 700px) {
+  .legal-nav,
+  .legal-main {
+    width: min(100%, calc(100% - 24px));
+  }
+
+  .legal-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .legal-body {
+    padding: 18px;
+  }
+}

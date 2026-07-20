@@ -3,104 +3,376 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#f7f0e4" />
-    <base href="/" />
-    <title>Makeable</title>
-    <link rel="icon" href="./assets/icons/lucide/sparkles.svg" />
-    <link rel="stylesheet" href="./styles.css" />
+    <meta name="theme-color" content="#f7f1e8" />
+    <title>Turn ideas into working physical products in hours. · Makeable</title>
+    <meta
+      name="description"
+      content="Makeable is an AI hardware prototyping studio that turns the parts on your desk into wiring plans, working firmware, and guided tests."
+    />
+    <meta
+      property="og:title"
+      content="Turn ideas into working physical products in hours. · Makeable"
+    />
+    <meta
+      property="og:description"
+      content="Makeable is an AI hardware prototyping studio that turns the parts on your desk into wiring plans, working firmware, and guided tests."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://makeable.build/" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://makeable.build/" />
+    <link rel="icon" href="/assets/icons/lucide/sparkles.svg" />
+    <link rel="preconnect" href="https://accounts.google.com" />
+    <link
+      rel="preload"
+      href="/assets/landing/desk-parts-v2.png"
+      as="image"
+      fetchpriority="high"
+    />
+    <link rel="stylesheet" href="/styles/landing-v2.css" />
   </head>
-  <body>
-    <a class="skip-link" href="#main-content">Skip to project builder</a>
+  <body class="waitlist-page">
+    <a class="waitlist-skip" href="#main">Skip to Makeable</a>
 
-    <header class="app-header" data-makeable-shell>
-      <a class="makeable-brand" href="/" aria-label="Makeable home">
-        <span aria-hidden="true">Makeable</span>
-        <span class="visually-hidden">Makeable home</span>
-        <img
-          class="brand-spark"
-          src="./assets/icons/lucide/sparkles.svg"
-          alt=""
-          width="24"
-          height="24"
-          aria-hidden="true"
-        />
+    <header class="waitlist-nav">
+      <a class="makeable-wordmark" href="/" aria-label="Makeable home">
+        <span class="makeable-wordmark-text" aria-hidden="true">Makeable</span>
+        <span class="makeable-logo-spark" aria-hidden="true"></span>
       </a>
-
-      <nav class="progress-rail" aria-label="Build progress">
-        <ol>
-          <li class="progress-step progress-step--describe" data-progress-step="describe" aria-current="step">
-            <a class="progress-action" data-progress-action aria-disabled="true" tabindex="-1">
-              <span class="progress-number" aria-hidden="true">1</span>
-              <img src="./assets/icons/lucide/message-circle.svg" alt="" width="30" height="30" aria-hidden="true" />
-              <span class="progress-label">Describe</span>
-            </a>
-            <span class="progress-complete" aria-hidden="true">
-              <img src="./assets/icons/lucide/check.svg" alt="" width="20" height="20" />
-            </span>
-          </li>
-          <li class="progress-step progress-step--scan" data-progress-step="scan">
-            <a class="progress-action" data-progress-action aria-disabled="true" tabindex="-1">
-              <span class="progress-number" aria-hidden="true">2</span>
-              <img src="./assets/icons/lucide/camera.svg" alt="" width="30" height="30" aria-hidden="true" />
-              <span class="progress-label">Scan Parts</span>
-            </a>
-            <span class="progress-complete" aria-hidden="true">
-              <img src="./assets/icons/lucide/check.svg" alt="" width="20" height="20" />
-            </span>
-          </li>
-          <li class="progress-step progress-step--build" data-progress-step="build">
-            <a class="progress-action" data-progress-action aria-disabled="true" tabindex="-1">
-              <span class="progress-number" aria-hidden="true">3</span>
-              <img src="./assets/icons/lucide/code-xml.svg" alt="" width="30" height="30" aria-hidden="true" />
-              <span class="progress-label">Build + Code</span>
-            </a>
-            <span class="progress-complete" aria-hidden="true">
-              <img src="./assets/icons/lucide/check.svg" alt="" width="20" height="20" />
-            </span>
-          </li>
-          <li class="progress-step progress-step--test" data-progress-step="test">
-            <a class="progress-action" data-progress-action aria-disabled="true" tabindex="-1">
-              <span class="progress-number" aria-hidden="true">4</span>
-              <img src="./assets/icons/lucide/zap.svg" alt="" width="30" height="30" aria-hidden="true" />
-              <span class="progress-label">Test</span>
-            </a>
-            <span class="progress-complete" aria-hidden="true">
-              <img src="./assets/icons/lucide/check.svg" alt="" width="20" height="20" />
-            </span>
-          </li>
-          <li class="progress-step progress-step--publish" data-progress-step="publish">
-            <a class="progress-action" data-progress-action aria-disabled="true" tabindex="-1">
-              <span class="progress-number" aria-hidden="true">5</span>
-              <img src="./assets/icons/lucide/globe-2.svg" alt="" width="30" height="30" aria-hidden="true" />
-              <span class="progress-label">Publish</span>
-            </a>
-            <span class="progress-complete" aria-hidden="true">
-              <img src="./assets/icons/lucide/check.svg" alt="" width="20" height="20" />
-            </span>
-          </li>
-        </ol>
-      </nav>
-
-      <aside class="account-panel" aria-label="Makeable account">
-        <div class="account-summary">
-          <span class="account-name" id="accountName">10 free generations</span>
-          <span class="credit-badge" id="creditBadge" hidden></span>
-        </div>
-        <button class="account-button" id="accountButton" type="button">Sign in</button>
-      </aside>
     </header>
 
-    <main class="app-main" id="main-content" tabindex="-1">
-      <section class="screen-outlet" data-screen-outlet aria-labelledby="makeable-heading">
-        <h1 class="visually-hidden" id="makeable-heading" data-app-heading>Makeable</h1>
-        <p class="app-status" id="appStatus" role="status" aria-live="polite">Loading Makeable…</p>
-        <noscript>
-          <p class="app-notice">Makeable needs JavaScript to guide your hardware build.</p>
-        </noscript>
+    <main class="waitlist-layout" id="main">
+      <section
+        class="waitlist-hero"
+        aria-labelledby="hero-title"
+        data-sticky-signup
+      >
+        <div class="hero-message">
+          <div class="hero-title-block">
+            <div class="hero-heading-wrap">
+              <h1 id="hero-title">
+                <span>Turn ideas into</span>
+                <span>working physical</span>
+                <span class="hero-underlined">
+                  products in hours.
+                  <span class="hero-underline-art" aria-hidden="true"></span>
+                </span>
+              </h1>
+              <span class="hero-marker-rays" aria-hidden="true">
+                <i></i><i></i><i></i>
+              </span>
+            </div>
+            <p class="hero-lede">
+              <span>Show Makeable your parts.</span>
+              <span>Get the wiring, code, and</span>
+              <span>tests to make them work.</span>
+            </p>
+          </div>
+
+          <div
+            class="launch-tag launch-poster"
+            aria-label="Early access opens August 9, 2026"
+          >
+            <span class="launch-tape grid-tape grid-tape--blue" aria-hidden="true"></span>
+            <span class="launch-poster-kicker">Early access opens</span>
+            <strong>August 9,</strong>
+            <strong class="launch-year">
+              <span class="launch-year-rays launch-year-rays--left" aria-hidden="true">
+                <i></i><i></i><i></i>
+              </span>
+              2026
+              <span class="launch-year-rays launch-year-rays--right" aria-hidden="true">
+                <i></i><i></i><i></i>
+              </span>
+            </strong>
+          </div>
+
+          <div class="hero-signup-anchor" data-signup-anchor>
+            <section class="hero-signup" id="join" aria-labelledby="signup-title">
+              <div data-signup-content>
+                <span class="launch-arrow" aria-hidden="true"></span>
+                <h2 id="signup-title">
+                  Join the waitlist
+                  <span class="hand-underline hand-underline--join" aria-hidden="true"></span>
+                </h2>
+                <div class="google-slot" data-google-slot>
+                  <button class="google-fallback" type="button" data-google-fallback>
+                    <img
+                      src="/assets/icons/google-g.svg"
+                      alt=""
+                      width="34"
+                      height="34"
+                      aria-hidden="true"
+                    />
+                    Continue with Google
+                  </button>
+                </div>
+                <p class="signup-note">
+                  One Google tap. You’re on the list.
+                  <span class="hand-underline hand-underline--note" aria-hidden="true"></span>
+                  <span class="signup-note-rays" aria-hidden="true">
+                    <i></i><i></i><i></i>
+                  </span>
+                </p>
+                <p class="signup-data-use">
+                  Google sign-in adds your verified email to Makeable’s early-access
+                  waitlist so we can send your pilot invitation.
+                  <a href="/privacy/">How we use your data</a>.
+                </p>
+              </div>
+              <div
+                class="signup-status"
+                id="signupStatus"
+                data-signup-status
+                role="status"
+                aria-live="polite"
+              ></div>
+            </section>
+          </div>
+        </div>
       </section>
+
+      <div class="landing-story-column" data-scroll-story>
+        <section
+          class="desk-reveal"
+          id="how-it-works"
+          aria-labelledby="desk-reveal-title"
+        >
+        <div class="desk-reveal-heading">
+          <p class="story-index">Your parts are the starting point</p>
+          <h2 id="desk-reveal-title">Your desk. Makeable sees a build.</h2>
+          <p>
+            Drag the handle to see Makeable recognize the useful parts already
+            in front of you.
+          </p>
+        </div>
+
+        <div
+          class="comparison paper-card"
+          data-comparison
+          style="--comparison-reveal: 30%"
+        >
+          <div class="comparison-label comparison-label--before">Your desk</div>
+          <div class="comparison-label comparison-label--after">Makeable sees</div>
+          <div class="comparison-media">
+            <div class="comparison-photo-frame">
+              <img
+                class="hero-photo comparison-photo"
+                data-comparison-photo="before"
+                src="/assets/landing/desk-parts-v2.png"
+                alt="An OLED display, ESP32 DevKit, PIR motion sensor, DHT22 sensor, and logic level converter on a desk"
+                width="1376"
+                height="768"
+                fetchpriority="high"
+                decoding="async"
+              />
+            </div>
+            <div
+              class="comparison-recognition-layer"
+              data-comparison-recognition-layer
+              aria-hidden="true"
+            >
+              <div class="comparison-photo-frame">
+                <img
+                  class="hero-photo comparison-photo"
+                  data-comparison-photo="after"
+                  src="/assets/landing/desk-parts-labelled-v3.png"
+                  alt=""
+                  width="1024"
+                  height="572"
+                  decoding="async"
+                />
+              </div>
+            </div>
+            <span class="comparison-divider" aria-hidden="true">
+              <span>
+                <img
+                  src="/assets/icons/lucide/arrow-left.svg"
+                  alt=""
+                  width="18"
+                  height="18"
+                />
+                <img
+                  src="/assets/icons/lucide/arrow-right.svg"
+                  alt=""
+                  width="18"
+                  height="18"
+                />
+              </span>
+            </span>
+            <input
+              class="comparison-range"
+              type="range"
+              min="0"
+              max="100"
+              value="30"
+              step="0.1"
+              aria-label="Reveal Makeable part recognition"
+              data-comparison-range
+            />
+          </div>
+        </div>
+        </section>
+
+        <section
+          class="build-story"
+          data-story-root
+          data-active-story="recognize"
+          aria-label="How Makeable works"
+        >
+        <div class="story-stage" data-story-stage>
+          <article
+            class="story-scene story-scene--recognize paper-card"
+            data-story-chapter="recognize"
+          >
+            <div class="story-copy">
+              <div class="story-banner">
+                <span class="story-number">01</span>
+                <h2>Recognize</h2>
+                <span class="story-doodle-arrow" aria-hidden="true"></span>
+              </div>
+              <p class="story-caption">We found 6 things!</p>
+              <ul class="part-chips" aria-label="Recognized parts">
+                <li><span class="part-chip-number">1</span><span class="part-chip-name">Breadboard</span></li>
+                <li><span class="part-chip-number">2</span><span class="part-chip-name">Arduino Uno</span></li>
+                <li><span class="part-chip-number">3</span><span class="part-chip-name">DC Motor</span></li>
+                <li><span class="part-chip-number">4</span><span class="part-chip-name">Red LED</span></li>
+                <li><span class="part-chip-number">5</span><span class="part-chip-name">Resistor</span></li>
+                <li><span class="part-chip-number">6</span><span class="part-chip-name">Jumper Wires</span></li>
+              </ul>
+            </div>
+            <figure class="story-visual" data-story-frame="recognize">
+              <img
+                class="story-image"
+                src="/assets/landing/recognize-hardware-clean-v2.png"
+                alt="A breadboard, Arduino Uno, motor, LED, resistor, wires, and battery pack on a desk"
+                width="1200"
+                height="463"
+                loading="lazy"
+                decoding="async"
+              />
+              <span class="story-tape story-tape--blue grid-tape grid-tape--blue" aria-hidden="true"></span>
+            </figure>
+          </article>
+
+          <article
+            class="story-scene story-scene--connect paper-card"
+            data-story-chapter="connect"
+          >
+            <div class="story-copy">
+              <div class="story-banner">
+                <span class="story-number">02</span>
+                <h2>Connect</h2>
+                <span class="story-doodle-arrow" aria-hidden="true"></span>
+              </div>
+              <p class="story-caption">We’ll wire it up.</p>
+              <ul class="wire-chips" aria-label="Example wiring">
+                <li>VCC → 5V</li>
+                <li>GND → GND</li>
+                <li>SIG → A0</li>
+              </ul>
+            </div>
+            <figure class="story-visual" data-story-frame="connect">
+              <img
+                class="story-image"
+                src="/assets/landing/connect-hardware-clean.png"
+                alt="An Arduino Uno wired to a soil moisture sensor"
+                width="1400"
+                height="397"
+                loading="lazy"
+                decoding="async"
+              />
+              <span class="story-tape story-tape--green grid-tape grid-tape--green" aria-hidden="true"></span>
+            </figure>
+          </article>
+
+          <article
+            class="story-scene story-scene--test paper-card"
+            data-story-chapter="test"
+          >
+            <div class="story-copy">
+              <div class="story-banner">
+                <span class="story-number">03</span>
+                <h2>Test</h2>
+              </div>
+              <p class="story-caption">We’ll test everything.</p>
+              <span class="story-copy-arrow story-doodle-arrow" aria-hidden="true"></span>
+            </div>
+            <figure class="story-visual" data-story-frame="test">
+              <div class="test-hardware-crop">
+                <img
+                  class="story-image"
+                  src="/assets/landing/test-hardware-clean-v2.png"
+                  alt="A plant, pump, and connected Arduino hardware"
+                  width="800"
+                  height="762"
+                  loading="lazy"
+                  decoding="async"
+                />
+              </div>
+              <div class="demo-status" aria-label="Example hardware checks">
+                <span class="status-tape grid-tape grid-tape--yellow" aria-hidden="true"></span>
+                <ul class="demo-status-list">
+                  <li class="demo-status-row">
+                    <span class="demo-check" aria-hidden="true"></span>
+                    <span>Board responds</span>
+                    <strong>OK</strong>
+                  </li>
+                  <li class="demo-status-row">
+                    <span class="demo-check" aria-hidden="true"></span>
+                    <span>Sensor reads</span>
+                    <strong>OK</strong>
+                  </li>
+                  <li class="demo-status-row">
+                    <span class="demo-check" aria-hidden="true"></span>
+                    <span>Pump spins</span>
+                    <strong>OK</strong>
+                  </li>
+                  <li class="demo-status-row">
+                    <span class="demo-check" aria-hidden="true"></span>
+                    <span>Power stays steady</span>
+                    <strong>OK</strong>
+                  </li>
+                </ul>
+                <label class="demo-progress-label" for="demo-progress">Checking your pump…</label>
+                <div class="demo-progress-row">
+                  <progress
+                    class="demo-progress"
+                    id="demo-progress"
+                    value="87"
+                    max="100"
+                  >
+                    87%
+                  </progress>
+                  <strong>87%</strong>
+                </div>
+              </div>
+            </figure>
+          </article>
+        </div>
+        </section>
+
+      </div>
     </main>
 
-    <script src="./config.local.js"></script>
-    <script type="module" src="./app.js"></script>
+    <footer class="waitlist-footer" aria-label="Legal and footer links">
+      <a class="makeable-wordmark makeable-wordmark--footer" href="/" aria-label="Makeable home">
+        <span class="makeable-wordmark-text" aria-hidden="true">Makeable</span>
+        <span class="makeable-logo-spark" aria-hidden="true"></span>
+      </a>
+      <p class="footer-purpose">
+        Makeable is an AI hardware prototyping studio that turns the parts on your desk
+        into wiring plans, working firmware, and guided tests.
+      </p>
+      <p>
+        <a href="/privacy/">Privacy</a>
+        <span aria-hidden="true">·</span>
+        <a href="/terms/">Terms</a>
+      </p>
+      <p>© <span data-current-year></span> Makeable</p>
+    </footer>
+
+    <script src="/config.local.js"></script>
+    <script type="module" src="/landing.js"></script>
   </body>
 </html>

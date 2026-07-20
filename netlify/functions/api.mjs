@@ -1,7 +1,26 @@
-export default async function handler(req) {
+import { getStore } from "@netlify/blobs";
+import { OAuth2Client } from "google-auth-library";
+import { createGoogleWaitlistResult } from "../../lib/acquisition.mjs";
+import {
+  persistVerifiedWaitlistRecord,
+  waitlistStoreNameForFunctionContext,
+} from "../../lib/waitlist-storage.mjs";
+import {
+  clearWaitlistSessionCookie,
+  createWaitlistSession,
+  forgetWaitlistSession,
+  resolveWaitlistSession,
+  waitlistSessionCookieState,
+  waitlistSessionStoreNameForFunctionContext,
+} from "../../lib/waitlist-session.mjs";
+
+const googleVerifiers = new Map();
+
+export default async function handler(req, context = {}) {
   try {
     const url = new URL(req.url);
     const env = getEnv();
+    const localApiPath = normalizedLocalApiPath(url.pathname);
 
     if (url.pathname === "/config.local.js") {
       return textResponse(publicConfigScript(env), "text/javascript; charset=utf-8");
@@ -11,14 +30,53 @@ export default async function handler(req) {
       return jsonResponse(await resolvedPublicConfig(env));
     }
 
+    if (localApiPath === "/api/waitlist/status") {
+      if (!new Set(["GET", "DELETE"]).has(req.method)) {
+        return jsonResponse({ error: "Method not allowed" }, 405, {
+          Allow: "GET, DELETE",
+          "Cache-Control": "no-store",
+        });
+      }
+      if (req.method === "DELETE") return await forgetBrowserConfirmation(req, context);
+      return await waitlistStatus(req, context);
+    }
+
+    if (localApiPath === "/api/waitlist") {
+      return jsonResponse({ error: "Email-only waitlist signup is disabled." }, 410, {
+        "Cache-Control": "no-store",
+      });
+    }
+
+    if (localApiPath === "/api/auth/google") {
+      if (req.method !== "POST") {
+        return jsonResponse({ error: "Method not allowed" }, 405, {
+          Allow: "POST",
+          "Cache-Control": "no-store",
+        });
+      }
+      return await completeGoogleWaitlist(req, env, context);
+    }
+
     if (url.pathname.startsWith("/api/")) {
-      return proxyMakeableApi(req, env);
+      return await proxyMakeableApi(req, env);
     }
 
     return jsonResponse({ error: "Not found" }, 404);
   } catch (error) {
-    console.error(error);
-    return jsonResponse({ error: String(error.message || error) }, 500);
+    const status =
+      Number.isInteger(error?.status) && error.status >= 400 && error.status < 600
+        ? error.status
+        : 500;
+    if (status === 500) console.error(error);
+    return jsonResponse(
+      {
+        error:
+          status === 500
+            ? "The Makeable server could not complete the request."
+            : String(error.message || error),
+      },
+      status,
+    );
   }
 }
 
@@ -43,12 +101,21 @@ function getEnv() {
     "COGNITO_DOMAIN",
     "COGNITO_CLIENT_ID",
     "COGNITO_REDIRECT_URI",
+    "GOOGLE_CLIENT_ID",
+    "WAITLIST_WEBHOOK_URL",
+    "WAITLIST_WEBHOOK_SECRET",
   ];
   return Object.fromEntries(keys.map((key) => [key, envValue(key)]));
 }
 
 function envValue(key) {
   return globalThis.Netlify?.env?.get(key) || process.env[key] || "";
+}
+
+function normalizedLocalApiPath(pathname) {
+  let normalized = pathname.replace(/\/+$/, "");
+  if (normalized.endsWith(".html")) normalized = normalized.slice(0, -5);
+  return normalized;
 }
 
 function publicConfig(env) {
@@ -66,6 +133,8 @@ function publicConfig(env) {
     cognitoDomain: env.COGNITO_DOMAIN || "",
     cognitoClientId: env.COGNITO_CLIENT_ID || "",
     cognitoRedirectUri: env.COGNITO_REDIRECT_URI || "",
+    googleClientId: env.GOOGLE_CLIENT_ID || "",
+    hasGoogleSignIn: Boolean(env.GOOGLE_CLIENT_ID),
     hasEsp32Compiler: false,
     hostedMode: true,
     firmwareCompileSupported: Boolean(env.MAKEABLE_API_BASE_URL),
@@ -86,10 +155,203 @@ async function resolvedPublicConfig(env) {
       ...backend,
       apiBaseUrl: local.apiBaseUrl,
       cognitoRedirectUri: local.cognitoRedirectUri || backend.cognitoRedirectUri || "",
+      googleClientId: local.googleClientId,
+      hasGoogleSignIn: local.hasGoogleSignIn,
     };
   } catch {
     return local;
   }
+}
+
+async function completeGoogleWaitlist(req, env, context) {
+  if (!env.GOOGLE_CLIENT_ID) {
+    return jsonResponse({ error: "Google sign-in is not configured." }, 503, {
+      "Cache-Control": "no-store",
+    });
+  }
+  const body = await readLimitedJsonRequest(req, 20 * 1024);
+  if (
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body) ||
+    typeof body.credential !== "string" ||
+    !body.credential ||
+    body.credential.length > 16_384 ||
+    typeof body.intent !== "string" ||
+    Object.keys(body).some((key) => !["credential", "intent"].includes(key))
+  ) {
+    return jsonResponse({ error: "Google sign-in request is invalid." }, 400, {
+      "Cache-Control": "no-store",
+    });
+  }
+
+  let identity;
+  try {
+    const client = googleVerifier(env.GOOGLE_CLIENT_ID);
+    const ticket = await client.verifyIdToken({
+      idToken: body.credential,
+      audience: env.GOOGLE_CLIENT_ID,
+    });
+    identity = ticket.getPayload();
+  } catch {
+    return jsonResponse({ error: "Google could not verify this sign-in." }, 401, {
+      "Cache-Control": "no-store",
+    });
+  }
+
+  const result = createGoogleWaitlistResult(identity, body.intent);
+  if (!result.ok) {
+    return jsonResponse({ error: result.error }, result.status, {
+      "Cache-Control": "no-store",
+    });
+  }
+  const delivery = await deliverWaitlistRecord(result.value.record, env, context);
+  if (!delivery.ok) {
+    return jsonResponse({ error: delivery.error }, delivery.status, {
+      "Cache-Control": "no-store",
+    });
+  }
+  const confirmation = await createBrowserConfirmation(delivery.key, context);
+  if (!confirmation.ok) {
+    return jsonResponse({ error: confirmation.error }, confirmation.status, {
+      "Cache-Control": "no-store",
+    });
+  }
+  return jsonResponse(
+    { ok: true, created: delivery.created, user: result.value.user },
+    200,
+    {
+      "Cache-Control": "no-store",
+      "Set-Cookie": confirmation.cookie,
+    },
+  );
+}
+
+async function deliverWaitlistRecord(record, env, context) {
+  try {
+    const store = getStore({
+      name: waitlistStoreNameForFunctionContext(context),
+      consistency: "strong",
+    });
+    const result = await persistVerifiedWaitlistRecord(record, {
+      store,
+      webhookUrl: env.WAITLIST_WEBHOOK_URL,
+      webhookSecret: env.WAITLIST_WEBHOOK_SECRET,
+      waitUntil:
+        typeof context?.waitUntil === "function"
+          ? context.waitUntil.bind(context)
+          : undefined,
+    });
+    return { ok: true, created: result.created, key: result.key };
+  } catch (error) {
+    console.error("Waitlist storage failed", error);
+    return {
+      ok: false,
+      status: 502,
+      error: "Waitlist signup could not be saved. Please try again.",
+    };
+  }
+}
+
+async function createBrowserConfirmation(signupKey, context) {
+  try {
+    const store = getStore({
+      name: waitlistSessionStoreNameForFunctionContext(context),
+      consistency: "strong",
+    });
+    const session = await createWaitlistSession(store, signupKey);
+    return { ok: true, cookie: session.cookie };
+  } catch (error) {
+    console.error("Waitlist browser confirmation failed", error);
+    return {
+      ok: false,
+      status: 502,
+      error: "Your signup was saved, but this browser could not be remembered. Please try once more.",
+    };
+  }
+}
+
+async function waitlistStatus(req, context) {
+  const cookie = waitlistSessionCookieState(req);
+  if (cookie.state !== "valid") {
+    return jsonResponse({ joined: false }, 200, {
+      "Cache-Control": "no-store",
+      ...(cookie.state === "invalid"
+        ? { "Set-Cookie": clearWaitlistSessionCookie() }
+        : {}),
+    });
+  }
+  try {
+    const signupStore = getStore({
+      name: waitlistStoreNameForFunctionContext(context),
+      consistency: "strong",
+    });
+    const sessionStore = getStore({
+      name: waitlistSessionStoreNameForFunctionContext(context),
+      consistency: "strong",
+    });
+    const status = await resolveWaitlistSession(req, { signupStore, sessionStore });
+    return jsonResponse({ joined: status.joined }, 200, {
+      "Cache-Control": "no-store",
+      ...(status.clearCookie
+        ? { "Set-Cookie": clearWaitlistSessionCookie() }
+        : {}),
+    });
+  } catch (error) {
+    console.error("Waitlist browser confirmation lookup failed", error);
+    return jsonResponse({ joined: false }, 200, {
+      "Cache-Control": "no-store",
+    });
+  }
+}
+
+async function forgetBrowserConfirmation(req, context) {
+  if (waitlistSessionCookieState(req).state === "valid") {
+    try {
+      const sessionStore = getStore({
+        name: waitlistSessionStoreNameForFunctionContext(context),
+        consistency: "strong",
+      });
+      await forgetWaitlistSession(req, sessionStore);
+    } catch (error) {
+      console.error("Waitlist browser confirmation removal failed", error);
+    }
+  }
+  return jsonResponse({ ok: true }, 200, {
+    "Cache-Control": "no-store",
+    "Set-Cookie": clearWaitlistSessionCookie(),
+  });
+}
+
+function googleVerifier(clientId) {
+  let client = googleVerifiers.get(clientId);
+  if (!client) {
+    client = new OAuth2Client(clientId);
+    googleVerifiers.set(clientId, client);
+  }
+  return client;
+}
+
+async function readLimitedJsonRequest(req, maxBytes) {
+  const advertisedLength = Number(req.headers.get("content-length"));
+  if (Number.isFinite(advertisedLength) && advertisedLength > maxBytes) {
+    throw requestError("Request body is too large.", 413);
+  }
+  const raw = await req.text();
+  if (new TextEncoder().encode(raw).byteLength > maxBytes) {
+    throw requestError("Request body is too large.", 413);
+  }
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    throw requestError("Request body must be valid JSON.", 400);
+  }
+}
+
+function requestError(message, status) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
 }
 
 async function proxyMakeableApi(req, env) {
@@ -101,16 +363,37 @@ async function proxyMakeableApi(req, env) {
   });
   const authorization = req.headers.get("authorization");
   const generationId = req.headers.get("x-makeable-generation-id");
+  const origin = req.headers.get("origin");
+  const requestedMethod = req.headers.get("access-control-request-method");
+  const requestedHeaders = req.headers.get("access-control-request-headers");
   if (authorization) headers.set("Authorization", authorization);
   if (generationId) headers.set("X-Makeable-Generation-Id", generationId);
+  if (origin) headers.set("Origin", origin);
+  if (requestedMethod) headers.set("Access-Control-Request-Method", requestedMethod);
+  if (requestedHeaders) headers.set("Access-Control-Request-Headers", requestedHeaders);
   const upstream = await fetch(`${base}${inputUrl.pathname}${inputUrl.search}`, {
     method: req.method,
     headers,
     body: req.method === "GET" || req.method === "HEAD" ? undefined : await req.text(),
   });
-  return new Response(await upstream.arrayBuffer(), {
+  const responseHeaders = new Headers();
+  for (const name of [
+    "content-type",
+    "cache-control",
+    "access-control-allow-origin",
+    "access-control-allow-headers",
+    "access-control-allow-methods",
+    "vary",
+    "www-authenticate",
+  ]) {
+    const value = upstream.headers.get(name);
+    if (value) responseHeaders.set(name, value);
+  }
+  const responseHasNoBody =
+    req.method === "HEAD" || [204, 205, 304].includes(upstream.status);
+  return new Response(responseHasNoBody ? null : await upstream.arrayBuffer(), {
     status: upstream.status,
-    headers: { "Content-Type": upstream.headers.get("content-type") || "application/json" },
+    headers: responseHeaders,
   });
 }
 
@@ -254,15 +537,21 @@ async function pipeJson(upstream) {
   });
 }
 
-function jsonResponse(data, status = 200) {
-  return textResponse(JSON.stringify(data), "application/json; charset=utf-8", status);
+function jsonResponse(data, status = 200, headers = {}) {
+  return textResponse(
+    JSON.stringify(data),
+    "application/json; charset=utf-8",
+    status,
+    headers,
+  );
 }
 
-function textResponse(text, contentType, status = 200) {
+function textResponse(text, contentType, status = 200, headers = {}) {
   return new Response(text, {
     status,
     headers: {
       "Content-Type": contentType,
+      ...headers,
     },
   });
 }

@@ -6,18 +6,15 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const output = path.join(root, "dist");
 
 await rm(output, { recursive: true, force: true });
-for (const file of ["index.html", "app.js", "styles.css"]) {
-  await cp(path.join(root, file), path.join(output, file));
-}
-
-for (const directory of [
-  "assets",
-  "lib",
-  "styles",
-  path.join("src", "makeable"),
-  path.join("images", "makeable"),
-]) {
-  const destination = path.join(output, directory);
-  await mkdir(path.dirname(destination), { recursive: true });
-  await cp(path.join(root, directory), destination, { recursive: true });
-}
+await mkdir(output, { recursive: true });
+await cp(path.join(root, "index.html"), path.join(output, "index.html"));
+await cp(path.join(root, "landing.js"), path.join(output, "landing.js"));
+await cp(path.join(root, "privacy"), path.join(output, "privacy"), { recursive: true });
+await cp(path.join(root, "terms"), path.join(output, "terms"), { recursive: true });
+await cp(path.join(root, "robots.txt"), path.join(output, "robots.txt"));
+await cp(path.join(root, "sitemap.xml"), path.join(output, "sitemap.xml"));
+await cp(path.join(root, "styles"), path.join(output, "styles"), { recursive: true });
+await cp(path.join(root, "assets"), path.join(output, "assets"), { recursive: true });
+await cp(path.join(root, "pilot"), path.join(output, "pilot"), { recursive: true });
+await cp(path.join(root, "pilot", "index.html"), path.join(output, "pilot-app.html"));
+await rm(path.join(output, "pilot", "index.html"));

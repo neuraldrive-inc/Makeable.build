@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { readFile, mkdir, writeFile, rm, readdir } from "node:fs/promises";
+import { appendFile, readFile, mkdir, writeFile, rm, readdir } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,10 +16,14 @@ import {
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { WebSocket, WebSocketServer } from "ws";
 import { getBoardProfile, supportedBoardSummary } from "./lib/board-profiles.mjs";
+import { createGoogleWaitlistResult } from "./lib/acquisition.mjs";
+import { waitlistSignupKey } from "./lib/waitlist-storage.mjs";
 import {
-  createPublishCapability,
-  verifyPublishCapability,
-} from "./lib/publish-capability.mjs";
+  clearWaitlistSessionCookie,
+  createWaitlistSession,
+  forgetWaitlistSession,
+  resolveWaitlistSession,
+} from "./lib/waitlist-session.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -37,6 +41,7 @@ const MAX_VOICE_SESSION_MS = Math.max(30000, Number(initialEnv.MAX_VOICE_SESSION
 const INITIAL_FREE_CREDITS = Math.max(0, Number(initialEnv.INITIAL_FREE_CREDITS || 10));
 const dynamodb = new DynamoDBClient({ region: initialEnv.AWS_REGION || "us-east-1" });
 const jwksByIssuer = new Map();
+const localWaitlistSessions = new Map();
 let activeCompiles = 0;
 const deepgramWebSocketServer = new WebSocketServer({
   noServer: true,
@@ -62,17 +67,12 @@ const mimeTypes = new Map([
   [".woff", "font/woff"],
   [".woff2", "font/woff2"],
 ]);
-const publicRootFiles = new Set(["index.html", "app.js", "styles.css"]);
-const publicDirectoryRoots = new Map([
-  ["assets", path.join(__dirname, "assets")],
-  ["src", path.join(__dirname, "src", "makeable")],
-  ["styles", path.join(__dirname, "styles")],
-]);
 
 const server = createServer(async (req, res) => {
   try {
     const env = getEnv();
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    const localApiPath = normalizedLocalApiPath(url.pathname);
 
     applyCors(req, res, env);
     if (req.method === "OPTIONS") return sendText(res, "", "text/plain; charset=utf-8", 204);
@@ -83,6 +83,40 @@ const server = createServer(async (req, res) => {
 
     if (url.pathname === "/api/config") {
       return sendJson(res, publicConfig(env));
+    }
+
+    if (localApiPath === "/api/waitlist/status") {
+      const sessionRequest = localWaitlistSessionRequest(req);
+      if (req.method === "GET") {
+        const status = await resolveWaitlistSession(sessionRequest, {
+          sessionStore: localWaitlistSessionStore,
+          signupStore: localWaitlistSignupStore,
+        });
+        if (status.clearCookie) {
+          res.setHeader("Set-Cookie", clearWaitlistSessionCookie());
+        }
+        return sendJson(res, { joined: status.joined });
+      }
+      if (req.method === "DELETE") {
+        await forgetWaitlistSession(sessionRequest, localWaitlistSessionStore);
+        res.setHeader("Set-Cookie", clearWaitlistSessionCookie());
+        return sendJson(res, { ok: true });
+      }
+      res.setHeader("Allow", "GET, DELETE");
+      return sendJson(res, { error: "Method not allowed" }, 405);
+    }
+
+    if (localApiPath === "/api/waitlist") {
+      return sendJson(res, { error: "Email-only waitlist signup is disabled." }, 410);
+    }
+
+    if (localApiPath === "/api/auth/google" && req.method !== "POST") {
+      res.setHeader("Allow", "POST");
+      return sendJson(res, { error: "Method not allowed" }, 405);
+    }
+
+    if (localApiPath === "/api/auth/google") {
+      return completeLocalGoogleWaitlist(req, res, env);
     }
 
     if (url.pathname === "/api/account" && req.method === "GET") {
@@ -146,6 +180,7 @@ const server = createServer(async (req, res) => {
         hasVoice: Boolean(env.DEEPGRAM_API_KEY),
         hasEsp32Compiler: Boolean(findArduinoCli(env)),
         hasAccounts: hasAccountConfig(env),
+        hasGoogleSignIn: Boolean(env.GOOGLE_CLIENT_ID),
         hostedMode: true,
         firmwareCompileSupported: Boolean(findArduinoCli(env)),
         supportedBoards: supportedBoardSummary(),
@@ -153,10 +188,23 @@ const server = createServer(async (req, res) => {
     }
 
     if (env.NODE_ENV === "production") return sendJson(res, { error: "Not found" }, 404);
-    return serveStatic(url.pathname, res);
+    return serveStatic(url, res);
   } catch (error) {
-    console.error(error);
-    return sendJson(res, { error: String(error.message || error) }, 500);
+    const status =
+      Number.isInteger(error?.statusCode) && error.statusCode >= 400 && error.statusCode < 600
+        ? error.statusCode
+        : 500;
+    if (status === 500) console.error(error);
+    return sendJson(
+      res,
+      {
+        error:
+          status === 500
+            ? "The Makeable server could not complete the request."
+            : String(error.message || error),
+      },
+      status,
+    );
   }
 });
 
@@ -310,11 +358,128 @@ function publicConfig(env) {
     cognitoDomain: env.COGNITO_DOMAIN || "",
     cognitoClientId: env.COGNITO_CLIENT_ID || "",
     cognitoRedirectUri: env.COGNITO_REDIRECT_URI || "",
+    googleClientId: env.GOOGLE_CLIENT_ID || "",
+    hasGoogleSignIn: Boolean(env.GOOGLE_CLIENT_ID),
     hostedMode: true,
     firmwareCompileSupported: Boolean(findArduinoCli(env)),
     supportedBoards: supportedBoardSummary(),
   };
   return config;
+}
+
+function normalizedLocalApiPath(pathname) {
+  let normalized = pathname.replace(/\/+$/, "");
+  if (normalized.endsWith(".html")) normalized = normalized.slice(0, -5);
+  return normalized;
+}
+
+async function completeLocalGoogleWaitlist(req, res, env) {
+  if (!env.GOOGLE_CLIENT_ID) {
+    return sendJson(res, { error: "Google sign-in is not configured." }, 503);
+  }
+  const body = await readJsonBody(req, 20 * 1024);
+  if (
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body) ||
+    typeof body.credential !== "string" ||
+    !body.credential ||
+    body.credential.length > 16_384 ||
+    typeof body.intent !== "string" ||
+    Object.keys(body).some((key) => !["credential", "intent"].includes(key))
+  ) {
+    return sendJson(res, { error: "Google sign-in request is invalid." }, 400);
+  }
+
+  let identity;
+  try {
+    const { OAuth2Client } = await import("google-auth-library");
+    const client = new OAuth2Client(env.GOOGLE_CLIENT_ID);
+    const ticket = await client.verifyIdToken({
+      idToken: body.credential,
+      audience: env.GOOGLE_CLIENT_ID,
+    });
+    identity = ticket.getPayload();
+  } catch {
+    return sendJson(res, { error: "Google could not verify this sign-in." }, 401);
+  }
+
+  const result = createGoogleWaitlistResult(identity, body.intent);
+  if (!result.ok) {
+    return sendJson(res, { error: result.error }, result.status);
+  }
+  await saveLocalWaitlistRecord(result.value.record);
+  const confirmation = await createWaitlistSession(
+    localWaitlistSessionStore,
+    waitlistSignupKey(result.value.record.email),
+  );
+  res.setHeader("Set-Cookie", confirmation.cookie);
+  return sendJson(res, { ok: true, user: result.value.user });
+}
+
+async function saveLocalWaitlistRecord(record) {
+  const directory = path.join(__dirname, "data");
+  const filePath = path.join(directory, "waitlist.jsonl");
+  await mkdir(directory, { recursive: true });
+  try {
+    const existing = await readFile(filePath, "utf8");
+    const duplicate = existing
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .some((line) => {
+        try {
+          return JSON.parse(line).email === record.email;
+        } catch {
+          return false;
+        }
+      });
+    if (duplicate) return;
+  } catch {
+    // The first signup creates the local data file.
+  }
+  await appendFile(filePath, `${JSON.stringify(record)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+}
+
+const localWaitlistSessionStore = {
+  async set(key, value) {
+    localWaitlistSessions.set(key, JSON.parse(await value.text()));
+    return { modified: true };
+  },
+  async get(key) {
+    return localWaitlistSessions.get(key) || null;
+  },
+  async delete(key) {
+    localWaitlistSessions.delete(key);
+  },
+};
+
+const localWaitlistSignupStore = {
+  async get(key) {
+    const filePath = path.join(__dirname, "data", "waitlist.jsonl");
+    try {
+      const contents = await readFile(filePath, "utf8");
+      for (const line of contents.split(/\r?\n/).filter(Boolean)) {
+        try {
+          const record = JSON.parse(line);
+          if (waitlistSignupKey(record.email) === key) return record;
+        } catch {
+          // Skip malformed local development records.
+        }
+      }
+    } catch {
+      // No local signups have been recorded yet.
+    }
+    return null;
+  },
+};
+
+function localWaitlistSessionRequest(req) {
+  return new Request(`http://${req.headers.host || "localhost"}/api/waitlist/status`, {
+    headers: { Cookie: String(req.headers.cookie || "") },
+  });
 }
 
 function applyCors(req, res, env) {
@@ -595,9 +760,54 @@ function publicConfigScript(env) {
   return `window.MAKEABLE_CONFIG = ${JSON.stringify(config)};`;
 }
 
-async function serveStatic(pathname, res) {
-  const filePath = resolvePublicFile(pathname);
-  if (!filePath) return sendText(res, "Not found", "text/plain; charset=utf-8", 404);
+async function serveStatic(url, res) {
+  const { pathname, search } = url;
+  if (pathname === "/index.html") {
+    res.writeHead(302, {
+      Location: `/${search}`,
+      "Cache-Control": "no-store",
+    });
+    res.end();
+    return;
+  }
+
+  if (pathname === "/pilot/") {
+    res.writeHead(302, {
+      Location: `/pilot${search}`,
+      "Cache-Control": "no-store",
+    });
+    res.end();
+    return;
+  }
+
+  if (pathname === "/privacy/" || pathname === "/privacy") {
+    return serveFile("/privacy/index.html", res);
+  }
+
+  if (pathname === "/terms/" || pathname === "/terms") {
+    return serveFile("/terms/index.html", res);
+  }
+
+  const safePath =
+    pathname === "/"
+      ? "/index.html"
+      : pathname === "/pilot"
+        ? "/pilot/index.html"
+        : decodeURIComponent(pathname);
+  return serveFile(safePath, res);
+}
+
+async function serveFile(safePath, res) {
+  const filePath = path.normalize(path.join(__dirname, safePath));
+  const relativePath = path.relative(__dirname, filePath);
+
+  if (
+    relativePath.startsWith("..") ||
+    path.isAbsolute(relativePath) ||
+    path.basename(filePath).startsWith(".")
+  ) {
+    return sendText(res, "Not found", "text/plain; charset=utf-8", 404);
+  }
 
   try {
     const data = await readFile(filePath);
@@ -1040,7 +1250,14 @@ async function readJsonBody(req, maxBytes = MAX_REQUEST_BYTES) {
     chunks.push(chunk);
   }
   const raw = Buffer.concat(chunks).toString("utf8");
-  return raw ? JSON.parse(raw) : {};
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const error = new Error("Request body must be valid JSON.");
+    error.statusCode = 400;
+    throw error;
+  }
 }
 
 function sendJson(res, data, status = 200) {

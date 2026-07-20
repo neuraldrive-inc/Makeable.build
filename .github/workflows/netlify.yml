@@ -26,8 +26,8 @@ jobs:
       - name: Validate files
         run: npm run build
 
-      - name: Run unit tests
-        run: npm run test:unit
+      - name: Run tests
+        run: npm test
 
       - name: Deploy production to Netlify
         if: github.ref == 'refs/heads/main'

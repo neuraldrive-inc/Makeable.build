@@ -3,7 +3,7 @@ import test from "node:test";
 
 import handler from "../netlify/functions/api.mjs";
 
-const testOrigin = "https://test--makeable-build.netlify.app";
+const productionOrigin = "https://makeable.build";
 const backendOrigin = "https://api.makeable.test";
 
 function installEnvironment(t, overrides = {}) {
@@ -13,7 +13,8 @@ function installEnvironment(t, overrides = {}) {
     MAKEABLE_API_BASE_URL: backendOrigin,
     COGNITO_DOMAIN: "https://auth.makeable.test",
     COGNITO_CLIENT_ID: "client-id",
-    COGNITO_REDIRECT_URI: `${testOrigin}/`,
+    COGNITO_REDIRECT_URI: `${productionOrigin}/pilot`,
+    GOOGLE_CLIENT_ID: "google-client-id",
     ...overrides,
   };
   globalThis.Netlify = {
@@ -41,7 +42,7 @@ test("Netlify proxies protected API requests to the metered backend", async (t) 
   };
 
   const response = await handler(
-    new Request(`${testOrigin}/api/openai/responses`, {
+    new Request(`${productionOrigin}/api/openai/responses`, {
       method: "POST",
       headers: {
         Authorization: "Bearer test-token",
@@ -59,7 +60,7 @@ test("Netlify proxies protected API requests to the metered backend", async (t) 
   assert.deepEqual(await response.json(), { error: "Authentication required" });
 });
 
-test("branch config keeps its own Cognito callback while using backend capabilities", async (t) => {
+test("production config keeps the pilot callback while using backend capabilities", async (t) => {
   installEnvironment(t);
   globalThis.fetch = async (url) => {
     assert.equal(String(url), `${backendOrigin}/api/config`);
@@ -67,18 +68,208 @@ test("branch config keeps its own Cognito callback while using backend capabilit
       hasAccounts: true,
       hasVoice: true,
       firmwareCompileSupported: true,
-      cognitoRedirectUri: "https://makeable.build/",
+      cognitoRedirectUri: `${productionOrigin}/`,
       supportedBoards: [{ id: "esp32", label: "ESP32" }],
     });
   };
 
-  const response = await handler(new Request(`${testOrigin}/api/config`));
+  const response = await handler(new Request(`${productionOrigin}/api/config`));
   const config = await response.json();
 
   assert.equal(response.status, 200);
   assert.equal(config.apiBaseUrl, backendOrigin);
-  assert.equal(config.cognitoRedirectUri, `${testOrigin}/`);
+  assert.equal(config.cognitoRedirectUri, `${productionOrigin}/pilot`);
+  assert.equal(config.googleClientId, "google-client-id");
+  assert.equal(config.hasGoogleSignIn, true);
   assert.equal(config.hasAccounts, true);
   assert.equal(config.firmwareCompileSupported, true);
   assert.deepEqual(config.supportedBoards, [{ id: "esp32", label: "ESP32" }]);
+});
+
+test("landing acquisition routes are reserved locally instead of reaching the AWS proxy", async (t) => {
+  installEnvironment(t, { GOOGLE_CLIENT_ID: "" });
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error("The AWS proxy should not be called");
+  };
+
+  const waitlistResponse = await handler(
+    new Request(`${productionOrigin}/api/waitlist`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "not-an-email" }),
+    }),
+  );
+  const googleResponse = await handler(
+    new Request(`${productionOrigin}/api/auth/google`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential: "test", intent: "waitlist" }),
+    }),
+  );
+  const statusResponse = await handler(
+    new Request(`${productionOrigin}/api/waitlist/status`, { method: "GET" }),
+    { deploy: { context: "production" } },
+  );
+
+  assert.equal(waitlistResponse.status, 410);
+  assert.deepEqual(await waitlistResponse.json(), {
+    error: "Email-only waitlist signup is disabled.",
+  });
+  assert.equal(googleResponse.status, 503);
+  assert.deepEqual(await googleResponse.json(), { error: "Google sign-in is not configured." });
+  assert.equal(statusResponse.status, 200);
+  assert.deepEqual(await statusResponse.json(), { joined: false });
+  assert.equal(statusResponse.headers.get("Cache-Control"), "no-store");
+  assert.equal(fetchCalls, 0);
+});
+
+test("waitlist browser confirmation routes are private, resettable, and never proxied", async (t) => {
+  installEnvironment(t);
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error("The AWS proxy should not be called");
+  };
+
+  const malformed = await handler(
+    new Request(`${productionOrigin}/api/waitlist/status`, {
+      headers: { Cookie: "__Host-makeable_waitlist=malformed" },
+    }),
+    { deploy: { context: "production" } },
+  );
+  assert.deepEqual(await malformed.json(), { joined: false });
+  assert.match(malformed.headers.get("Set-Cookie"), /Max-Age=0/);
+
+  const reset = await handler(
+    new Request(`${productionOrigin}/api/waitlist/status`, { method: "DELETE" }),
+    { deploy: { context: "production" } },
+  );
+  assert.deepEqual(await reset.json(), { ok: true });
+  assert.match(reset.headers.get("Set-Cookie"), /HttpOnly/);
+
+  const unsupported = await handler(
+    new Request(`${productionOrigin}/api/waitlist/status`, { method: "POST" }),
+  );
+  assert.equal(unsupported.status, 405);
+  assert.equal(unsupported.headers.get("Allow"), "GET, DELETE");
+  assert.equal(fetchCalls, 0);
+});
+
+test("landing acquisition rejects oversized request bodies", async (t) => {
+  installEnvironment(t);
+  const response = await handler(
+    new Request(`${productionOrigin}/api/auth/google`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential: "a".repeat(21 * 1024), intent: "waitlist" }),
+    }),
+  );
+  assert.equal(response.status, 413);
+  assert.deepEqual(await response.json(), { error: "Request body is too large." });
+});
+
+test("Google acquisition rejects null bodies and unsupported methods without proxying", async (t) => {
+  installEnvironment(t);
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error("The AWS proxy should not be called");
+  };
+
+  const nullResponse = await handler(
+    new Request(`${productionOrigin}/api/auth/google`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "null",
+    }),
+  );
+  const getResponse = await handler(
+    new Request(`${productionOrigin}/api/auth/google`, { method: "GET" }),
+  );
+  const manualGetResponse = await handler(
+    new Request(`${productionOrigin}/api/waitlist`, { method: "GET" }),
+  );
+
+  assert.equal(nullResponse.status, 400);
+  assert.deepEqual(await nullResponse.json(), {
+    error: "Google sign-in request is invalid.",
+  });
+  assert.equal(getResponse.status, 405);
+  assert.equal(getResponse.headers.get("Allow"), "POST");
+  assert.equal(manualGetResponse.status, 410);
+  assert.equal(fetchCalls, 0);
+});
+
+test("acquisition route variants cannot fall through to the AWS proxy", async (t) => {
+  installEnvironment(t);
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error("The AWS proxy should not be called");
+  };
+
+  for (const pathname of [
+    "/api/waitlist/",
+    "/api/waitlist.html",
+    "/api/waitlist/status/",
+    "/api/waitlist/status.html",
+    "/api/auth/google/",
+    "/api/auth/google.html",
+  ]) {
+    const response = await handler(
+      new Request(`${productionOrigin}${pathname}`, { method: "GET" }),
+    );
+    assert.equal(
+      response.status,
+      pathname.includes("waitlist/status")
+        ? 200
+        : pathname.includes("auth/google")
+          ? 405
+          : 410,
+    );
+  }
+  assert.equal(fetchCalls, 0);
+});
+
+test("Netlify passes CORS preflights through without adding a body to 204 responses", async (t) => {
+  installEnvironment(t);
+  let upstream;
+  globalThis.fetch = async (url, options) => {
+    upstream = { url: String(url), options };
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": productionOrigin,
+        "Access-Control-Allow-Headers":
+          "Content-Type, Authorization, X-Makeable-Generation-Id",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        Vary: "Origin",
+      },
+    });
+  };
+
+  const response = await handler(
+    new Request(`${productionOrigin}/api/openai/responses`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: productionOrigin,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers":
+          "authorization,content-type,x-makeable-generation-id",
+      },
+    }),
+  );
+
+  assert.equal(upstream.url, `${backendOrigin}/api/openai/responses`);
+  assert.equal(upstream.options.headers.get("Origin"), productionOrigin);
+  assert.equal(upstream.options.headers.get("Access-Control-Request-Method"), "POST");
+  assert.equal(
+    upstream.options.headers.get("Access-Control-Request-Headers"),
+    "authorization,content-type,x-makeable-generation-id",
+  );
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), productionOrigin);
+  assert.equal(await response.text(), "");
 });

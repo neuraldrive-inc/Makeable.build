@@ -9,5 +9,6 @@ tmp/
 .geckco-ai/
 .netlify/
 dist/
+data/
 test-results/
 playwright-report/

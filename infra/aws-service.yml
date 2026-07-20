@@ -87,7 +87,7 @@ Resources:
           - Name: COGNITO_DOMAIN
             Value: !Ref CognitoDomain
           - Name: COGNITO_REDIRECT_URI
-            Value: https://makeable.build/
+            Value: https://makeable.build/pilot
           - Name: CREDIT_ACCOUNTS_TABLE
             Value: !Ref CreditAccountsTable
           - Name: CREDIT_LEDGER_TABLE
