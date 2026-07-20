@@ -37,8 +37,8 @@ Resources:
       AllowedOAuthFlowsUserPoolClient: true
       AllowedOAuthFlows: [code]
       AllowedOAuthScopes: [openid, email, profile]
-      CallbackURLs: [https://makeable.build/, http://localhost:8787/]
-      LogoutURLs: [https://makeable.build/, http://localhost:8787/]
+      CallbackURLs: [https://makeable.build/, https://test--makeable-build.netlify.app/, http://localhost:8787/]
+      LogoutURLs: [https://makeable.build/, https://test--makeable-build.netlify.app/, http://localhost:8787/]
       SupportedIdentityProviders: [COGNITO]
       ExplicitAuthFlows:
         - ALLOW_ADMIN_USER_PASSWORD_AUTH

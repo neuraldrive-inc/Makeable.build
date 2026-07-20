@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - test
   workflow_dispatch:
 
 jobs:
@@ -19,12 +20,25 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Install dependencies
+        run: npm ci
+
       - name: Validate files
         run: npm run build
 
-      - name: Deploy to Netlify
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Deploy production to Netlify
+        if: github.ref == 'refs/heads/main'
         run: npx netlify-cli@24.9.0 deploy --prod --build --site "$NETLIFY_SITE_ID" --auth "$NETLIFY_AUTH_TOKEN" --message "Deploy ${GITHUB_SHA}"
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
 
+      - name: Deploy test branch to Netlify
+        if: github.ref == 'refs/heads/test'
+        run: npx netlify-cli@24.9.0 deploy --alias test --context branch:test --build --site "$NETLIFY_SITE_ID" --auth "$NETLIFY_AUTH_TOKEN" --message "Deploy test ${GITHUB_SHA}"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}

@@ -11,47 +11,8 @@ export default async function handler(req) {
       return jsonResponse(await resolvedPublicConfig(env));
     }
 
-    if (url.pathname === "/api/openai/responses" && req.method === "POST") {
-      return proxyOpenAI(req, env);
-    }
-
-    if (url.pathname === "/api/openai/background" && req.method === "POST") {
-      return createOpenAIBackgroundResponse(req, env);
-    }
-
-    const responseMatch = url.pathname.match(/^\/api\/openai\/responses\/([^/]+)$/);
-    if (responseMatch && req.method === "GET") {
-      return retrieveOpenAIResponse(responseMatch[1], env);
-    }
-
-    if (url.pathname === "/api/esp32/status") {
+    if (url.pathname.startsWith("/api/")) {
       return proxyMakeableApi(req, env);
-    }
-
-    if (url.pathname === "/api/firmware/compile" && req.method === "POST") {
-      return proxyMakeableApi(req, env);
-    }
-
-    if (url.pathname === "/api/deepgram/token" && req.method === "POST") {
-      return proxyMakeableApi(req, env);
-    }
-
-    if (url.pathname === "/api/github/repos" && req.method === "POST") {
-      return proxyMakeableApi(req, env);
-    }
-
-    if (url.pathname === "/api/github/upload-file" && req.method === "POST") {
-      return proxyMakeableApi(req, env);
-    }
-
-    if (url.pathname === "/api/health") {
-      return jsonResponse({
-        ok: true,
-        hostedMode: true,
-        hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
-        hasGithubToken: Boolean(env.GITHUB_TOKEN),
-        firmwareCompileSupported: Boolean(env.MAKEABLE_API_BASE_URL),
-      });
     }
 
     return jsonResponse({ error: "Not found" }, 404);
@@ -120,7 +81,12 @@ async function resolvedPublicConfig(env) {
     });
     if (!response.ok) return local;
     const backend = await response.json();
-    return { ...local, ...backend, apiBaseUrl: local.apiBaseUrl };
+    return {
+      ...local,
+      ...backend,
+      apiBaseUrl: local.apiBaseUrl,
+      cognitoRedirectUri: local.cognitoRedirectUri || backend.cognitoRedirectUri || "",
+    };
   } catch {
     return local;
   }
