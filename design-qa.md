@@ -22,7 +22,7 @@
    strokes, a real double underline, a centered torn launch poster, oversized
    Google CTA, hand underline details, and the approved August 9, 2026 date.
 4. The process scenes now use vivid approved pink/blue/green banners, torn
-   paper boundaries, six-pixel desktop seams, corrected Connect/Test column
+   paper boundaries, six-to-seven-pixel desktop seams, corrected Connect/Test column
    ratios, and the same hardware crops as the approved source.
 5. The final reference and implementation were viewed together at the same
    1536 × 1024 scale. The changed headline copy is intentional:
@@ -63,8 +63,11 @@ Results:
   CTA and opens Google through the credential prompt instead of replacing it
   with a small third-party iframe button.
 - Same-image pointer, touch, and keyboard comparison slider.
-- Recognition callouts remain fully visible at the approved 44.3% reveal, and
-  real hand-drawn raster arrows replace generic interface arrows.
+- Recognition callouts remain fully visible at the approved 44.3% reveal.
+- Wordmark, marker rays, double underlines, arrows, torn poster, wiring chips,
+  diagnostic checks, progress, and colored tape are all coded HTML/CSS rather
+  than flattened interface screenshots. Raster content is limited to paper
+  texture and hardware photography.
 - Google configuration errors, verified signup success, and pilot redirect.
 - Tablet/mobile sticky CTA behavior and safe bottom clearance.
 - Focus treatment, live status messaging, reduced motion, labels, and touch
@@ -84,7 +87,7 @@ Results:
 
 - Build checks: passed.
 - Unit suite: 127 passed.
-- Complete browser, interaction, responsive, and accessibility suite: 189 passed.
+- Complete browser, interaction, responsive, and accessibility suite: 192 passed.
 - Final browser console review: no landing-page errors.
 - Final combined reference review: passed.
 

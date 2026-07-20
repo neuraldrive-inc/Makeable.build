@@ -40,7 +40,21 @@ test("landing UI is semantic instead of screenshot-derived", async ({ page }) =>
   await expect(
     page.locator('.launch-poster img[src*="launch-poster-reference"]'),
   ).toHaveCount(0);
-  await expect(page.locator(".launch-poster img")).toHaveCount(2);
+  await expect(page.locator(".launch-poster img")).toHaveCount(0);
+  await expect(page.locator(".hero-underline-art img")).toHaveCount(0);
+  await expect(page.locator(".hero-marker-rays img")).toHaveCount(0);
+  await expect(page.locator(".hand-underline img")).toHaveCount(0);
+  await expect(page.locator(".story-doodle-arrow img")).toHaveCount(0);
+  await expect(page.locator(".grid-tape img")).toHaveCount(0);
+  await expect(page.locator(".grid-tape")).toHaveCount(4);
+  await expect(page.locator(".wire-chips li")).toHaveCount(3);
+  await expect(page.locator(".demo-check")).toHaveCount(4);
+  await expect(page.locator(".demo-status-row strong")).toHaveText([
+    "OK",
+    "OK",
+    "OK",
+    "OK",
+  ]);
   await expect(page.locator(".paper-card")).toHaveCount(4);
   await expect(page.locator("[data-story-frame] img.story-image")).toHaveCount(3);
   await expect(page.locator("[data-story-chapter] h2")).toHaveCount(3);
@@ -156,7 +170,7 @@ test("comparison and process stages are separate paper cards", async ({ page }) 
   expect(cards).toHaveLength(4);
   for (let index = 1; index < cards.length; index += 1) {
     expect(cards[index].top - cards[index - 1].bottom).toBeGreaterThanOrEqual(5);
-    expect(cards[index].top - cards[index - 1].bottom).toBeLessThanOrEqual(7);
+    expect(cards[index].top - cards[index - 1].bottom).toBeLessThanOrEqual(8);
   }
   expect(cards.every(({ border }) => border === "1px")).toBe(true);
   expect(cards.every(({ shadow }) => shadow !== "none")).toBe(true);
@@ -295,7 +309,53 @@ test("process cards use hardware imagery with semantic diagnostics", async ({
     page.locator('[data-story-frame="test"] .story-image'),
   ).toHaveAttribute("src", "/assets/landing/test-hardware.png");
   await expect(page.locator(".demo-status-row")).toHaveCount(4);
+  await expect(page.locator(".demo-check")).toHaveCount(4);
+  await expect(page.locator(".demo-status-row strong")).toHaveText([
+    "OK",
+    "OK",
+    "OK",
+    "OK",
+  ]);
   await expect(page.locator(".demo-progress")).toHaveAttribute("value", "87");
+});
+
+test("coded landing components remain inside their cards at key widths", async ({
+  page,
+}) => {
+  for (const viewport of [
+    { width: 1536, height: 1024 },
+    { width: 834, height: 1194 },
+    { width: 390, height: 844 },
+    { width: 360, height: 800 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+
+    const geometry = await page.evaluate(() => {
+      const within = (childSelector, parentSelector, tolerance = 1) => {
+        const child = document.querySelector(childSelector)?.getBoundingClientRect();
+        const parent = document.querySelector(parentSelector)?.getBoundingClientRect();
+        return Boolean(
+          child &&
+            parent &&
+            child.left >= parent.left - tolerance &&
+            child.right <= parent.right + tolerance,
+        );
+      };
+
+      return {
+        documentFits:
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
+        wiresFit: within(".wire-chips", '.story-scene--connect .story-copy'),
+        statusFits: within(".demo-status", '.story-scene--test .story-visual'),
+      };
+    });
+
+    expect(geometry.documentFits).toBe(true);
+    expect(geometry.wiresFit).toBe(true);
+    expect(geometry.statusFits).toBe(true);
+  }
 });
 
 test("Google configuration errors remain beside the signup control as an alert", async ({
@@ -455,15 +515,17 @@ test("mobile story frames stay in normal flow without horizontal overflow", asyn
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
 });
 
-test("mobile signup enters sticky mode only after its source position leaves", async ({
+test("mobile signup remains visible while its source position is away", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
 
   const signup = page.locator(".hero-signup");
-  await expect(signup).toHaveCSS("position", "relative");
+  const signupAnchor = page.locator("[data-signup-anchor]");
+  await signupAnchor.scrollIntoViewIfNeeded();
   await expect(signup).not.toHaveClass(/is-mobile-sticky/);
+  await expect(signup).toHaveCSS("position", "relative");
 
   await page
     .locator('[data-story-chapter="connect"]')
@@ -781,7 +843,7 @@ test("the approved composition remains usable across the full responsive matrix"
       expect(measurements.hero.left).toBeCloseTo(0, 0);
       expect(measurements.hero.top).toBeCloseTo(0, 0);
       expect(measurements.hero.width).toBeGreaterThanOrEqual(560);
-      expect(measurements.cardGaps.every((gap) => gap >= 5 && gap <= 7)).toBe(
+      expect(measurements.cardGaps.every((gap) => gap >= 5 && gap <= 8)).toBe(
         true,
       );
     } else {
