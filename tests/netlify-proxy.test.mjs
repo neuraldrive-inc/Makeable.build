@@ -82,3 +82,44 @@ test("production config keeps the pilot callback while using backend capabilitie
   assert.equal(config.firmwareCompileSupported, true);
   assert.deepEqual(config.supportedBoards, [{ id: "esp32", label: "ESP32" }]);
 });
+
+test("Netlify passes CORS preflights through without adding a body to 204 responses", async (t) => {
+  installEnvironment(t);
+  let upstream;
+  globalThis.fetch = async (url, options) => {
+    upstream = { url: String(url), options };
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": productionOrigin,
+        "Access-Control-Allow-Headers":
+          "Content-Type, Authorization, X-Makeable-Generation-Id",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        Vary: "Origin",
+      },
+    });
+  };
+
+  const response = await handler(
+    new Request(`${productionOrigin}/api/openai/responses`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: productionOrigin,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers":
+          "authorization,content-type,x-makeable-generation-id",
+      },
+    }),
+  );
+
+  assert.equal(upstream.url, `${backendOrigin}/api/openai/responses`);
+  assert.equal(upstream.options.headers.get("Origin"), productionOrigin);
+  assert.equal(upstream.options.headers.get("Access-Control-Request-Method"), "POST");
+  assert.equal(
+    upstream.options.headers.get("Access-Control-Request-Headers"),
+    "authorization,content-type,x-makeable-generation-id",
+  );
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), productionOrigin);
+  assert.equal(await response.text(), "");
+});

@@ -101,16 +101,37 @@ async function proxyMakeableApi(req, env) {
   });
   const authorization = req.headers.get("authorization");
   const generationId = req.headers.get("x-makeable-generation-id");
+  const origin = req.headers.get("origin");
+  const requestedMethod = req.headers.get("access-control-request-method");
+  const requestedHeaders = req.headers.get("access-control-request-headers");
   if (authorization) headers.set("Authorization", authorization);
   if (generationId) headers.set("X-Makeable-Generation-Id", generationId);
+  if (origin) headers.set("Origin", origin);
+  if (requestedMethod) headers.set("Access-Control-Request-Method", requestedMethod);
+  if (requestedHeaders) headers.set("Access-Control-Request-Headers", requestedHeaders);
   const upstream = await fetch(`${base}${inputUrl.pathname}${inputUrl.search}`, {
     method: req.method,
     headers,
     body: req.method === "GET" || req.method === "HEAD" ? undefined : await req.text(),
   });
-  return new Response(await upstream.arrayBuffer(), {
+  const responseHeaders = new Headers();
+  for (const name of [
+    "content-type",
+    "cache-control",
+    "access-control-allow-origin",
+    "access-control-allow-headers",
+    "access-control-allow-methods",
+    "vary",
+    "www-authenticate",
+  ]) {
+    const value = upstream.headers.get(name);
+    if (value) responseHeaders.set(name, value);
+  }
+  const responseHasNoBody =
+    req.method === "HEAD" || [204, 205, 304].includes(upstream.status);
+  return new Response(responseHasNoBody ? null : await upstream.arrayBuffer(), {
     status: upstream.status,
-    headers: { "Content-Type": upstream.headers.get("content-type") || "application/json" },
+    headers: responseHeaders,
   });
 }
 
