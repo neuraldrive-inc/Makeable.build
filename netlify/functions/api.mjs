@@ -16,6 +16,8 @@ import {
   createGoogleAcquisitionResult,
 } from "../../src/makeable/acquisition.js";
 import { OAuth2Client } from "google-auth-library";
+import { getStore } from "@netlify/blobs";
+import { timingSafeEqual } from "node:crypto";
 
 export default async function handler(req) {
   try {
@@ -36,6 +38,10 @@ export default async function handler(req) {
 
     if (url.pathname === "/api/waitlist" && req.method === "POST") {
       return createWaitlistSignup(req, env);
+    }
+
+    if (url.pathname === "/api/waitlist/export" && req.method === "GET") {
+      return exportWaitlistSignups(url, env);
     }
 
     if (url.pathname === "/api/auth/google" && req.method === "POST") {
@@ -140,6 +146,7 @@ function getEnv() {
     "GOOGLE_CLIENT_ID",
     "WAITLIST_WEBHOOK_URL",
     "WAITLIST_WEBHOOK_SECRET",
+    "WAITLIST_ADMIN_KEY",
   ];
   return Object.fromEntries(keys.map((key) => [key, envValue(key)]));
 }
@@ -231,13 +238,13 @@ async function completeGoogleAcquisition(req, env) {
 }
 
 async function deliverHostedWaitlistRecord(record, env) {
-  if (!env.WAITLIST_WEBHOOK_URL) {
-    return {
-      ok: false,
-      status: 503,
-      error: "Waitlist storage is not configured for this deployment.",
-    };
+  if (env.WAITLIST_WEBHOOK_URL) {
+    return deliverWaitlistWebhook(record, env);
   }
+  return deliverWaitlistBlob(record);
+}
+
+async function deliverWaitlistWebhook(record, env) {
   let url;
   try {
     url = new URL(env.WAITLIST_WEBHOOK_URL);
@@ -262,6 +269,58 @@ async function deliverHostedWaitlistRecord(record, env) {
     if (!upstream.ok) throw new Error("Waitlist upstream rejected the record");
     return { ok: true };
   } catch {
+    return {
+      ok: false,
+      status: 502,
+      error: "Waitlist signup could not be saved. Please try again.",
+    };
+  }
+}
+
+async function exportWaitlistSignups(url, env) {
+  if (!env.WAITLIST_ADMIN_KEY) {
+    return jsonResponse({ error: "Waitlist export is not configured." }, 503);
+  }
+  const key = url.searchParams.get("key") || "";
+  if (!timingSafeStringEqual(key, env.WAITLIST_ADMIN_KEY)) {
+    return jsonResponse({ error: "Not authorized." }, 401);
+  }
+  try {
+    const store = getStore("waitlist");
+    const records = [];
+    let cursor;
+    do {
+      const page = await store.list({ cursor });
+      for (const blob of page.blobs) {
+        const record = await store.get(blob.key, { type: "json" });
+        if (record) records.push(record);
+      }
+      cursor = page.cursor;
+    } while (cursor);
+    records.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    return jsonResponse({ ok: true, count: records.length, records }, 200, {
+      "Cache-Control": "no-store",
+    });
+  } catch (error) {
+    console.error(error);
+    return jsonResponse({ error: "Waitlist export failed." }, 502);
+  }
+}
+
+function timingSafeStringEqual(a, b) {
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
+async function deliverWaitlistBlob(record) {
+  try {
+    const store = getStore("waitlist");
+    await store.setJSON(record.email, record);
+    return { ok: true };
+  } catch (error) {
+    console.error(error);
     return {
       ok: false,
       status: 502,

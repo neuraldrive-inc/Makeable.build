@@ -16,6 +16,7 @@
     "@playwright/test": "^1.61.1"
   },
   "dependencies": {
+    "@netlify/blobs": "^10.7.9",
     "esptool-js": "0.5.7",
     "google-auth-library": "^10.3.0"
   }
