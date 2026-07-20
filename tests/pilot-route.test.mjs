@@ -26,6 +26,7 @@ test("the current production app stays packaged as a self-contained pilot", asyn
 
   const landingHtml = await readFile(path.join(root, "dist", "index.html"), "utf8");
   assert.match(landingHtml, /Turn ideas into working physical products in hours\./);
+  assert.match(landingHtml, /Makeable is an AI hardware prototyping studio/);
   assert.match(landingHtml, /<link rel="canonical" href="https:\/\/makeable\.build\/" \/>/);
   assert.match(landingHtml, /<script type="module" src="\/landing\.js"><\/script>/);
   for (const relativePath of [
