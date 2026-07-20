@@ -205,7 +205,8 @@ test("the workbench comparison can be dragged and changed with the keyboard", as
   await page.goto("/");
 
   const comparison = page.locator("[data-comparison]");
-  const deskPhoto = comparison.locator(".comparison-photo");
+  const deskPhoto = comparison.locator('[data-comparison-photo="before"]');
+  const labelledPhoto = comparison.locator('[data-comparison-photo="after"]');
   const recognitionLayer = comparison.locator(
     "[data-comparison-recognition-layer]",
   );
@@ -216,65 +217,64 @@ test("the workbench comparison can be dragged and changed with the keyboard", as
   await expect(deskPhoto).toHaveCount(1);
   await expect(deskPhoto).toHaveAttribute(
     "src",
-    "/assets/landing/desk-parts.jpeg",
+    "/assets/landing/desk-parts-v2.png",
   );
   await expect(recognitionLayer).toHaveCount(1);
-  await expect(comparison.locator(".part-outline")).toHaveCount(3);
-  await expect(comparison.locator(".part-callout")).toHaveCount(3);
-
-  await slider.scrollIntoViewIfNeeded();
-  await expect(slider).toHaveValue("44.3");
-  await slider.focus();
-  await slider.press("ArrowRight");
-  await expect(slider).toHaveValue("44.4");
-  await expect(comparison).toHaveCSS("--comparison-reveal", "44.4%");
-  await expect(recognitionLayer).toHaveCSS(
-    "clip-path",
-    "inset(0px 0px 0px 44.4%)",
+  await expect(labelledPhoto).toHaveCount(1);
+  await expect(labelledPhoto).toHaveAttribute(
+    "src",
+    "/assets/landing/desk-parts-labelled-v3.png",
   );
 
+  await slider.scrollIntoViewIfNeeded();
+  await expect(slider).toHaveValue("30");
+  await slider.focus();
+  await slider.press("ArrowRight");
+  await expect(slider).toHaveValue("30.1");
+  await expect(comparison).toHaveCSS("--comparison-reveal", "30.1%");
+  await expect(recognitionLayer).toHaveCSS(
+    "clip-path",
+    "inset(0px 0px 0px 30.1%)",
+  );
+
+  // The before and after photos share one photo of the same parts, so their
+  // frames must occupy identical geometry or the reveal will misalign them.
   const geometry = await comparison.evaluate((root) => {
-    const target = root
-      .querySelector(".comparison-annotation-frame")
+    const before = root
+      .querySelector('[data-comparison-photo="before"]')
+      .closest(".comparison-photo-frame")
       .getBoundingClientRect();
-    return [...root.querySelectorAll(".part-outline")].map((outline) => {
-      const rect = outline.getBoundingClientRect();
-      return {
-        insidePhoto:
-          rect.left >= target.left - 6 &&
-          rect.top >= target.top - 6 &&
-          rect.right <= target.right + 6 &&
-          rect.bottom <= target.bottom + 6,
-        coverage: (rect.width * rect.height) / (target.width * target.height),
-      };
-    });
+    const after = root
+      .querySelector('[data-comparison-photo="after"]')
+      .closest(".comparison-photo-frame")
+      .getBoundingClientRect();
+    return {
+      x: Math.abs(before.x - after.x),
+      y: Math.abs(before.y - after.y),
+      width: Math.abs(before.width - after.width),
+      height: Math.abs(before.height - after.height),
+    };
   });
 
-  expect(geometry.every(({ insidePhoto }) => insidePhoto)).toBe(true);
-  expect(geometry.every(({ coverage }) => coverage < 0.18)).toBe(true);
+  for (const property of ["x", "y", "width", "height"]) {
+    expect(geometry[property]).toBeLessThanOrEqual(1);
+  }
 
   const fixedGeometry = [];
   for (const value of [20, 50, 80]) {
     await slider.fill(String(value));
     fixedGeometry.push(
       await comparison.evaluate((root) => {
-        const photo = root
-          .querySelector(".comparison-photo-frame")
-          .getBoundingClientRect();
-        const outline = root.querySelector(".part-outline").getBoundingClientRect();
+        const rect = (selector) =>
+          root
+            .querySelector(selector)
+            .closest(".comparison-photo-frame")
+            .getBoundingClientRect();
+        const before = rect('[data-comparison-photo="before"]');
+        const after = rect('[data-comparison-photo="after"]');
         return {
-          photo: {
-            x: photo.x,
-            y: photo.y,
-            width: photo.width,
-            height: photo.height,
-          },
-          outline: {
-            x: outline.x,
-            y: outline.y,
-            width: outline.width,
-            height: outline.height,
-          },
+          before: { x: before.x, y: before.y, width: before.width, height: before.height },
+          after: { x: after.x, y: after.y, width: after.width, height: after.height },
         };
       }),
     );
@@ -282,7 +282,7 @@ test("the workbench comparison can be dragged and changed with the keyboard", as
 
   const [baseline, ...changed] = fixedGeometry;
   for (const geometryAtValue of changed) {
-    for (const target of ["photo", "outline"]) {
+    for (const target of ["before", "after"]) {
       for (const property of ["x", "y", "width", "height"]) {
         expect(
           Math.abs(
@@ -476,7 +476,7 @@ test("landing photography and product screens keep their intended crop", async (
   await page.goto("/");
 
   const heroPhoto = page.getByRole("img", {
-    name: "An ESP32, PIR motion sensor, and OLED display on a workbench",
+    name: "An OLED display, ESP32 DevKit, PIR motion sensor, DHT22 sensor, and logic level converter on a desk",
   });
   const productScreen = page.getByRole("img", {
     name:
@@ -485,7 +485,9 @@ test("landing photography and product screens keep their intended crop", async (
 
   await expect(heroPhoto).toBeVisible();
   await expect(productScreen).toBeVisible();
-  await expect(heroPhoto).toHaveCSS("object-fit", "cover");
+  // The before/after comparison photo uses "contain" (not "cover") so the
+  // baked-in recognition labels on the after image are never cropped.
+  await expect(heroPhoto).toHaveCSS("object-fit", "contain");
   await expect(productScreen).toHaveCSS("object-fit", "cover");
 });
 
@@ -619,7 +621,9 @@ test("mobile navigation links remain tappable and use the mobile photo crop", as
   );
   expect(heights.every((height) => height >= 44)).toBe(true);
 
-  await expect(page.locator(".hero-photo")).toHaveCSS("object-position", "50% 45%");
+  await expect(
+    page.locator('[data-comparison-photo="before"]'),
+  ).toHaveCSS("object-position", "50% 45%");
 });
 
 test("landing motion is limited to transform and opacity", async ({ page }) => {
@@ -794,7 +798,9 @@ test("the approved composition remains usable across the full responsive matrix"
       const headlineSpans = [...document.querySelectorAll(".hero-message h1 > span")];
       const cards = [...document.querySelectorAll(".landing-story-column .paper-card")];
       const comparison = document.querySelector(".comparison-photo-frame");
-      const annotation = document.querySelector(".comparison-annotation-frame");
+      const annotation = document
+        .querySelector('[data-comparison-photo="after"]')
+        .closest(".comparison-photo-frame");
       const posterElement = document.querySelector(".launch-poster");
       const signupElement = document.querySelector(".hero-signup");
       const paperStyles = cards.map((card) => getComputedStyle(card));

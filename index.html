@@ -22,7 +22,7 @@
     <link rel="preconnect" href="https://accounts.google.com" />
     <link
       rel="preload"
-      href="/assets/landing/desk-parts.jpeg"
+      href="/assets/landing/desk-parts-v2.png"
       as="image"
       fetchpriority="high"
     />
@@ -142,7 +142,7 @@
         <div
           class="comparison paper-card"
           data-comparison
-          style="--comparison-reveal: 44.3%"
+          style="--comparison-reveal: 30%"
         >
           <div class="comparison-label comparison-label--before">Your desk</div>
           <div class="comparison-label comparison-label--after">Makeable sees</div>
@@ -150,10 +150,11 @@
             <div class="comparison-photo-frame">
               <img
                 class="hero-photo comparison-photo"
-                src="/assets/landing/desk-parts.jpeg"
-                alt="An ESP32, PIR motion sensor, and OLED display on a workbench"
-                width="1600"
-                height="1200"
+                data-comparison-photo="before"
+                src="/assets/landing/desk-parts-v2.png"
+                alt="An OLED display, ESP32 DevKit, PIR motion sensor, DHT22 sensor, and logic level converter on a desk"
+                width="1376"
+                height="768"
                 fetchpriority="high"
                 decoding="async"
               />
@@ -163,22 +164,16 @@
               data-comparison-recognition-layer
               aria-hidden="true"
             >
-              <div class="comparison-annotation-frame">
-                <span class="part-outline part-outline--display"></span>
-                <span class="part-outline part-outline--sensor"></span>
-                <span class="part-outline part-outline--board"></span>
-                <span class="part-arrow part-arrow--display" aria-hidden="true"></span>
-                <span class="part-arrow part-arrow--sensor" aria-hidden="true"></span>
-                <span class="part-arrow part-arrow--board" aria-hidden="true"></span>
-                <span class="part-callout part-callout--display">
-                  <span></span>OLED display
-                </span>
-                <span class="part-callout part-callout--sensor">
-                  <span></span>PIR motion<br />sensor
-                </span>
-                <span class="part-callout part-callout--board">
-                  <span></span>ESP32 DevKit
-                </span>
+              <div class="comparison-photo-frame">
+                <img
+                  class="hero-photo comparison-photo"
+                  data-comparison-photo="after"
+                  src="/assets/landing/desk-parts-labelled-v3.png"
+                  alt=""
+                  width="1024"
+                  height="572"
+                  decoding="async"
+                />
               </div>
             </div>
             <span class="comparison-divider" aria-hidden="true">
@@ -202,7 +197,7 @@
               type="range"
               min="0"
               max="100"
-              value="44.3"
+              value="30"
               step="0.1"
               aria-label="Reveal Makeable part recognition"
               data-comparison-range
