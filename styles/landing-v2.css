@@ -682,8 +682,10 @@ figure {
 
 .google-slot {
   display: grid;
-  min-height: 121px;
-  padding: 8px;
+  width: min(100%, 424px);
+  min-height: 62px;
+  margin-inline: auto;
+  padding: 6px 9px;
   place-items: center;
   border: 3px solid var(--bench-pink);
   border-radius: 20px;
@@ -695,16 +697,16 @@ figure {
 
 .google-fallback {
   display: flex;
-  min-height: 97px;
+  min-height: 46px;
   align-items: center;
   justify-content: center;
-  gap: 26px;
-  padding: 18px 26px;
+  gap: 14px;
+  padding: 10px 18px;
   border: 1px solid rgb(34 26 28 / 13%);
   border-radius: 15px;
   background: #fffefa;
   color: var(--bench-ink);
-  font-size: 28px;
+  font-size: 20px;
   font-weight: 950;
   letter-spacing: -0.03em;
   cursor: pointer;
@@ -722,15 +724,15 @@ figure {
 }
 
 .google-fallback img {
-  width: 48px;
-  height: 48px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
 }
 
 .google-slot > div {
   display: flex;
   width: 100% !important;
-  min-height: 88px;
+  min-height: 46px;
   align-items: center;
   justify-content: center;
 }
@@ -891,6 +893,19 @@ figure {
   background: var(--bench-coral);
   color: white;
   font-weight: 900;
+  cursor: pointer;
+}
+
+.forget-waitlist {
+  min-height: 36px;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--bench-muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
   cursor: pointer;
 }
 
@@ -1673,7 +1688,7 @@ figure {
 
   .google-slot,
   .google-fallback {
-    min-height: 75px;
+    min-height: 58px;
   }
 
   .google-slot {
@@ -1682,14 +1697,14 @@ figure {
   }
 
   .google-fallback {
-    gap: 17px;
-    padding: 12px 20px;
-    font-size: 22px;
+    gap: 12px;
+    padding: 9px 16px;
+    font-size: 18px;
   }
 
   .google-fallback img {
-    width: 38px;
-    height: 38px;
+    width: 28px;
+    height: 28px;
   }
 
   .signup-note {
@@ -1999,14 +2014,14 @@ figure {
   }
 
   .hero-signup.is-mobile-sticky .google-slot {
-    min-height: 92px;
+    min-height: 52px;
     padding: 4px;
     border: 0;
     box-shadow: none;
   }
 
   .hero-signup.is-mobile-sticky .google-fallback {
-    min-height: 84px;
+    min-height: 46px;
   }
 
   .hero-signup.is-mobile-sticky .signup-data-use {
@@ -2235,7 +2250,7 @@ figure {
 
   .google-slot,
   .google-fallback {
-    min-height: 88px;
+    min-height: 58px;
   }
 
   .google-fallback {

@@ -108,6 +108,10 @@ test("landing acquisition routes are reserved locally instead of reaching the AW
       body: JSON.stringify({ credential: "test", intent: "waitlist" }),
     }),
   );
+  const statusResponse = await handler(
+    new Request(`${productionOrigin}/api/waitlist/status`, { method: "GET" }),
+    { deploy: { context: "production" } },
+  );
 
   assert.equal(waitlistResponse.status, 410);
   assert.deepEqual(await waitlistResponse.json(), {
@@ -115,6 +119,41 @@ test("landing acquisition routes are reserved locally instead of reaching the AW
   });
   assert.equal(googleResponse.status, 503);
   assert.deepEqual(await googleResponse.json(), { error: "Google sign-in is not configured." });
+  assert.equal(statusResponse.status, 200);
+  assert.deepEqual(await statusResponse.json(), { joined: false });
+  assert.equal(statusResponse.headers.get("Cache-Control"), "no-store");
+  assert.equal(fetchCalls, 0);
+});
+
+test("waitlist browser confirmation routes are private, resettable, and never proxied", async (t) => {
+  installEnvironment(t);
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error("The AWS proxy should not be called");
+  };
+
+  const malformed = await handler(
+    new Request(`${productionOrigin}/api/waitlist/status`, {
+      headers: { Cookie: "__Host-makeable_waitlist=malformed" },
+    }),
+    { deploy: { context: "production" } },
+  );
+  assert.deepEqual(await malformed.json(), { joined: false });
+  assert.match(malformed.headers.get("Set-Cookie"), /Max-Age=0/);
+
+  const reset = await handler(
+    new Request(`${productionOrigin}/api/waitlist/status`, { method: "DELETE" }),
+    { deploy: { context: "production" } },
+  );
+  assert.deepEqual(await reset.json(), { ok: true });
+  assert.match(reset.headers.get("Set-Cookie"), /HttpOnly/);
+
+  const unsupported = await handler(
+    new Request(`${productionOrigin}/api/waitlist/status`, { method: "POST" }),
+  );
+  assert.equal(unsupported.status, 405);
+  assert.equal(unsupported.headers.get("Allow"), "GET, DELETE");
   assert.equal(fetchCalls, 0);
 });
 
@@ -174,13 +213,22 @@ test("acquisition route variants cannot fall through to the AWS proxy", async (t
   for (const pathname of [
     "/api/waitlist/",
     "/api/waitlist.html",
+    "/api/waitlist/status/",
+    "/api/waitlist/status.html",
     "/api/auth/google/",
     "/api/auth/google.html",
   ]) {
     const response = await handler(
       new Request(`${productionOrigin}${pathname}`, { method: "GET" }),
     );
-    assert.equal(response.status, pathname.includes("waitlist") ? 410 : 405);
+    assert.equal(
+      response.status,
+      pathname.includes("waitlist/status")
+        ? 200
+        : pathname.includes("auth/google")
+          ? 405
+          : 410,
+    );
   }
   assert.equal(fetchCalls, 0);
 });

@@ -42,6 +42,13 @@ test("Google signup uses the SDK-rendered button flow", async () => {
   assert.match(landingScript, /GOOGLE_SUBMISSION_ATTEMPTS = 3/);
   assert.match(landingScript, /googleSubmissionInFlight/);
   assert.match(landingScript, /new AbortController\(\)/);
+  assert.match(landingScript, /fetch\("\/api\/waitlist\/status"/);
+  assert.match(
+    landingScript,
+    /if \(config\.googleClientId && googleSlot\) void initializeWaitlistExperience\(\)/,
+  );
+  assert.match(landingScript, /You’re already on the list/);
+  assert.doesNotMatch(landingScript, /localStorage|sessionStorage|document\.cookie/);
   assert.match(landingHtml, /verified email to Makeable’s early-access/);
   assert.match(landingHtml, /How we use your data/);
 });

@@ -5,6 +5,14 @@ import {
   persistVerifiedWaitlistRecord,
   waitlistStoreNameForFunctionContext,
 } from "../../lib/waitlist-storage.mjs";
+import {
+  clearWaitlistSessionCookie,
+  createWaitlistSession,
+  forgetWaitlistSession,
+  resolveWaitlistSession,
+  waitlistSessionCookieState,
+  waitlistSessionStoreNameForFunctionContext,
+} from "../../lib/waitlist-session.mjs";
 
 const googleVerifiers = new Map();
 
@@ -20,6 +28,17 @@ export default async function handler(req, context = {}) {
 
     if (url.pathname === "/api/config") {
       return jsonResponse(await resolvedPublicConfig(env));
+    }
+
+    if (localApiPath === "/api/waitlist/status") {
+      if (!new Set(["GET", "DELETE"]).has(req.method)) {
+        return jsonResponse({ error: "Method not allowed" }, 405, {
+          Allow: "GET, DELETE",
+          "Cache-Control": "no-store",
+        });
+      }
+      if (req.method === "DELETE") return await forgetBrowserConfirmation(req, context);
+      return await waitlistStatus(req, context);
     }
 
     if (localApiPath === "/api/waitlist") {
@@ -192,11 +211,18 @@ async function completeGoogleWaitlist(req, env, context) {
       "Cache-Control": "no-store",
     });
   }
+  const confirmation = await createBrowserConfirmation(delivery.key, context);
+  if (!confirmation.ok) {
+    return jsonResponse({ error: confirmation.error }, confirmation.status, {
+      "Cache-Control": "no-store",
+    });
+  }
   return jsonResponse(
     { ok: true, created: delivery.created, user: result.value.user },
     200,
     {
       "Cache-Control": "no-store",
+      "Set-Cookie": confirmation.cookie,
     },
   );
 }
@@ -216,7 +242,7 @@ async function deliverWaitlistRecord(record, env, context) {
           ? context.waitUntil.bind(context)
           : undefined,
     });
-    return { ok: true, created: result.created };
+    return { ok: true, created: result.created, key: result.key };
   } catch (error) {
     console.error("Waitlist storage failed", error);
     return {
@@ -225,6 +251,76 @@ async function deliverWaitlistRecord(record, env, context) {
       error: "Waitlist signup could not be saved. Please try again.",
     };
   }
+}
+
+async function createBrowserConfirmation(signupKey, context) {
+  try {
+    const store = getStore({
+      name: waitlistSessionStoreNameForFunctionContext(context),
+      consistency: "strong",
+    });
+    const session = await createWaitlistSession(store, signupKey);
+    return { ok: true, cookie: session.cookie };
+  } catch (error) {
+    console.error("Waitlist browser confirmation failed", error);
+    return {
+      ok: false,
+      status: 502,
+      error: "Your signup was saved, but this browser could not be remembered. Please try once more.",
+    };
+  }
+}
+
+async function waitlistStatus(req, context) {
+  const cookie = waitlistSessionCookieState(req);
+  if (cookie.state !== "valid") {
+    return jsonResponse({ joined: false }, 200, {
+      "Cache-Control": "no-store",
+      ...(cookie.state === "invalid"
+        ? { "Set-Cookie": clearWaitlistSessionCookie() }
+        : {}),
+    });
+  }
+  try {
+    const signupStore = getStore({
+      name: waitlistStoreNameForFunctionContext(context),
+      consistency: "strong",
+    });
+    const sessionStore = getStore({
+      name: waitlistSessionStoreNameForFunctionContext(context),
+      consistency: "strong",
+    });
+    const status = await resolveWaitlistSession(req, { signupStore, sessionStore });
+    return jsonResponse({ joined: status.joined }, 200, {
+      "Cache-Control": "no-store",
+      ...(status.clearCookie
+        ? { "Set-Cookie": clearWaitlistSessionCookie() }
+        : {}),
+    });
+  } catch (error) {
+    console.error("Waitlist browser confirmation lookup failed", error);
+    return jsonResponse({ joined: false }, 200, {
+      "Cache-Control": "no-store",
+    });
+  }
+}
+
+async function forgetBrowserConfirmation(req, context) {
+  if (waitlistSessionCookieState(req).state === "valid") {
+    try {
+      const sessionStore = getStore({
+        name: waitlistSessionStoreNameForFunctionContext(context),
+        consistency: "strong",
+      });
+      await forgetWaitlistSession(req, sessionStore);
+    } catch (error) {
+      console.error("Waitlist browser confirmation removal failed", error);
+    }
+  }
+  return jsonResponse({ ok: true }, 200, {
+    "Cache-Control": "no-store",
+    "Set-Cookie": clearWaitlistSessionCookie(),
+  });
 }
 
 function googleVerifier(clientId) {

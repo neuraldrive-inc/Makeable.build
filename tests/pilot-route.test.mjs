@@ -49,6 +49,8 @@ test("the current production app stays packaged as a self-contained pilot", asyn
   assert.match(privacyHtml, /Google sign-in supplies your name, email address, and email verification/);
   assert.match(privacyHtml, /stable account identifier/);
   assert.match(privacyHtml, /does not store either in new waitlist records/);
+  assert.match(privacyHtml, /random, HttpOnly browser/);
+  assert.match(privacyHtml, /not a Google credential/);
   assert.match(privacyHtml, /Netlify Blobs/);
   assert.match(privacyHtml, /mohammedkhambhati2020@gmail\.com/);
   assert.match(termsHtml, /Early access, not a finished product/);

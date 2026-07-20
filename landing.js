@@ -8,6 +8,7 @@ let googleSubmissionInFlight = false;
 
 const GOOGLE_SUBMISSION_ATTEMPTS = 3;
 const GOOGLE_SUBMISSION_TIMEOUT_MS = 10_000;
+const WAITLIST_STATUS_TIMEOUT_MS = 4_000;
 
 setupWorkbenchComparison();
 setupBuildStory();
@@ -42,7 +43,33 @@ googleFallback?.addEventListener("click", () => {
   );
 });
 
-if (config.googleClientId && googleSlot) loadGoogleIdentity();
+if (config.googleClientId && googleSlot) void initializeWaitlistExperience();
+
+async function initializeWaitlistExperience() {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(
+    () => controller.abort(),
+    WAITLIST_STATUS_TIMEOUT_MS,
+  );
+  try {
+    const response = await fetch("/api/waitlist/status", {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok && payload.joined === true) {
+      showWaitlistSuccess({ returning: true });
+      return;
+    }
+  } catch {
+    // A status outage must not prevent a new visitor from joining.
+  } finally {
+    window.clearTimeout(timeout);
+  }
+  loadGoogleIdentity();
+}
 
 function loadGoogleIdentity() {
   if (!googleSlot || !config.googleClientId) return;
@@ -98,7 +125,11 @@ function renderGoogleButton() {
   }
 
   const buttonHost = document.createElement("div");
-  const availableWidth = Math.floor(googleSlot.getBoundingClientRect().width - 16);
+  const slotStyle = window.getComputedStyle(googleSlot);
+  const horizontalPadding =
+    Number.parseFloat(slotStyle.paddingLeft) +
+    Number.parseFloat(slotStyle.paddingRight);
+  const availableWidth = Math.floor(googleSlot.clientWidth - horizontalPadding);
   const width = Math.min(400, Math.max(220, availableWidth));
 
   try {
@@ -189,24 +220,43 @@ function wait(milliseconds) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
-function showWaitlistSuccess() {
+function showWaitlistSuccess({ returning = false } = {}) {
   const content = document.querySelector("[data-signup-content]");
   if (!content) return;
   content.innerHTML = `
     <div class="signup-success">
       <img src="/assets/icons/lucide/check.svg" alt="" />
-      <h2 id="signup-title" tabindex="-1">You’re on the list.</h2>
-      <p>We’ll send your Makeable early-access invitation before August 9.</p>
+      <h2 id="signup-title" tabindex="-1">${
+        returning ? "You’re already on the list." : "You’re on the list."
+      }</h2>
+      <p>${
+        returning
+          ? "This browser remembers your confirmed waitlist signup."
+          : "We’ll send your Makeable early-access invitation before August 9."
+      }</p>
       <button class="share-waitlist" type="button" data-share-waitlist>
         Share Makeable
       </button>
+      ${
+        returning
+          ? '<button class="forget-waitlist" type="button" data-forget-waitlist>Not you? Use another Google account</button>'
+          : ""
+      }
     </div>
   `;
-  setStatus("Waitlist signup complete.", "success");
+  setStatus(
+    returning
+      ? "Waitlist membership confirmed on this browser."
+      : "Waitlist signup complete.",
+    "success",
+  );
   content
     .querySelector("[data-share-waitlist]")
     ?.addEventListener("click", shareWaitlist);
-  content.querySelector("h2")?.focus();
+  content
+    .querySelector("[data-forget-waitlist]")
+    ?.addEventListener("click", forgetWaitlistBrowser);
+  if (!returning) content.querySelector("h2")?.focus();
 }
 
 function setStatus(message, tone) {
@@ -236,6 +286,20 @@ async function shareWaitlist() {
   } catch (error) {
     if (error?.name === "AbortError") return;
     setStatus("Copy this page’s address to share Makeable.", "error");
+  }
+}
+
+async function forgetWaitlistBrowser() {
+  setStatus("Forgetting this browser…", "info");
+  try {
+    const response = await fetch("/api/waitlist/status", {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) throw new Error();
+    window.location.reload();
+  } catch {
+    setStatus("This browser could not be reset. Please try again.", "error");
   }
 }
 

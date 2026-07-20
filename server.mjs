@@ -17,6 +17,13 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { WebSocket, WebSocketServer } from "ws";
 import { getBoardProfile, supportedBoardSummary } from "./lib/board-profiles.mjs";
 import { createGoogleWaitlistResult } from "./lib/acquisition.mjs";
+import { waitlistSignupKey } from "./lib/waitlist-storage.mjs";
+import {
+  clearWaitlistSessionCookie,
+  createWaitlistSession,
+  forgetWaitlistSession,
+  resolveWaitlistSession,
+} from "./lib/waitlist-session.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -34,6 +41,7 @@ const MAX_VOICE_SESSION_MS = Math.max(30000, Number(initialEnv.MAX_VOICE_SESSION
 const INITIAL_FREE_CREDITS = Math.max(0, Number(initialEnv.INITIAL_FREE_CREDITS || 10));
 const dynamodb = new DynamoDBClient({ region: initialEnv.AWS_REGION || "us-east-1" });
 const jwksByIssuer = new Map();
+const localWaitlistSessions = new Map();
 let activeCompiles = 0;
 const deepgramWebSocketServer = new WebSocketServer({
   noServer: true,
@@ -75,6 +83,27 @@ const server = createServer(async (req, res) => {
 
     if (url.pathname === "/api/config") {
       return sendJson(res, publicConfig(env));
+    }
+
+    if (localApiPath === "/api/waitlist/status") {
+      const sessionRequest = localWaitlistSessionRequest(req);
+      if (req.method === "GET") {
+        const status = await resolveWaitlistSession(sessionRequest, {
+          sessionStore: localWaitlistSessionStore,
+          signupStore: localWaitlistSignupStore,
+        });
+        if (status.clearCookie) {
+          res.setHeader("Set-Cookie", clearWaitlistSessionCookie());
+        }
+        return sendJson(res, { joined: status.joined });
+      }
+      if (req.method === "DELETE") {
+        await forgetWaitlistSession(sessionRequest, localWaitlistSessionStore);
+        res.setHeader("Set-Cookie", clearWaitlistSessionCookie());
+        return sendJson(res, { ok: true });
+      }
+      res.setHeader("Allow", "GET, DELETE");
+      return sendJson(res, { error: "Method not allowed" }, 405);
     }
 
     if (localApiPath === "/api/waitlist") {
@@ -380,6 +409,11 @@ async function completeLocalGoogleWaitlist(req, res, env) {
     return sendJson(res, { error: result.error }, result.status);
   }
   await saveLocalWaitlistRecord(result.value.record);
+  const confirmation = await createWaitlistSession(
+    localWaitlistSessionStore,
+    waitlistSignupKey(result.value.record.email),
+  );
+  res.setHeader("Set-Cookie", confirmation.cookie);
   return sendJson(res, { ok: true, user: result.value.user });
 }
 
@@ -406,6 +440,45 @@ async function saveLocalWaitlistRecord(record) {
   await appendFile(filePath, `${JSON.stringify(record)}\n`, {
     encoding: "utf8",
     mode: 0o600,
+  });
+}
+
+const localWaitlistSessionStore = {
+  async set(key, value) {
+    localWaitlistSessions.set(key, JSON.parse(await value.text()));
+    return { modified: true };
+  },
+  async get(key) {
+    return localWaitlistSessions.get(key) || null;
+  },
+  async delete(key) {
+    localWaitlistSessions.delete(key);
+  },
+};
+
+const localWaitlistSignupStore = {
+  async get(key) {
+    const filePath = path.join(__dirname, "data", "waitlist.jsonl");
+    try {
+      const contents = await readFile(filePath, "utf8");
+      for (const line of contents.split(/\r?\n/).filter(Boolean)) {
+        try {
+          const record = JSON.parse(line);
+          if (waitlistSignupKey(record.email) === key) return record;
+        } catch {
+          // Skip malformed local development records.
+        }
+      }
+    } catch {
+      // No local signups have been recorded yet.
+    }
+    return null;
+  },
+};
+
+function localWaitlistSessionRequest(req) {
+  return new Request(`http://${req.headers.host || "localhost"}/api/waitlist/status`, {
+    headers: { Cookie: String(req.headers.cookie || "") },
   });
 }
 
