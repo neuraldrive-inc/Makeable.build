@@ -272,7 +272,7 @@ function setupMobileSignup() {
     if (shouldStick) {
       document.body.style.setProperty(
         "--sticky-signup-clearance",
-        `${Math.ceil(signup.getBoundingClientRect().height + 12)}px`,
+        `${Math.ceil(signup.getBoundingClientRect().height + 40)}px`,
       );
     } else {
       document.body.style.removeProperty("--sticky-signup-clearance");

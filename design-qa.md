@@ -23,7 +23,8 @@
    Google CTA, hand underline details, and the approved August 9, 2026 date.
 4. The process scenes now use vivid approved pink/blue/green banners, torn
    paper boundaries, six-to-seven-pixel desktop seams, corrected Connect/Test column
-   ratios, and the same hardware crops as the approved source.
+   ratios, and clean hardware-only photography with no baked-in tape, arrows,
+   labels, status UI, or other interface decoration.
 5. The final reference and implementation were viewed together at the same
    1536 × 1024 scale. The changed headline copy is intentional:
    `Turn ideas into working physical products in hours.` No unresolved P0, P1,
@@ -67,7 +68,8 @@ Results:
 - Wordmark, marker rays, double underlines, arrows, torn poster, wiring chips,
   diagnostic checks, progress, and colored tape are all coded HTML/CSS rather
   than flattened interface screenshots. Raster content is limited to paper
-  texture and hardware photography.
+  texture and the three clean hardware photographs in
+  `assets/landing/*-hardware-clean*.png`.
 - Google configuration errors, verified signup success, and pilot redirect.
 - Tablet/mobile sticky CTA behavior and safe bottom clearance.
 - Focus treatment, live status messaging, reduced motion, labels, and touch
@@ -86,7 +88,7 @@ Results:
 ## Verification results
 
 - Build checks: passed.
-- Unit suite: 127 passed.
+- Unit suite: 128 passed.
 - Complete browser, interaction, responsive, and accessibility suite: 192 passed.
 - Final browser console review: no landing-page errors.
 - Final combined reference review: passed.

@@ -18,3 +18,9 @@ from the pinned `esptool-js@0.5.7` dependency. Its Apache License 2.0 text is
 retained beside the vendored bundle. Makeable imports this local copy so board
 loading never depends on a runtime CDN request. The bundle's pako, atob-lite,
 and tslib dependency licenses are retained under `vendor/esptool-js/licenses/`.
+
+The three versioned `landing/*-hardware-clean*.png` files are hardware-only photographic
+layers produced with the built-in ImageGen editing workflow from the approved
+landing references. They intentionally contain no interface text, tape,
+arrows, labels, checks, progress, or other baked-in UI; those elements are
+rendered semantically by `index.html` and `styles/landing-v2.css`.

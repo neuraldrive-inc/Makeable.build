@@ -301,13 +301,14 @@ test("process cards use hardware imagery with semantic diagnostics", async ({
 
   await expect(
     page.locator('[data-story-frame="recognize"] .story-image'),
-  ).toHaveAttribute("src", "/assets/landing/recognize-hardware.png");
+  ).toHaveAttribute("src", "/assets/landing/recognize-hardware-clean-v2.png");
   await expect(
     page.locator('[data-story-frame="connect"] .story-image'),
-  ).toHaveAttribute("src", "/assets/landing/connect-hardware.png");
+  ).toHaveAttribute("src", "/assets/landing/connect-hardware-clean.png");
   await expect(
     page.locator('[data-story-frame="test"] .story-image'),
-  ).toHaveAttribute("src", "/assets/landing/test-hardware.png");
+  ).toHaveAttribute("src", "/assets/landing/test-hardware-clean-v2.png");
+  await expect(page.locator(".story-tape.grid-tape")).toHaveCount(2);
   await expect(page.locator(".demo-status-row")).toHaveCount(4);
   await expect(page.locator(".demo-check")).toHaveCount(4);
   await expect(page.locator(".demo-status-row strong")).toHaveText([
@@ -511,8 +512,26 @@ test("mobile story frames stay in normal flow without horizontal overflow", asyn
   const dimensions = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
+    tapePercentageOverlap: (() => {
+      const tape = document.querySelector(".status-tape").getBoundingClientRect();
+      const percentage = document
+        .querySelector(".demo-progress-row strong")
+        .getBoundingClientRect();
+      const width = Math.max(
+        0,
+        Math.min(tape.right, percentage.right) -
+          Math.max(tape.left, percentage.left),
+      );
+      const height = Math.max(
+        0,
+        Math.min(tape.bottom, percentage.bottom) -
+          Math.max(tape.top, percentage.top),
+      );
+      return width * height;
+    })(),
   }));
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+  expect(dimensions.tapePercentageOverlap).toBe(0);
 });
 
 test("mobile signup remains visible while its source position is away", async ({
@@ -572,6 +591,16 @@ test("tablet hero stacks instead of squeezing the signup copy", async ({ page })
   await expect(
     page.getByRole("button", { name: "Continue with Google" }),
   ).toBeInViewport({ ratio: 0.98 });
+
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.waitForTimeout(100);
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const bottomClearance = await page.evaluate(() => {
+    const diagnostics = document.querySelector(".demo-status").getBoundingClientRect();
+    const stickySignup = document.querySelector(".hero-signup").getBoundingClientRect();
+    return stickySignup.top - diagnostics.bottom;
+  });
+  expect(bottomClearance).toBeGreaterThanOrEqual(8);
 });
 
 test("mobile navigation links remain tappable and use the mobile photo crop", async ({

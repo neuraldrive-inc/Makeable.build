@@ -1565,11 +1565,9 @@ figure {
 }
 
 .story-scene--connect .story-image {
-  position: absolute;
-  top: 0;
-  left: -12%;
-  width: 124%;
-  max-width: none;
+  position: relative;
+  width: 100%;
+  max-width: 100%;
 }
 
 .story-scene--test .test-hardware-crop .story-image {
@@ -2160,6 +2158,10 @@ figure {
     grid-template-columns: 46% 54%;
   }
 
+  .story-scene--recognize .story-banner {
+    width: 82%;
+  }
+
   .story-scene--connect {
     grid-template-columns: 34.5% 65.5%;
   }
@@ -2492,6 +2494,10 @@ figure {
     height: 72px;
   }
 
+  .story-scene--recognize .story-banner {
+    width: 95%;
+  }
+
   .story-banner h2 {
     font-size: 28px;
   }
@@ -2518,8 +2524,8 @@ figure {
   .story-scene--connect .story-image {
     position: relative;
     top: auto;
-    left: -12%;
-    width: 124%;
+    left: auto;
+    width: 100%;
     aspect-ratio: 590 / 168;
   }
 
@@ -2601,6 +2607,14 @@ figure {
 
   .demo-progress-label {
     font-size: 10px;
+  }
+
+  .demo-progress-row {
+    margin-right: 60px;
+  }
+
+  .status-tape {
+    right: -30px;
   }
 }
 
