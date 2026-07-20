@@ -7,6 +7,12 @@ const output = path.join(root, "dist");
 
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
+await cp(path.join(root, "index.html"), path.join(output, "index.html"));
+await cp(path.join(root, "landing.js"), path.join(output, "landing.js"));
+await cp(path.join(root, "robots.txt"), path.join(output, "robots.txt"));
+await cp(path.join(root, "sitemap.xml"), path.join(output, "sitemap.xml"));
+await cp(path.join(root, "styles"), path.join(output, "styles"), { recursive: true });
+await cp(path.join(root, "assets"), path.join(output, "assets"), { recursive: true });
 await cp(path.join(root, "pilot"), path.join(output, "pilot"), { recursive: true });
 await cp(path.join(root, "pilot", "index.html"), path.join(output, "pilot-app.html"));
 await rm(path.join(output, "pilot", "index.html"));

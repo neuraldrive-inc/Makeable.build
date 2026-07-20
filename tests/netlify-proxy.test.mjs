@@ -14,6 +14,7 @@ function installEnvironment(t, overrides = {}) {
     COGNITO_DOMAIN: "https://auth.makeable.test",
     COGNITO_CLIENT_ID: "client-id",
     COGNITO_REDIRECT_URI: `${productionOrigin}/pilot`,
+    GOOGLE_CLIENT_ID: "google-client-id",
     ...overrides,
   };
   globalThis.Netlify = {
@@ -78,9 +79,54 @@ test("production config keeps the pilot callback while using backend capabilitie
   assert.equal(response.status, 200);
   assert.equal(config.apiBaseUrl, backendOrigin);
   assert.equal(config.cognitoRedirectUri, `${productionOrigin}/pilot`);
+  assert.equal(config.googleClientId, "google-client-id");
+  assert.equal(config.hasGoogleSignIn, true);
   assert.equal(config.hasAccounts, true);
   assert.equal(config.firmwareCompileSupported, true);
   assert.deepEqual(config.supportedBoards, [{ id: "esp32", label: "ESP32" }]);
+});
+
+test("landing acquisition routes are handled locally instead of reaching the AWS proxy", async (t) => {
+  installEnvironment(t, { GOOGLE_CLIENT_ID: "" });
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error("The AWS proxy should not be called");
+  };
+
+  const waitlistResponse = await handler(
+    new Request(`${productionOrigin}/api/waitlist`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "not-an-email" }),
+    }),
+  );
+  const googleResponse = await handler(
+    new Request(`${productionOrigin}/api/auth/google`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential: "test", intent: "waitlist" }),
+    }),
+  );
+
+  assert.equal(waitlistResponse.status, 400);
+  assert.deepEqual(await waitlistResponse.json(), { error: "Enter a valid email address." });
+  assert.equal(googleResponse.status, 503);
+  assert.deepEqual(await googleResponse.json(), { error: "Google sign-in is not configured." });
+  assert.equal(fetchCalls, 0);
+});
+
+test("landing acquisition rejects oversized request bodies", async (t) => {
+  installEnvironment(t);
+  const response = await handler(
+    new Request(`${productionOrigin}/api/waitlist`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: `${"a".repeat(17 * 1024)}@example.com` }),
+    }),
+  );
+  assert.equal(response.status, 413);
+  assert.deepEqual(await response.json(), { error: "Request body is too large." });
 });
 
 test("Netlify passes CORS preflights through without adding a body to 204 responses", async (t) => {

@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /pilot
+Disallow: /pilot-app.html
+
+Sitemap: https://makeable.build/sitemap.xml

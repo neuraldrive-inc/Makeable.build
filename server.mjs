@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { readFile, mkdir, writeFile, rm, readdir } from "node:fs/promises";
+import { appendFile, readFile, mkdir, writeFile, rm, readdir } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,10 @@ import {
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { WebSocket, WebSocketServer } from "ws";
 import { getBoardProfile, supportedBoardSummary } from "./lib/board-profiles.mjs";
+import {
+  createEmailWaitlistRecord,
+  createGoogleWaitlistResult,
+} from "./lib/acquisition.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -55,6 +59,8 @@ const mimeTypes = new Map([
   [".jpeg", "image/jpeg"],
   [".webp", "image/webp"],
   [".ico", "image/x-icon"],
+  [".woff", "font/woff"],
+  [".woff2", "font/woff2"],
 ]);
 
 const server = createServer(async (req, res) => {
@@ -71,6 +77,14 @@ const server = createServer(async (req, res) => {
 
     if (url.pathname === "/api/config") {
       return sendJson(res, publicConfig(env));
+    }
+
+    if (url.pathname === "/api/waitlist" && req.method === "POST") {
+      return createLocalWaitlistSignup(req, res);
+    }
+
+    if (url.pathname === "/api/auth/google" && req.method === "POST") {
+      return completeLocalGoogleWaitlist(req, res, env);
     }
 
     if (url.pathname === "/api/account" && req.method === "GET") {
@@ -134,6 +148,7 @@ const server = createServer(async (req, res) => {
         hasVoice: Boolean(env.DEEPGRAM_API_KEY),
         hasEsp32Compiler: Boolean(findArduinoCli(env)),
         hasAccounts: hasAccountConfig(env),
+        hasGoogleSignIn: Boolean(env.GOOGLE_CLIENT_ID),
         hostedMode: true,
         firmwareCompileSupported: Boolean(findArduinoCli(env)),
         supportedBoards: supportedBoardSummary(),
@@ -143,8 +158,21 @@ const server = createServer(async (req, res) => {
     if (env.NODE_ENV === "production") return sendJson(res, { error: "Not found" }, 404);
     return serveStatic(url, res);
   } catch (error) {
-    console.error(error);
-    return sendJson(res, { error: String(error.message || error) }, 500);
+    const status =
+      Number.isInteger(error?.statusCode) && error.statusCode >= 400 && error.statusCode < 600
+        ? error.statusCode
+        : 500;
+    if (status === 500) console.error(error);
+    return sendJson(
+      res,
+      {
+        error:
+          status === 500
+            ? "The Makeable server could not complete the request."
+            : String(error.message || error),
+      },
+      status,
+    );
   }
 });
 
@@ -298,11 +326,84 @@ function publicConfig(env) {
     cognitoDomain: env.COGNITO_DOMAIN || "",
     cognitoClientId: env.COGNITO_CLIENT_ID || "",
     cognitoRedirectUri: env.COGNITO_REDIRECT_URI || "",
+    googleClientId: env.GOOGLE_CLIENT_ID || "",
+    hasGoogleSignIn: Boolean(env.GOOGLE_CLIENT_ID),
     hostedMode: true,
     firmwareCompileSupported: Boolean(findArduinoCli(env)),
     supportedBoards: supportedBoardSummary(),
   };
   return config;
+}
+
+async function createLocalWaitlistSignup(req, res) {
+  const validation = createEmailWaitlistRecord(await readJsonBody(req, 16 * 1024));
+  if (!validation.ok) {
+    return sendJson(res, { error: validation.error }, validation.status);
+  }
+  await saveLocalWaitlistRecord(validation.value);
+  return sendJson(res, { ok: true });
+}
+
+async function completeLocalGoogleWaitlist(req, res, env) {
+  if (!env.GOOGLE_CLIENT_ID) {
+    return sendJson(res, { error: "Google sign-in is not configured." }, 503);
+  }
+  const body = await readJsonBody(req, 20 * 1024);
+  if (
+    typeof body.credential !== "string" ||
+    !body.credential ||
+    body.credential.length > 16_384 ||
+    typeof body.intent !== "string" ||
+    Object.keys(body).some((key) => !["credential", "intent"].includes(key))
+  ) {
+    return sendJson(res, { error: "Google sign-in request is invalid." }, 400);
+  }
+
+  let identity;
+  try {
+    const { OAuth2Client } = await import("google-auth-library");
+    const client = new OAuth2Client(env.GOOGLE_CLIENT_ID);
+    const ticket = await client.verifyIdToken({
+      idToken: body.credential,
+      audience: env.GOOGLE_CLIENT_ID,
+    });
+    identity = ticket.getPayload();
+  } catch {
+    return sendJson(res, { error: "Google could not verify this sign-in." }, 401);
+  }
+
+  const result = createGoogleWaitlistResult(identity, body.intent);
+  if (!result.ok) {
+    return sendJson(res, { error: result.error }, result.status);
+  }
+  await saveLocalWaitlistRecord(result.value.record);
+  return sendJson(res, { ok: true, user: result.value.user });
+}
+
+async function saveLocalWaitlistRecord(record) {
+  const directory = path.join(__dirname, "data");
+  const filePath = path.join(directory, "waitlist.jsonl");
+  await mkdir(directory, { recursive: true });
+  try {
+    const existing = await readFile(filePath, "utf8");
+    const duplicate = existing
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .some((line) => {
+        try {
+          return JSON.parse(line).email === record.email;
+        } catch {
+          return false;
+        }
+      });
+    if (duplicate) return;
+  } catch {
+    // The first signup creates the local data file.
+  }
+  await appendFile(filePath, `${JSON.stringify(record)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
 }
 
 function applyCors(req, res, env) {
@@ -585,9 +686,9 @@ function publicConfigScript(env) {
 
 async function serveStatic(url, res) {
   const { pathname, search } = url;
-  if (pathname === "/" || pathname === "/index.html") {
+  if (pathname === "/index.html") {
     res.writeHead(302, {
-      Location: `/pilot${search}`,
+      Location: `/${search}`,
       "Cache-Control": "no-store",
     });
     res.end();
@@ -604,7 +705,11 @@ async function serveStatic(url, res) {
   }
 
   const safePath =
-    pathname === "/pilot" ? "/pilot/index.html" : decodeURIComponent(pathname);
+    pathname === "/"
+      ? "/index.html"
+      : pathname === "/pilot"
+        ? "/pilot/index.html"
+        : decodeURIComponent(pathname);
   const filePath = path.normalize(path.join(__dirname, safePath));
   const relativePath = path.relative(__dirname, filePath);
 
@@ -998,7 +1103,14 @@ async function readJsonBody(req, maxBytes = MAX_REQUEST_BYTES) {
     chunks.push(chunk);
   }
   const raw = Buffer.concat(chunks).toString("utf8");
-  return raw ? JSON.parse(raw) : {};
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const error = new Error("Request body must be valid JSON.");
+    error.statusCode = 400;
+    throw error;
+  }
 }
 
 function sendJson(res, data, status = 200) {

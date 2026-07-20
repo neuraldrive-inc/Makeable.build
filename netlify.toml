@@ -1,7 +1,7 @@
 [build]
   publish = "dist"
   functions = "netlify/functions"
-  command = "node --check app.js && node --check server.mjs && node --check netlify/functions/api.mjs && node scripts/build-static.mjs"
+  command = "node --check app.js && node --check landing.js && node --check lib/acquisition.mjs && node --check server.mjs && node --check netlify/functions/api.mjs && node scripts/build-static.mjs"
 
 [functions]
   node_bundler = "esbuild"
@@ -10,12 +10,6 @@
   from = "/pilot"
   to = "/pilot-app.html"
   status = 200
-  force = true
-
-[[redirects]]
-  from = "/"
-  to = "/pilot"
-  status = 302
   force = true
 
 [[headers]]

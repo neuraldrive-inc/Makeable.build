@@ -5,13 +5,15 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "build": "node --check app.js && node --check server.mjs && node --check netlify/functions/api.mjs && node --test tests/board-profiles.test.mjs",
-    "test": "node --test tests/*.test.mjs",
+    "build": "node --check app.js && node --check landing.js && node --check lib/acquisition.mjs && node --check server.mjs && node --check netlify/functions/api.mjs && node --test tests/board-profiles.test.mjs",
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
     "test:compiler": "MAKEABLE_TEST_ARDUINO_CLI=$PWD/.makeable/toolchain/bin/arduino-cli node --test tests/compiler.integration.test.mjs",
     "toolchain:install": "bash scripts/install-arduino-toolchain.sh"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "3.1090.0",
+    "@netlify/blobs": "10.1.0",
+    "google-auth-library": "10.3.0",
     "jose": "6.2.3",
     "ws": "8.21.1"
   }

@@ -1,3 +1,11 @@
+import { createHash } from "node:crypto";
+import { getStore } from "@netlify/blobs";
+import { OAuth2Client } from "google-auth-library";
+import {
+  createEmailWaitlistRecord,
+  createGoogleWaitlistResult,
+} from "../../lib/acquisition.mjs";
+
 export default async function handler(req) {
   try {
     const url = new URL(req.url);
@@ -11,14 +19,34 @@ export default async function handler(req) {
       return jsonResponse(await resolvedPublicConfig(env));
     }
 
+    if (url.pathname === "/api/waitlist" && req.method === "POST") {
+      return await createWaitlistSignup(req, env);
+    }
+
+    if (url.pathname === "/api/auth/google" && req.method === "POST") {
+      return await completeGoogleWaitlist(req, env);
+    }
+
     if (url.pathname.startsWith("/api/")) {
-      return proxyMakeableApi(req, env);
+      return await proxyMakeableApi(req, env);
     }
 
     return jsonResponse({ error: "Not found" }, 404);
   } catch (error) {
-    console.error(error);
-    return jsonResponse({ error: String(error.message || error) }, 500);
+    const status =
+      Number.isInteger(error?.status) && error.status >= 400 && error.status < 600
+        ? error.status
+        : 500;
+    if (status === 500) console.error(error);
+    return jsonResponse(
+      {
+        error:
+          status === 500
+            ? "The Makeable server could not complete the request."
+            : String(error.message || error),
+      },
+      status,
+    );
   }
 }
 
@@ -43,6 +71,9 @@ function getEnv() {
     "COGNITO_DOMAIN",
     "COGNITO_CLIENT_ID",
     "COGNITO_REDIRECT_URI",
+    "GOOGLE_CLIENT_ID",
+    "WAITLIST_WEBHOOK_URL",
+    "WAITLIST_WEBHOOK_SECRET",
   ];
   return Object.fromEntries(keys.map((key) => [key, envValue(key)]));
 }
@@ -66,6 +97,8 @@ function publicConfig(env) {
     cognitoDomain: env.COGNITO_DOMAIN || "",
     cognitoClientId: env.COGNITO_CLIENT_ID || "",
     cognitoRedirectUri: env.COGNITO_REDIRECT_URI || "",
+    googleClientId: env.GOOGLE_CLIENT_ID || "",
+    hasGoogleSignIn: Boolean(env.GOOGLE_CLIENT_ID),
     hasEsp32Compiler: false,
     hostedMode: true,
     firmwareCompileSupported: Boolean(env.MAKEABLE_API_BASE_URL),
@@ -86,10 +119,153 @@ async function resolvedPublicConfig(env) {
       ...backend,
       apiBaseUrl: local.apiBaseUrl,
       cognitoRedirectUri: local.cognitoRedirectUri || backend.cognitoRedirectUri || "",
+      googleClientId: local.googleClientId,
+      hasGoogleSignIn: local.hasGoogleSignIn,
     };
   } catch {
     return local;
   }
+}
+
+async function createWaitlistSignup(req, env) {
+  const validation = createEmailWaitlistRecord(
+    await readLimitedJsonRequest(req, 16 * 1024),
+  );
+  if (!validation.ok) {
+    return jsonResponse({ error: validation.error }, validation.status, {
+      "Cache-Control": "no-store",
+    });
+  }
+  const delivery = await deliverWaitlistRecord(validation.value, env);
+  if (!delivery.ok) {
+    return jsonResponse({ error: delivery.error }, delivery.status, {
+      "Cache-Control": "no-store",
+    });
+  }
+  return jsonResponse({ ok: true }, 200, { "Cache-Control": "no-store" });
+}
+
+async function completeGoogleWaitlist(req, env) {
+  if (!env.GOOGLE_CLIENT_ID) {
+    return jsonResponse({ error: "Google sign-in is not configured." }, 503, {
+      "Cache-Control": "no-store",
+    });
+  }
+  const body = await readLimitedJsonRequest(req, 20 * 1024);
+  if (
+    typeof body.credential !== "string" ||
+    !body.credential ||
+    body.credential.length > 16_384 ||
+    typeof body.intent !== "string" ||
+    Object.keys(body).some((key) => !["credential", "intent"].includes(key))
+  ) {
+    return jsonResponse({ error: "Google sign-in request is invalid." }, 400, {
+      "Cache-Control": "no-store",
+    });
+  }
+
+  let identity;
+  try {
+    const client = new OAuth2Client(env.GOOGLE_CLIENT_ID);
+    const ticket = await client.verifyIdToken({
+      idToken: body.credential,
+      audience: env.GOOGLE_CLIENT_ID,
+    });
+    identity = ticket.getPayload();
+  } catch {
+    return jsonResponse({ error: "Google could not verify this sign-in." }, 401, {
+      "Cache-Control": "no-store",
+    });
+  }
+
+  const result = createGoogleWaitlistResult(identity, body.intent);
+  if (!result.ok) {
+    return jsonResponse({ error: result.error }, result.status, {
+      "Cache-Control": "no-store",
+    });
+  }
+  const delivery = await deliverWaitlistRecord(result.value.record, env);
+  if (!delivery.ok) {
+    return jsonResponse({ error: delivery.error }, delivery.status, {
+      "Cache-Control": "no-store",
+    });
+  }
+  return jsonResponse({ ok: true, user: result.value.user }, 200, {
+    "Cache-Control": "no-store",
+  });
+}
+
+async function deliverWaitlistRecord(record, env) {
+  if (env.WAITLIST_WEBHOOK_URL) {
+    return deliverWaitlistWebhook(record, env);
+  }
+  try {
+    const key = `signup-${createHash("sha256").update(record.email).digest("hex")}`;
+    await getStore("waitlist").setJSON(key, record);
+    return { ok: true };
+  } catch (error) {
+    console.error("Waitlist storage failed", error);
+    return {
+      ok: false,
+      status: 502,
+      error: "Waitlist signup could not be saved. Please try again.",
+    };
+  }
+}
+
+async function deliverWaitlistWebhook(record, env) {
+  let url;
+  try {
+    url = new URL(env.WAITLIST_WEBHOOK_URL);
+    if (url.protocol !== "https:") throw new Error("HTTPS required");
+  } catch {
+    return {
+      ok: false,
+      status: 503,
+      error: "Waitlist storage is not configured for this deployment.",
+    };
+  }
+  try {
+    const headers = { "Content-Type": "application/json" };
+    if (env.WAITLIST_WEBHOOK_SECRET) {
+      headers.Authorization = `Bearer ${env.WAITLIST_WEBHOOK_SECRET}`;
+    }
+    const upstream = await fetch(url.href, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(record),
+    });
+    if (!upstream.ok) throw new Error("Waitlist upstream rejected the record");
+    return { ok: true };
+  } catch {
+    return {
+      ok: false,
+      status: 502,
+      error: "Waitlist signup could not be saved. Please try again.",
+    };
+  }
+}
+
+async function readLimitedJsonRequest(req, maxBytes) {
+  const advertisedLength = Number(req.headers.get("content-length"));
+  if (Number.isFinite(advertisedLength) && advertisedLength > maxBytes) {
+    throw requestError("Request body is too large.", 413);
+  }
+  const raw = await req.text();
+  if (new TextEncoder().encode(raw).byteLength > maxBytes) {
+    throw requestError("Request body is too large.", 413);
+  }
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    throw requestError("Request body must be valid JSON.", 400);
+  }
+}
+
+function requestError(message, status) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
 }
 
 async function proxyMakeableApi(req, env) {
@@ -346,15 +522,21 @@ async function pipeJson(upstream) {
   });
 }
 
-function jsonResponse(data, status = 200) {
-  return textResponse(JSON.stringify(data), "application/json; charset=utf-8", status);
+function jsonResponse(data, status = 200, headers = {}) {
+  return textResponse(
+    JSON.stringify(data),
+    "application/json; charset=utf-8",
+    status,
+    headers,
+  );
 }
 
-function textResponse(text, contentType, status = 200) {
+function textResponse(text, contentType, status = 200, headers = {}) {
   return new Response(text, {
     status,
     headers: {
       "Content-Type": contentType,
+      ...headers,
     },
   });
 }

@@ -6,11 +6,12 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-test("the current production app is packaged as a self-contained pilot", async () => {
+test("the current production app stays packaged as a self-contained pilot", async () => {
   await import(`../scripts/build-static.mjs?pilot-test=${Date.now()}`);
 
   const pilotHtml = await readFile(path.join(root, "dist", "pilot-app.html"), "utf8");
   assert.match(pilotHtml, /<base href="\/pilot\/" \/>/);
+  assert.match(pilotHtml, /<meta name="robots" content="noindex, nofollow" \/>/);
   assert.match(pilotHtml, /<script src="\/config\.local\.js"><\/script>/);
   assert.doesNotMatch(pilotHtml, /src="\.\/config\.local\.js"/);
 
@@ -23,19 +24,31 @@ test("the current production app is packaged as a self-contained pilot", async (
     await access(path.join(root, "dist", relativePath));
   }
 
-  await assert.rejects(access(path.join(root, "dist", "index.html")));
+  const landingHtml = await readFile(path.join(root, "dist", "index.html"), "utf8");
+  assert.match(landingHtml, /Turn ideas into working physical products in hours\./);
+  assert.match(landingHtml, /<link rel="canonical" href="https:\/\/makeable\.build\/" \/>/);
+  assert.match(landingHtml, /<script type="module" src="\/landing\.js"><\/script>/);
+  for (const relativePath of [
+    "landing.js",
+    "styles/landing-v2.css",
+    "assets/fonts/fredoka/fredoka.woff2",
+    "assets/icons/google-g.svg",
+    "assets/landing/desk-parts-v2.png",
+    "robots.txt",
+    "sitemap.xml",
+  ]) {
+    await access(path.join(root, "dist", relativePath));
+  }
+
   await assert.rejects(access(path.join(root, "dist", "app.js")));
   await assert.rejects(access(path.join(root, "dist", "styles.css")));
 });
 
-test("Netlify keeps the root move temporary and rewrites the pilot entrypoint", async () => {
+test("Netlify serves the landing at root and rewrites only the pilot entrypoint", async () => {
   const config = await readFile(path.join(root, "netlify.toml"), "utf8");
   assert.match(
     config,
     /from = "\/pilot"[\s\S]*?to = "\/pilot-app\.html"[\s\S]*?status = 200[\s\S]*?force = true/,
   );
-  assert.match(
-    config,
-    /from = "\/"[\s\S]*?to = "\/pilot"[\s\S]*?status = 302[\s\S]*?force = true/,
-  );
+  assert.doesNotMatch(config, /from = "\/"/);
 });
