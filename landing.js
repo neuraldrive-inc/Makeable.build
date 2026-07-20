@@ -3,7 +3,7 @@ const status = document.querySelector("[data-signup-status]");
 const googleSlot = document.querySelector("[data-google-slot]");
 const googleFallback = document.querySelector("[data-google-fallback]");
 let googleInitialized = false;
-let googlePromptPending = false;
+let googleButtonRendered = false;
 
 setupWorkbenchComparison();
 setupBuildStory();
@@ -23,14 +23,8 @@ for (const link of document.querySelectorAll('a[href="#join"]')) {
 
 googleFallback?.addEventListener("click", () => {
   if (config.googleClientId) {
-    setStatus("Opening Google sign-in…", "info");
-    googlePromptPending = true;
-    if (window.google?.accounts?.id) {
-      initializeGoogleIdentity();
-      openGooglePrompt();
-    } else {
-      loadGoogleIdentity();
-    }
+    setStatus("Google sign-in is still loading. Please try again in a moment.", "info");
+    loadGoogleIdentity();
     return;
   }
   const isLocal =
@@ -61,10 +55,9 @@ function loadGoogleIdentity() {
   script.dataset.googleIdentity = "true";
   script.addEventListener("load", () => {
     initializeGoogleIdentity();
-    if (googlePromptPending) openGooglePrompt();
   });
   script.addEventListener("error", () => {
-    googlePromptPending = false;
+    script.remove();
     setStatus("Google sign-in could not load. Check your connection and try again.", "error");
   });
   document.head.append(script);
@@ -72,36 +65,54 @@ function loadGoogleIdentity() {
 
 function initializeGoogleIdentity() {
   if (
-    googleInitialized ||
     !window.google?.accounts?.id ||
     !googleSlot ||
     !config.googleClientId
   ) {
     return;
   }
-  window.google.accounts.id.initialize({
-    client_id: config.googleClientId,
-    callback: handleGoogleCredential,
-    auto_select: false,
-    cancel_on_tap_outside: true,
-    use_fedcm_for_prompt: true,
-  });
-  googleInitialized = true;
+  if (!googleInitialized) {
+    window.google.accounts.id.initialize({
+      client_id: config.googleClientId,
+      callback: handleGoogleCredential,
+      auto_select: false,
+      ux_mode: "popup",
+    });
+    googleInitialized = true;
+  }
+  renderGoogleButton();
 }
 
-function openGooglePrompt() {
-  if (!googleInitialized || !window.google?.accounts?.id?.prompt) return;
-  googlePromptPending = false;
-  window.google.accounts.id.prompt((notification) => {
-    const unavailable =
-      notification?.isNotDisplayed?.() || notification?.isSkippedMoment?.();
-    if (unavailable) {
-      setStatus(
-        "Google sign-in could not open. Check your browser settings and try again.",
-        "error",
-      );
-    }
-  });
+function renderGoogleButton() {
+  if (
+    googleButtonRendered ||
+    !googleInitialized ||
+    !window.google?.accounts?.id?.renderButton ||
+    !googleSlot
+  ) {
+    return;
+  }
+
+  const buttonHost = document.createElement("div");
+  const availableWidth = Math.floor(googleSlot.getBoundingClientRect().width - 16);
+  const width = Math.min(400, Math.max(220, availableWidth));
+
+  try {
+    googleSlot.replaceChildren(buttonHost);
+    window.google.accounts.id.renderButton(buttonHost, {
+      type: "standard",
+      theme: "outline",
+      size: "large",
+      text: "continue_with",
+      shape: "rectangular",
+      logo_alignment: "left",
+      width,
+    });
+    googleButtonRendered = true;
+  } catch {
+    googleSlot.replaceChildren(googleFallback);
+    setStatus("Google sign-in could not load. Check your connection and try again.", "error");
+  }
 }
 
 async function handleGoogleCredential(response) {

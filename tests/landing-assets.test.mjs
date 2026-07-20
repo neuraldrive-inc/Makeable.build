@@ -33,3 +33,9 @@ test("the landing bundle does not expose the pilot or builder source entrypoints
   await assert.rejects(access(path.join(root, "dist", "app.js")));
   await assert.rejects(access(path.join(root, "dist", "styles.css")));
 });
+
+test("Google signup uses the SDK-rendered button flow", async () => {
+  const landingScript = await readFile(path.join(root, "landing.js"), "utf8");
+  assert.match(landingScript, /accounts\.id\.renderButton\(/);
+  assert.doesNotMatch(landingScript, /accounts\.id\.prompt\(/);
+});
