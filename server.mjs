@@ -141,7 +141,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (env.NODE_ENV === "production") return sendJson(res, { error: "Not found" }, 404);
-    return serveStatic(url.pathname, res);
+    return serveStatic(url, res);
   } catch (error) {
     console.error(error);
     return sendJson(res, { error: String(error.message || error) }, 500);
@@ -583,8 +583,28 @@ function publicConfigScript(env) {
   return `window.MAKEABLE_CONFIG = ${JSON.stringify(config)};`;
 }
 
-async function serveStatic(pathname, res) {
-  const safePath = pathname === "/" ? "/index.html" : decodeURIComponent(pathname);
+async function serveStatic(url, res) {
+  const { pathname, search } = url;
+  if (pathname === "/" || pathname === "/index.html") {
+    res.writeHead(302, {
+      Location: `/pilot${search}`,
+      "Cache-Control": "no-store",
+    });
+    res.end();
+    return;
+  }
+
+  if (pathname === "/pilot/") {
+    res.writeHead(302, {
+      Location: `/pilot${search}`,
+      "Cache-Control": "no-store",
+    });
+    res.end();
+    return;
+  }
+
+  const safePath =
+    pathname === "/pilot" ? "/pilot/index.html" : decodeURIComponent(pathname);
   const filePath = path.normalize(path.join(__dirname, safePath));
   const relativePath = path.relative(__dirname, filePath);
 

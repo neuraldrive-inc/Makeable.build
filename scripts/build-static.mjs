@@ -6,13 +6,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const output = path.join(root, "dist");
 
 await rm(output, { recursive: true, force: true });
-await mkdir(path.join(output, "images"), { recursive: true });
-
-for (const file of ["index.html", "app.js", "styles.css"]) {
-  await cp(path.join(root, file), path.join(output, file));
-}
-
-await cp(path.join(root, "lib"), path.join(output, "lib"), { recursive: true });
-await cp(path.join(root, "images", "makeable"), path.join(output, "images", "makeable"), {
-  recursive: true,
-});
+await mkdir(output, { recursive: true });
+await cp(path.join(root, "pilot"), path.join(output, "pilot"), { recursive: true });
+await cp(path.join(root, "pilot", "index.html"), path.join(output, "pilot-app.html"));
+await rm(path.join(output, "pilot", "index.html"));

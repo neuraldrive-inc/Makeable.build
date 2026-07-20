@@ -6,6 +6,18 @@
 [functions]
   node_bundler = "esbuild"
 
+[[redirects]]
+  from = "/pilot"
+  to = "/pilot-app.html"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/"
+  to = "/pilot"
+  status = 302
+  force = true
+
 [[headers]]
   for = "/*"
   [headers.values]

@@ -8,50 +8,11 @@ export default async function handler(req) {
     }
 
     if (url.pathname === "/api/config") {
-      return jsonResponse(publicConfig(env));
+      return jsonResponse(await resolvedPublicConfig(env));
     }
 
-    if (url.pathname === "/api/openai/responses" && req.method === "POST") {
-      return proxyOpenAI(req, env);
-    }
-
-    if (url.pathname === "/api/openai/background" && req.method === "POST") {
-      return createOpenAIBackgroundResponse(req, env);
-    }
-
-    const responseMatch = url.pathname.match(/^\/api\/openai\/responses\/([^/]+)$/);
-    if (responseMatch && req.method === "GET") {
-      return retrieveOpenAIResponse(responseMatch[1], env);
-    }
-
-    if (url.pathname === "/api/esp32/status") {
+    if (url.pathname.startsWith("/api/")) {
       return proxyMakeableApi(req, env);
-    }
-
-    if (url.pathname === "/api/firmware/compile" && req.method === "POST") {
-      return proxyMakeableApi(req, env);
-    }
-
-    if (url.pathname === "/api/deepgram/token" && req.method === "POST") {
-      return proxyMakeableApi(req, env);
-    }
-
-    if (url.pathname === "/api/github/repos" && req.method === "POST") {
-      return createGitHubRepo(req, env);
-    }
-
-    if (url.pathname === "/api/github/upload-file" && req.method === "POST") {
-      return uploadGitHubFile(req, env);
-    }
-
-    if (url.pathname === "/api/health") {
-      return jsonResponse({
-        ok: true,
-        hostedMode: true,
-        hasOpenAIKey: Boolean(env.OPENAI_API_KEY),
-        hasGithubToken: Boolean(env.GITHUB_TOKEN),
-        firmwareCompileSupported: Boolean(env.MAKEABLE_API_BASE_URL),
-      });
     }
 
     return jsonResponse({ error: "Not found" }, 404);
@@ -111,13 +72,40 @@ function publicConfig(env) {
   };
 }
 
+async function resolvedPublicConfig(env) {
+  const local = publicConfig(env);
+  if (!local.apiBaseUrl) return local;
+  try {
+    const response = await fetch(`${local.apiBaseUrl}/api/config`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return local;
+    const backend = await response.json();
+    return {
+      ...local,
+      ...backend,
+      apiBaseUrl: local.apiBaseUrl,
+      cognitoRedirectUri: local.cognitoRedirectUri || backend.cognitoRedirectUri || "",
+    };
+  } catch {
+    return local;
+  }
+}
+
 async function proxyMakeableApi(req, env) {
   const base = String(env.MAKEABLE_API_BASE_URL || "").replace(/\/$/, "");
   if (!base) return jsonResponse({ error: "The hosted firmware service is not configured." }, 503);
   const inputUrl = new URL(req.url);
+  const headers = new Headers({
+    "Content-Type": req.headers.get("content-type") || "application/json",
+  });
+  const authorization = req.headers.get("authorization");
+  const generationId = req.headers.get("x-makeable-generation-id");
+  if (authorization) headers.set("Authorization", authorization);
+  if (generationId) headers.set("X-Makeable-Generation-Id", generationId);
   const upstream = await fetch(`${base}${inputUrl.pathname}${inputUrl.search}`, {
     method: req.method,
-    headers: { "Content-Type": req.headers.get("content-type") || "application/json" },
+    headers,
     body: req.method === "GET" || req.method === "HEAD" ? undefined : await req.text(),
   });
   return new Response(await upstream.arrayBuffer(), {
