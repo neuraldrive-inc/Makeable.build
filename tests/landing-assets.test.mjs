@@ -36,6 +36,12 @@ test("the landing bundle does not expose the pilot or builder source entrypoints
 
 test("Google signup uses the SDK-rendered button flow", async () => {
   const landingScript = await readFile(path.join(root, "landing.js"), "utf8");
+  const landingHtml = await readFile(path.join(root, "index.html"), "utf8");
   assert.match(landingScript, /accounts\.id\.renderButton\(/);
   assert.doesNotMatch(landingScript, /accounts\.id\.prompt\(/);
+  assert.match(landingScript, /GOOGLE_SUBMISSION_ATTEMPTS = 3/);
+  assert.match(landingScript, /googleSubmissionInFlight/);
+  assert.match(landingScript, /new AbortController\(\)/);
+  assert.match(landingHtml, /verified email to Makeable’s early-access/);
+  assert.match(landingHtml, /How we use your data/);
 });

@@ -751,6 +751,22 @@ figure {
   text-align: center;
 }
 
+.signup-data-use {
+  max-width: 430px;
+  margin: 27px auto 0;
+  color: var(--bench-muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.signup-data-use a {
+  color: var(--bench-ink);
+  font-weight: 800;
+  text-underline-offset: 3px;
+}
+
 .hand-underline--note {
   bottom: -15px;
   left: 46%;
@@ -1681,6 +1697,12 @@ figure {
     font-size: 13px;
   }
 
+  .signup-data-use {
+    max-width: 360px;
+    margin-top: 19px;
+    font-size: 10px;
+  }
+
   .story-scene--test .story-visual {
     padding: 9px;
     gap: 8px;
@@ -1987,6 +2009,12 @@ figure {
     min-height: 84px;
   }
 
+  .hero-signup.is-mobile-sticky .signup-data-use {
+    margin: 4px 8px 2px;
+    font-size: 11px;
+    line-height: 1.25;
+  }
+
   .hero-signup.is-mobile-sticky .signup-status:not(:empty) {
     right: 0;
     bottom: calc(100% + 10px);
@@ -2247,6 +2275,12 @@ figure {
     padding: 4px;
     border: 0;
     box-shadow: none;
+  }
+
+  .hero-signup.is-mobile-sticky .signup-data-use {
+    margin: 3px 7px 1px;
+    font-size: 10px;
+    line-height: 1.2;
   }
 
   .hero-signup.is-mobile-sticky .signup-status:not(:empty) {

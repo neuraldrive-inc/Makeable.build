@@ -1,15 +1,18 @@
-import { createHash } from "node:crypto";
 import { getStore } from "@netlify/blobs";
 import { OAuth2Client } from "google-auth-library";
+import { createGoogleWaitlistResult } from "../../lib/acquisition.mjs";
 import {
-  createEmailWaitlistRecord,
-  createGoogleWaitlistResult,
-} from "../../lib/acquisition.mjs";
+  persistVerifiedWaitlistRecord,
+  waitlistStoreNameForFunctionContext,
+} from "../../lib/waitlist-storage.mjs";
 
-export default async function handler(req) {
+const googleVerifiers = new Map();
+
+export default async function handler(req, context = {}) {
   try {
     const url = new URL(req.url);
     const env = getEnv();
+    const localApiPath = normalizedLocalApiPath(url.pathname);
 
     if (url.pathname === "/config.local.js") {
       return textResponse(publicConfigScript(env), "text/javascript; charset=utf-8");
@@ -19,12 +22,20 @@ export default async function handler(req) {
       return jsonResponse(await resolvedPublicConfig(env));
     }
 
-    if (url.pathname === "/api/waitlist" && req.method === "POST") {
-      return await createWaitlistSignup(req, env);
+    if (localApiPath === "/api/waitlist") {
+      return jsonResponse({ error: "Email-only waitlist signup is disabled." }, 410, {
+        "Cache-Control": "no-store",
+      });
     }
 
-    if (url.pathname === "/api/auth/google" && req.method === "POST") {
-      return await completeGoogleWaitlist(req, env);
+    if (localApiPath === "/api/auth/google") {
+      if (req.method !== "POST") {
+        return jsonResponse({ error: "Method not allowed" }, 405, {
+          Allow: "POST",
+          "Cache-Control": "no-store",
+        });
+      }
+      return await completeGoogleWaitlist(req, env, context);
     }
 
     if (url.pathname.startsWith("/api/")) {
@@ -82,6 +93,12 @@ function envValue(key) {
   return globalThis.Netlify?.env?.get(key) || process.env[key] || "";
 }
 
+function normalizedLocalApiPath(pathname) {
+  let normalized = pathname.replace(/\/+$/, "");
+  if (normalized.endsWith(".html")) normalized = normalized.slice(0, -5);
+  return normalized;
+}
+
 function publicConfig(env) {
   return {
     apiBaseUrl: String(env.MAKEABLE_API_BASE_URL || "").replace(/\/$/, ""),
@@ -127,25 +144,7 @@ async function resolvedPublicConfig(env) {
   }
 }
 
-async function createWaitlistSignup(req, env) {
-  const validation = createEmailWaitlistRecord(
-    await readLimitedJsonRequest(req, 16 * 1024),
-  );
-  if (!validation.ok) {
-    return jsonResponse({ error: validation.error }, validation.status, {
-      "Cache-Control": "no-store",
-    });
-  }
-  const delivery = await deliverWaitlistRecord(validation.value, env);
-  if (!delivery.ok) {
-    return jsonResponse({ error: delivery.error }, delivery.status, {
-      "Cache-Control": "no-store",
-    });
-  }
-  return jsonResponse({ ok: true }, 200, { "Cache-Control": "no-store" });
-}
-
-async function completeGoogleWaitlist(req, env) {
+async function completeGoogleWaitlist(req, env, context) {
   if (!env.GOOGLE_CLIENT_ID) {
     return jsonResponse({ error: "Google sign-in is not configured." }, 503, {
       "Cache-Control": "no-store",
@@ -153,6 +152,9 @@ async function completeGoogleWaitlist(req, env) {
   }
   const body = await readLimitedJsonRequest(req, 20 * 1024);
   if (
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body) ||
     typeof body.credential !== "string" ||
     !body.credential ||
     body.credential.length > 16_384 ||
@@ -166,7 +168,7 @@ async function completeGoogleWaitlist(req, env) {
 
   let identity;
   try {
-    const client = new OAuth2Client(env.GOOGLE_CLIENT_ID);
+    const client = googleVerifier(env.GOOGLE_CLIENT_ID);
     const ticket = await client.verifyIdToken({
       idToken: body.credential,
       audience: env.GOOGLE_CLIENT_ID,
@@ -184,25 +186,37 @@ async function completeGoogleWaitlist(req, env) {
       "Cache-Control": "no-store",
     });
   }
-  const delivery = await deliverWaitlistRecord(result.value.record, env);
+  const delivery = await deliverWaitlistRecord(result.value.record, env, context);
   if (!delivery.ok) {
     return jsonResponse({ error: delivery.error }, delivery.status, {
       "Cache-Control": "no-store",
     });
   }
-  return jsonResponse({ ok: true, user: result.value.user }, 200, {
-    "Cache-Control": "no-store",
-  });
+  return jsonResponse(
+    { ok: true, created: delivery.created, user: result.value.user },
+    200,
+    {
+      "Cache-Control": "no-store",
+    },
+  );
 }
 
-async function deliverWaitlistRecord(record, env) {
-  if (env.WAITLIST_WEBHOOK_URL) {
-    return deliverWaitlistWebhook(record, env);
-  }
+async function deliverWaitlistRecord(record, env, context) {
   try {
-    const key = `signup-${createHash("sha256").update(record.email).digest("hex")}`;
-    await getStore("waitlist").setJSON(key, record);
-    return { ok: true };
+    const store = getStore({
+      name: waitlistStoreNameForFunctionContext(context),
+      consistency: "strong",
+    });
+    const result = await persistVerifiedWaitlistRecord(record, {
+      store,
+      webhookUrl: env.WAITLIST_WEBHOOK_URL,
+      webhookSecret: env.WAITLIST_WEBHOOK_SECRET,
+      waitUntil:
+        typeof context?.waitUntil === "function"
+          ? context.waitUntil.bind(context)
+          : undefined,
+    });
+    return { ok: true, created: result.created };
   } catch (error) {
     console.error("Waitlist storage failed", error);
     return {
@@ -213,37 +227,13 @@ async function deliverWaitlistRecord(record, env) {
   }
 }
 
-async function deliverWaitlistWebhook(record, env) {
-  let url;
-  try {
-    url = new URL(env.WAITLIST_WEBHOOK_URL);
-    if (url.protocol !== "https:") throw new Error("HTTPS required");
-  } catch {
-    return {
-      ok: false,
-      status: 503,
-      error: "Waitlist storage is not configured for this deployment.",
-    };
+function googleVerifier(clientId) {
+  let client = googleVerifiers.get(clientId);
+  if (!client) {
+    client = new OAuth2Client(clientId);
+    googleVerifiers.set(clientId, client);
   }
-  try {
-    const headers = { "Content-Type": "application/json" };
-    if (env.WAITLIST_WEBHOOK_SECRET) {
-      headers.Authorization = `Bearer ${env.WAITLIST_WEBHOOK_SECRET}`;
-    }
-    const upstream = await fetch(url.href, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(record),
-    });
-    if (!upstream.ok) throw new Error("Waitlist upstream rejected the record");
-    return { ok: true };
-  } catch {
-    return {
-      ok: false,
-      status: 502,
-      error: "Waitlist signup could not be saved. Please try again.",
-    };
-  }
+  return client;
 }
 
 async function readLimitedJsonRequest(req, maxBytes) {

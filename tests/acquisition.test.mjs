@@ -2,26 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  createEmailWaitlistRecord,
   createGoogleWaitlistResult,
 } from "../lib/acquisition.mjs";
-
-test("email waitlist records are normalized and reject extra fields", () => {
-  const now = new Date("2026-07-20T12:00:00.000Z");
-  assert.deepEqual(
-    createEmailWaitlistRecord({ email: "  Maker@Example.COM " }, { now }),
-    {
-      ok: true,
-      value: {
-        email: "maker@example.com",
-        source: "email",
-        createdAt: now.toISOString(),
-      },
-    },
-  );
-  assert.equal(createEmailWaitlistRecord({ email: "bad", role: "admin" }).status, 400);
-  assert.equal(createEmailWaitlistRecord({ email: "not-an-email" }).status, 400);
-});
 
 test("Google waitlist records require a verified identity and waitlist intent", () => {
   const now = new Date("2026-07-20T12:00:00.000Z");
@@ -40,8 +22,9 @@ test("Google waitlist records require a verified identity and waitlist intent", 
     name: "Maker",
     picture: "https://example.com/avatar.png",
   });
-  assert.equal(result.value.record.googleSubject, "google-subject");
   assert.equal(result.value.record.createdAt, now.toISOString());
+  assert.equal(Object.hasOwn(result.value.record, "googleSubject"), false);
+  assert.equal(Object.hasOwn(result.value.record, "picture"), false);
   assert.equal(createGoogleWaitlistResult(identity, "pilot").status, 400);
   assert.equal(
     createGoogleWaitlistResult({ ...identity, email_verified: false }, "waitlist").status,

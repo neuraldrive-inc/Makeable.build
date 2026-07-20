@@ -37,8 +37,9 @@
           <div class="legal-body">
             <p class="legal-updated">Last updated: July 20, 2026</p>
             <p>
-              Google sign-in supplies your name, email address, profile image URL,
-              email verification status, and a stable Google account identifier.
+              Google sign-in supplies your name, email address, and email verification
+              status. Google also supplies a stable account identifier and may supply a
+              profile image URL, but Makeable does not store either in new waitlist records.
             </p>
 
             <h2>How we use it</h2>
@@ -48,7 +49,8 @@
               hosted deployment uses Netlify Blobs. If we connect another waitlist
               service, the record may be securely delivered to that service for the
               same purpose. If you join through Google sign-in, we may also keep your
-              name and profile image to make the experience friendlier in the product.
+              name to personalize the invitation. We deduplicate by normalized email
+              address and never store your Google credential token.
             </p>
 
             <h2>What we do not do</h2>

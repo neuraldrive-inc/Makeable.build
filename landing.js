@@ -4,6 +4,10 @@ const googleSlot = document.querySelector("[data-google-slot]");
 const googleFallback = document.querySelector("[data-google-fallback]");
 let googleInitialized = false;
 let googleButtonRendered = false;
+let googleSubmissionInFlight = false;
+
+const GOOGLE_SUBMISSION_ATTEMPTS = 3;
+const GOOGLE_SUBMISSION_TIMEOUT_MS = 10_000;
 
 setupWorkbenchComparison();
 setupBuildStory();
@@ -116,22 +120,17 @@ function renderGoogleButton() {
 }
 
 async function handleGoogleCredential(response) {
+  if (googleSubmissionInFlight) return;
   const credential = response?.credential;
   if (!credential) {
     setStatus("Google sign-in did not return an identity. Please try again.", "error");
     return;
   }
+  googleSubmissionInFlight = true;
   setStatus("Adding you to the waitlist…", "info");
 
   try {
-    const apiResponse = await fetch("/api/auth/google", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        credential,
-        intent: "waitlist",
-      }),
-    });
+    const apiResponse = await submitGoogleCredential(credential);
     const payload = await apiResponse.json().catch(() => ({}));
     if (!apiResponse.ok) {
       throw new Error(payload.error || "Google sign-in could not be completed.");
@@ -139,10 +138,55 @@ async function handleGoogleCredential(response) {
     showWaitlistSuccess();
   } catch (error) {
     setStatus(
-      error.message || "Google sign-in could not be completed. Please try again.",
+      error?.message || "Google sign-in could not be completed. Please try again.",
       "error",
     );
+  } finally {
+    googleSubmissionInFlight = false;
   }
+}
+
+async function submitGoogleCredential(credential) {
+  let lastError;
+  for (let attempt = 0; attempt < GOOGLE_SUBMISSION_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(
+      () => controller.abort(),
+      GOOGLE_SUBMISSION_TIMEOUT_MS,
+    );
+    try {
+      const response = await fetch("/api/auth/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credential, intent: "waitlist" }),
+        signal: controller.signal,
+      });
+      if (!isRetryableStatus(response.status) || attempt === GOOGLE_SUBMISSION_ATTEMPTS - 1) {
+        return response;
+      }
+      lastError = new Error("Google sign-in could not be completed. Please try again.");
+    } catch (error) {
+      lastError = error;
+      if (attempt === GOOGLE_SUBMISSION_ATTEMPTS - 1) break;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+    setStatus("Connection interrupted—retrying your signup…", "info");
+    await wait(300 * 2 ** attempt);
+  }
+  throw new Error(
+    lastError?.name === "AbortError"
+      ? "The signup request timed out. Please try again."
+      : "Google sign-in could not be completed. Please try again.",
+  );
+}
+
+function isRetryableStatus(statusCode) {
+  return statusCode === 408 || statusCode === 429 || statusCode >= 500;
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
 function showWaitlistSuccess() {

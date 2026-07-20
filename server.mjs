@@ -16,10 +16,7 @@ import {
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { WebSocket, WebSocketServer } from "ws";
 import { getBoardProfile, supportedBoardSummary } from "./lib/board-profiles.mjs";
-import {
-  createEmailWaitlistRecord,
-  createGoogleWaitlistResult,
-} from "./lib/acquisition.mjs";
+import { createGoogleWaitlistResult } from "./lib/acquisition.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -67,6 +64,7 @@ const server = createServer(async (req, res) => {
   try {
     const env = getEnv();
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    const localApiPath = normalizedLocalApiPath(url.pathname);
 
     applyCors(req, res, env);
     if (req.method === "OPTIONS") return sendText(res, "", "text/plain; charset=utf-8", 204);
@@ -79,11 +77,16 @@ const server = createServer(async (req, res) => {
       return sendJson(res, publicConfig(env));
     }
 
-    if (url.pathname === "/api/waitlist" && req.method === "POST") {
-      return createLocalWaitlistSignup(req, res);
+    if (localApiPath === "/api/waitlist") {
+      return sendJson(res, { error: "Email-only waitlist signup is disabled." }, 410);
     }
 
-    if (url.pathname === "/api/auth/google" && req.method === "POST") {
+    if (localApiPath === "/api/auth/google" && req.method !== "POST") {
+      res.setHeader("Allow", "POST");
+      return sendJson(res, { error: "Method not allowed" }, 405);
+    }
+
+    if (localApiPath === "/api/auth/google") {
       return completeLocalGoogleWaitlist(req, res, env);
     }
 
@@ -335,13 +338,10 @@ function publicConfig(env) {
   return config;
 }
 
-async function createLocalWaitlistSignup(req, res) {
-  const validation = createEmailWaitlistRecord(await readJsonBody(req, 16 * 1024));
-  if (!validation.ok) {
-    return sendJson(res, { error: validation.error }, validation.status);
-  }
-  await saveLocalWaitlistRecord(validation.value);
-  return sendJson(res, { ok: true });
+function normalizedLocalApiPath(pathname) {
+  let normalized = pathname.replace(/\/+$/, "");
+  if (normalized.endsWith(".html")) normalized = normalized.slice(0, -5);
+  return normalized;
 }
 
 async function completeLocalGoogleWaitlist(req, res, env) {
@@ -350,6 +350,9 @@ async function completeLocalGoogleWaitlist(req, res, env) {
   }
   const body = await readJsonBody(req, 20 * 1024);
   if (
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body) ||
     typeof body.credential !== "string" ||
     !body.credential ||
     body.credential.length > 16_384 ||

@@ -86,7 +86,7 @@ test("production config keeps the pilot callback while using backend capabilitie
   assert.deepEqual(config.supportedBoards, [{ id: "esp32", label: "ESP32" }]);
 });
 
-test("landing acquisition routes are handled locally instead of reaching the AWS proxy", async (t) => {
+test("landing acquisition routes are reserved locally instead of reaching the AWS proxy", async (t) => {
   installEnvironment(t, { GOOGLE_CLIENT_ID: "" });
   let fetchCalls = 0;
   globalThis.fetch = async () => {
@@ -109,8 +109,10 @@ test("landing acquisition routes are handled locally instead of reaching the AWS
     }),
   );
 
-  assert.equal(waitlistResponse.status, 400);
-  assert.deepEqual(await waitlistResponse.json(), { error: "Enter a valid email address." });
+  assert.equal(waitlistResponse.status, 410);
+  assert.deepEqual(await waitlistResponse.json(), {
+    error: "Email-only waitlist signup is disabled.",
+  });
   assert.equal(googleResponse.status, 503);
   assert.deepEqual(await googleResponse.json(), { error: "Google sign-in is not configured." });
   assert.equal(fetchCalls, 0);
@@ -119,14 +121,68 @@ test("landing acquisition routes are handled locally instead of reaching the AWS
 test("landing acquisition rejects oversized request bodies", async (t) => {
   installEnvironment(t);
   const response = await handler(
-    new Request(`${productionOrigin}/api/waitlist`, {
+    new Request(`${productionOrigin}/api/auth/google`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: `${"a".repeat(17 * 1024)}@example.com` }),
+      body: JSON.stringify({ credential: "a".repeat(21 * 1024), intent: "waitlist" }),
     }),
   );
   assert.equal(response.status, 413);
   assert.deepEqual(await response.json(), { error: "Request body is too large." });
+});
+
+test("Google acquisition rejects null bodies and unsupported methods without proxying", async (t) => {
+  installEnvironment(t);
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error("The AWS proxy should not be called");
+  };
+
+  const nullResponse = await handler(
+    new Request(`${productionOrigin}/api/auth/google`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "null",
+    }),
+  );
+  const getResponse = await handler(
+    new Request(`${productionOrigin}/api/auth/google`, { method: "GET" }),
+  );
+  const manualGetResponse = await handler(
+    new Request(`${productionOrigin}/api/waitlist`, { method: "GET" }),
+  );
+
+  assert.equal(nullResponse.status, 400);
+  assert.deepEqual(await nullResponse.json(), {
+    error: "Google sign-in request is invalid.",
+  });
+  assert.equal(getResponse.status, 405);
+  assert.equal(getResponse.headers.get("Allow"), "POST");
+  assert.equal(manualGetResponse.status, 410);
+  assert.equal(fetchCalls, 0);
+});
+
+test("acquisition route variants cannot fall through to the AWS proxy", async (t) => {
+  installEnvironment(t);
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error("The AWS proxy should not be called");
+  };
+
+  for (const pathname of [
+    "/api/waitlist/",
+    "/api/waitlist.html",
+    "/api/auth/google/",
+    "/api/auth/google.html",
+  ]) {
+    const response = await handler(
+      new Request(`${productionOrigin}${pathname}`, { method: "GET" }),
+    );
+    assert.equal(response.status, pathname.includes("waitlist") ? 410 : 405);
+  }
+  assert.equal(fetchCalls, 0);
 });
 
 test("Netlify passes CORS preflights through without adding a body to 204 responses", async (t) => {
