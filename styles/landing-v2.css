@@ -42,7 +42,6 @@
   --landing-rail-width: clamp(360px, 39.583vw, 608px);
   --landing-gap: 6px;
   --paper-texture: url("../assets/landing/paper-cream.jpeg");
-  --wood-fill: url("../assets/landing/desk-wood-fill.jpeg");
 }
 
 *,
@@ -964,15 +963,12 @@ figure {
 }
 
 .comparison {
-  background-color: #9d724d;
+  background-color: var(--bench-surface);
+  background-image: var(--paper-texture);
 }
 
 .comparison-media {
   overflow: hidden;
-  background-color: #9d724d;
-  background-image: var(--wood-fill);
-  background-repeat: repeat;
-  background-size: 250px 250px;
 }
 
 .comparison-photo-frame {
