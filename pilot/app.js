@@ -1,4 +1,12 @@
-import { selectBoardProfile, USB_SERIAL_FILTERS } from "./lib/board-profiles.mjs";
+import { boardHumanGuide, selectBoardProfile, USB_SERIAL_FILTERS } from "./lib/board-profiles.mjs";
+import {
+  expectedDiagnosticHits,
+  findDiagnosticFailure,
+  normalizeBeginnerPlan,
+  resolveWorkflowStage,
+  validateBeginnerPlan,
+  wireDescription,
+} from "./lib/beginner-plan.mjs";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -18,18 +26,18 @@ const initialAuthSearch = window.location.search;
 const WORKFLOW_STAGES = [
   {
     hash: "#capture",
-    label: "Step 1: Describe",
-    hint: "Tell Makeable what you want to build.",
+    label: "Step 1: Start",
+    hint: "Start with an idea or show me the parts you have.",
   },
   {
     hash: "#plan",
-    label: "Step 2: Scan Parts",
-    hint: "Show Makeable the real parts on your desk.",
+    label: "Step 2: Check parts",
+    hint: "Make the labels visible and confirm every required part.",
   },
   {
     hash: "#flash",
-    label: "Step 3: Build + Load",
-    hint: "Connect one wire at a time, then let Makeable load the board.",
+    label: "Step 3: Build",
+    hint: "Connect one exact wire at a time, then load the board.",
   },
   {
     hash: "#verify",
@@ -38,8 +46,8 @@ const WORKFLOW_STAGES = [
   },
   {
     hash: "#document",
-    label: "Step 5: Finish",
-    hint: "Review the guide, parts, and test results.",
+    label: "Step 5: Celebrate",
+    hint: "Optionally add a photo, publish, and share the verified build.",
   },
 ];
 
@@ -64,13 +72,39 @@ const state = {
   deepgramSocket: null,
   voiceRecorder: null,
   voiceStream: null,
-  cameraStream: null,
-  evidencePhotos: [],
+  voiceEpoch: 0,
+  serialEpoch: 0,
+  entryMode: "idea",
+  orientationConfirmed: false,
+  preparationConfirmed: false,
+  planIssues: [],
+  completedConnectionIds: new Set(),
+  manualResult: null,
+  automaticTestStatus: "pending",
+  diagnosticFailure: null,
+  diagnosticLogOffset: 0,
   readme: "",
   compiledFirmware: null,
+  flashStatus: "idle",
+  flashPhase: "cable",
+  completionMedia: {
+    finishedBuild: null,
+    creator: null,
+  },
+  completionSelectionEpoch: {
+    finishedBuild: 0,
+    creator: 0,
+  },
+  publishedProject: null,
+  publishDraft: null,
   activeBuildStepIndex: 0,
   activeWorkflowStageIndex: 0,
   generationId: "",
+  sessionEpoch: 0,
+  verificationEpoch: 0,
+  compilerReady: false,
+  flashOperationActive: false,
+  publishOperationActive: false,
   auth: loadStoredAuth(),
   account: null,
 };
@@ -79,6 +113,7 @@ const els = {
   ideaNextButton: $("#ideaNextButton"),
   ideaPrompts: document.querySelectorAll("[data-idea]"),
   voiceTranscriptBox: $("#voiceTranscriptBox"),
+  photoFirstStatus: $("#photoFirstStatus"),
   homeButton: $("#homeButton"),
   homeBrandLink: $("#homeBrandLink"),
   canvas: $("#partsCanvas"),
@@ -90,6 +125,12 @@ const els = {
   voiceStatus: $("#voiceStatus"),
   transcriptBox: $("#transcriptBox"),
   analyzeButton: $("#analyzeButton"),
+  startPhotoFirstButton: $("#startPhotoFirstButton"),
+  orientationConfirmed: $("#orientationConfirmed"),
+  ideaFromPhotoPanel: $("#ideaFromPhotoPanel"),
+  photoIdeaOptions: $("#photoIdeaOptions"),
+  manualHelpButton: $("#manualHelpButton"),
+  testTabItems: document.querySelectorAll(".test-tabs span"),
   workflowStages: document.querySelectorAll("[data-stage-index]"),
   timelineButtons: document.querySelectorAll("[data-workflow-stage]"),
   stageBackButton: $("#stageBackButton"),
@@ -109,6 +150,15 @@ const els = {
   showCodeButton: $("#showCodeButton"),
   wiringWorkspace: $("#wiringWorkspace"),
   codeWorkspace: $("#codeWorkspace"),
+  buildPreparation: $("#buildPreparation"),
+  boardSupportBadge: $("#boardSupportBadge"),
+  boardIdentity: $("#boardIdentity"),
+  usbCableGuide: $("#usbCableGuide"),
+  cableInventoryList: $("#cableInventoryList"),
+  planIssues: $("#planIssues"),
+  preparationConfirmed: $("#preparationConfirmed"),
+  beginAssemblyButton: $("#beginAssemblyButton"),
+  wireLegend: $("#wireLegend"),
   baudRateInput: $("#baudRateInput"),
   connectSerialButton: $("#connectSerialButton"),
   disconnectSerialButton: $("#disconnectSerialButton"),
@@ -117,19 +167,42 @@ const els = {
   evaluateLogsButton: $("#evaluateLogsButton"),
   serialLog: $("#serialLog"),
   logEvaluation: $("#logEvaluation"),
-  cameraPreview: $("#cameraPreview"),
-  startCameraButton: $("#startCameraButton"),
-  captureEvidenceButton: $("#captureEvidenceButton"),
+  diagnosticRepairCard: $("#diagnosticRepairCard"),
+  diagnosticRepairTitle: $("#diagnosticRepairTitle"),
+  diagnosticConnection: $("#diagnosticConnection"),
+  diagnosticEvidence: $("#diagnosticEvidence"),
+  openRepairButton: $("#openRepairButton"),
+  retryDiagnosticButton: $("#retryDiagnosticButton"),
   verifyBehaviorButton: $("#verifyBehaviorButton"),
-  evidenceStrip: $("#evidenceStrip"),
+  manualObservation: $("#manualObservation"),
+  operatingGuide: $("#operatingGuide"),
+  manualSuccessQuestion: $("#manualSuccessQuestion"),
   behaviorEvaluation: $("#behaviorEvaluation"),
+  continueToCelebrateButton: $("#continueToCelebrateButton"),
   compileFlashButton: $("#compileFlashButton"),
+  testHardwareButton: $("#testHardwareButton"),
+  flashProgress: $("#flashProgress"),
   flashProgressBar: $("#flashProgressBar"),
+  flashProgressLabel: $("#flashProgressLabel"),
+  flashStateItems: document.querySelectorAll("[data-flash-state]"),
+  usbCableName: $("#usbCableName"),
+  boardUsbPort: $("#boardUsbPort"),
   esp32Status: $("#esp32Status"),
   generateReadmeButton: $("#generateReadmeButton"),
   repoNameInput: $("#repoNameInput"),
   privateRepoInput: $("#privateRepoInput"),
   publishGithubButton: $("#publishGithubButton"),
+  publishGateNote: $("#publishGateNote"),
+  finishedBuildPhotoInput: $("#finishedBuildPhotoInput"),
+  creatorPhotoInput: $("#creatorPhotoInput"),
+  finishedBuildPreview: $("#finishedBuildPreview"),
+  creatorPhotoPreview: $("#creatorPhotoPreview"),
+  includeFinishedBuildPhoto: $("#includeFinishedBuildPhoto"),
+  includeCreatorPhoto: $("#includeCreatorPhoto"),
+  coverAltText: $("#coverAltText"),
+  projectCoverPreview: $("#projectCoverPreview"),
+  projectTitlePreview: $("#projectTitlePreview"),
+  shareBuildButton: $("#shareBuildButton"),
   githubStatus: $("#githubStatus"),
   readmePreview: $("#readmePreview"),
   accountButton: $("#accountButton"),
@@ -141,8 +214,38 @@ const hardwarePlanSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
+    schemaVersion: { type: "integer", enum: [2] },
     projectTitle: { type: "string" },
     summary: { type: "string" },
+    boardProfile: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        profileId: { type: "string" },
+        manufacturer: { type: "string" },
+        model: { type: "string" },
+        revision: { type: "string" },
+        supportStatus: {
+          type: "string",
+          enum: ["exactly_supported", "compatible_with_differences", "unverified"],
+        },
+        usbConnector: { type: "string" },
+        resetLabel: { type: "string" },
+        bootLabel: { type: "string" },
+        printedLabels: { type: "array", items: { type: "string" } },
+      },
+      required: [
+        "profileId",
+        "manufacturer",
+        "model",
+        "revision",
+        "supportStatus",
+        "usbConnector",
+        "resetLabel",
+        "bootLabel",
+        "printedLabels",
+      ],
+    },
     parts: {
       type: "array",
       items: {
@@ -152,8 +255,14 @@ const hardwarePlanSchema = {
           id: { type: "string" },
           name: { type: "string" },
           type: { type: "string" },
-          confidence: { type: "number" },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
           role: { type: "string" },
+          profileId: { type: "string" },
+          compatibilityStatus: {
+            type: "string",
+            enum: ["exactly_supported", "compatible_with_differences", "unverified"],
+          },
+          connectorType: { type: "string" },
           bbox: {
             type: "object",
             additionalProperties: false,
@@ -166,8 +275,42 @@ const hardwarePlanSchema = {
             required: ["x", "y", "width", "height"],
           },
         },
-        required: ["id", "name", "type", "confidence", "role", "bbox"],
+        required: [
+          "id",
+          "name",
+          "type",
+          "confidence",
+          "role",
+          "profileId",
+          "compatibilityStatus",
+          "connectorType",
+          "bbox",
+        ],
       },
+    },
+    preparation: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        orientation: { type: "string" },
+        usbCable: { type: "string" },
+        requiredPartIds: { type: "array", items: { type: "string" } },
+        wires: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              connectionId: { type: "string" },
+              color: { type: "string" },
+              connectorType: { type: "string" },
+              quantity: { type: "integer" },
+            },
+            required: ["connectionId", "color", "connectorType", "quantity"],
+          },
+        },
+      },
+      required: ["orientation", "usbCable", "requiredPartIds", "wires"],
     },
     warnings: { type: "array", items: { type: "string" } },
     wiringSteps: {
@@ -177,17 +320,80 @@ const hardwarePlanSchema = {
         additionalProperties: false,
         properties: {
           order: { type: "integer" },
+          connectionId: { type: "string" },
+          connectionNumber: { type: "integer" },
           title: { type: "string" },
+          action: { type: "string" },
           instruction: { type: "string" },
           from: { type: "string" },
           to: { type: "string" },
           fromPartId: { type: "string" },
           toPartId: { type: "string" },
           pin: { type: "string" },
+          fromPrintedPin: { type: "string" },
+          toPrintedPin: { type: "string" },
+          fromElectricalAlias: { type: "string" },
+          toElectricalAlias: { type: "string" },
+          pinLocationsConfirmed: { type: "boolean" },
+          fromPinBbox: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              x: { type: "number" },
+              y: { type: "number" },
+              width: { type: "number" },
+              height: { type: "number" },
+            },
+            required: ["x", "y", "width", "height"],
+          },
+          toPinBbox: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              x: { type: "number" },
+              y: { type: "number" },
+              width: { type: "number" },
+              height: { type: "number" },
+            },
+            required: ["x", "y", "width", "height"],
+          },
           wireColor: { type: "string" },
+          wireType: { type: "string" },
+          quickCheck: { type: "string" },
           check: { type: "string" },
+          why: { type: "string" },
+          warning: { type: "string" },
+          requiredPartIds: { type: "array", items: { type: "string" } },
+          accessibilityRank: { type: "integer" },
         },
-        required: ["order", "title", "instruction", "from", "to", "fromPartId", "toPartId", "pin", "wireColor", "check"],
+        required: [
+          "order",
+          "connectionId",
+          "connectionNumber",
+          "title",
+          "action",
+          "instruction",
+          "from",
+          "to",
+          "fromPartId",
+          "toPartId",
+          "pin",
+          "fromPrintedPin",
+          "toPrintedPin",
+          "fromElectricalAlias",
+          "toElectricalAlias",
+          "pinLocationsConfirmed",
+          "fromPinBbox",
+          "toPinBbox",
+          "wireColor",
+          "wireType",
+          "quickCheck",
+          "check",
+          "why",
+          "warning",
+          "requiredPartIds",
+          "accessibilityRank",
+        ],
       },
     },
     diagnosticTests: {
@@ -200,9 +406,32 @@ const hardwarePlanSchema = {
           purpose: { type: "string" },
           userAction: { type: "string" },
           expectedSerial: { type: "string" },
+          failureTitle: { type: "string" },
+          recoveryAction: { type: "string" },
+          connectionId: { type: "string" },
         },
-        required: ["name", "purpose", "userAction", "expectedSerial"],
+        required: [
+          "name",
+          "purpose",
+          "userAction",
+          "expectedSerial",
+          "failureTitle",
+          "recoveryAction",
+          "connectionId",
+        ],
       },
+    },
+    operatingGuide: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        summary: { type: "string" },
+        steps: { type: "array", items: { type: "string" } },
+        successQuestion: { type: "string" },
+        unit: { type: "string" },
+        resetInstruction: { type: "string" },
+      },
+      required: ["summary", "steps", "successQuestion", "unit", "resetInstruction"],
     },
     firmwareSpec: {
       type: "object",
@@ -231,12 +460,16 @@ const hardwarePlanSchema = {
     },
   },
   required: [
+    "schemaVersion",
     "projectTitle",
     "summary",
+    "boardProfile",
     "parts",
+    "preparation",
     "warnings",
     "wiringSteps",
     "diagnosticTests",
+    "operatingGuide",
     "firmwareSpec",
   ],
 };
@@ -264,15 +497,27 @@ const HOSTED_FIRMWARE_LIBRARIES = [
   "PubSubClient",
 ];
 
-const behaviorSchema = {
+const ideaSuggestionSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
-    status: { type: "string", enum: ["pass", "needs_attention", "fail", "uncertain"] },
-    observations: { type: "array", items: { type: "string" } },
-    nextStep: { type: "string" },
+    suggestions: {
+      type: "array",
+      minItems: 2,
+      maxItems: 3,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          title: { type: "string" },
+          description: { type: "string" },
+          usesParts: { type: "array", items: { type: "string" } },
+        },
+        required: ["title", "description", "usesParts"],
+      },
+    },
   },
-  required: ["status", "observations", "nextStep"],
+  required: ["suggestions"],
 };
 
 bindEvents();
@@ -287,18 +532,83 @@ refreshServerConfig().then(initializeAuth);
 refreshEsp32Status();
 if (/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
   globalThis.__MAKEABLE_TEST_API__ = {
-    loadPlan(plan) {
-      state.plan = plan;
-      state.compiledFirmware = null;
+    async loadPlan(plan, imageDataUrl = "") {
+      invalidatePendingGeneration();
+      resetBuildEvidence();
+      state.plan = normalizePlan(plan);
+      state.planIssues = validateBeginnerPlan(state.plan);
+      if (imageDataUrl) {
+        const fixtureImage = new Image();
+        await new Promise((resolve, reject) => {
+          fixtureImage.onload = resolve;
+          fixtureImage.onerror = () => reject(new Error("The local QA image could not be loaded."));
+          fixtureImage.src = imageDataUrl;
+        });
+        state.imageDataUrl = imageDataUrl;
+        state.imageElement = fixtureImage;
+        document.body.classList.add("has-parts-photo");
+      }
       renderPlan();
       setActiveWorkflowStage(2);
-      setBuildMode("code");
+    },
+    setManualResult(result) {
+      state.manualResult = { ...result, verificationEpoch: state.verificationEpoch };
+      updatePublishControls();
+    },
+    setFlashStatus(status) {
+      beginAutomaticTestAttempt();
+      state.flashStatus = status;
+      if (status === "success" && state.plan) {
+        state.preparationConfirmed = true;
+        state.completedConnectionIds = new Set(state.plan.wiringSteps.map(({ connectionId }) => connectionId));
+        updatePreparationControls();
+        setBuildMode("code");
+      }
+      renderFlashState(status === "success" ? "success" : "cable");
+      if (status === "success") {
+        if (els.compileFlashButton) {
+          els.compileFlashButton.disabled = true;
+          els.compileFlashButton.textContent = "Loading board...";
+        }
+        setFlashProgress(100, "Firmware loaded successfully");
+      }
+      updatePublishControls();
+    },
+    setAutomaticTestStatus(status) {
+      beginAutomaticTestAttempt();
+      state.automaticTestStatus = status;
+      updatePublishControls();
+    },
+    setSerialLog(log) {
+      state.serialLog = String(log || "");
+      els.serialLog.textContent = state.serialLog;
+      els.evaluateLogsButton.disabled = !state.serialLog.trim();
+    },
+    setCompiledFirmware(compiledFirmware) {
+      state.compiledFirmware = compiledFirmware;
+      updatePublishControls();
+    },
+    setOperationActive(kind, active) {
+      setBlockingOperation(kind, Boolean(active));
     },
     getState() {
       return {
         board: selectBoardProfile(state.plan)?.id || null,
         compiled: Boolean(state.compiledFirmware),
+        flashStatus: state.flashStatus,
         status: els.esp32Status.textContent,
+        manualStatus: currentManualResult()?.status || null,
+        automaticTestStatus: state.automaticTestStatus,
+        planIssues: state.planIssues,
+        flashOperationActive: state.flashOperationActive,
+        publishOperationActive: state.publishOperationActive,
+        publishReady: Boolean(
+          state.plan &&
+            state.compiledFirmware &&
+            state.flashStatus === "success" &&
+            state.automaticTestStatus === "pass" &&
+            currentManualResult()?.status === "pass",
+        ),
       };
     },
   };
@@ -318,46 +628,183 @@ function bindEvents() {
   els.homeButton?.addEventListener("click", showIntro);
   els.homeBrandLink?.addEventListener("click", showIntro);
   els.ideaNextButton?.addEventListener("click", advanceFromIdea);
+  els.startPhotoFirstButton?.addEventListener("click", startPhotoFirst);
   els.ideaPrompts.forEach((button) => {
     button.addEventListener("click", () => {
       els.ideaText.value = button.dataset.idea || "";
       els.ideaText.focus();
+      handleIdeaChange();
     });
   });
-  els.photoInput.addEventListener("change", handlePhotoUpload);
-  els.clearPhotoButton.addEventListener("click", clearPhoto);
-  els.startVoiceButton.addEventListener("click", startVoiceCapture);
-  els.stopVoiceButton.addEventListener("click", stopVoiceCapture);
-  els.analyzeButton.addEventListener("click", analyzeHardware);
+  els.ideaText?.addEventListener("input", handleIdeaChange);
+  els.photoInput?.addEventListener("change", handlePhotoUpload);
+  els.clearPhotoButton?.addEventListener("click", clearPhoto);
+  els.startVoiceButton?.addEventListener("click", startVoiceCapture);
+  els.stopVoiceButton?.addEventListener("click", stopVoiceCapture);
+  els.analyzeButton?.addEventListener("click", analyzeHardware);
+  els.orientationConfirmed?.addEventListener("change", () => {
+    state.orientationConfirmed = els.orientationConfirmed.checked;
+    updatePhotoReadiness();
+  });
+  els.preparationConfirmed?.addEventListener("change", () => {
+    state.preparationConfirmed = els.preparationConfirmed.checked;
+    updatePreparationControls();
+  });
+  els.beginAssemblyButton?.addEventListener("click", beginAssembly);
   els.timelineButtons.forEach((button) => {
     button.addEventListener("click", () => setActiveWorkflowStage(Number(button.dataset.workflowStage || 0)));
   });
   els.stageBackButton.addEventListener("click", () => setActiveWorkflowStage(state.activeWorkflowStageIndex - 1));
   els.stageNextButton.addEventListener("click", () => setActiveWorkflowStage(state.activeWorkflowStageIndex + 1));
-  els.prevBuildStepButton.addEventListener("click", () => setActiveBuildStep(state.activeBuildStepIndex - 1));
-  els.nextBuildStepButton.addEventListener("click", advanceBuildStep);
+  els.prevBuildStepButton?.addEventListener("click", () => setActiveBuildStep(state.activeBuildStepIndex - 1));
+  els.nextBuildStepButton?.addEventListener("click", advanceBuildStep);
   els.showWiringButton?.addEventListener("click", () => setBuildMode("wiring"));
   els.showCodeButton?.addEventListener("click", () => setBuildMode("code"));
-  els.connectSerialButton.addEventListener("click", connectSerial);
-  els.disconnectSerialButton.addEventListener("click", disconnectSerial);
-  els.sendSerialButton.addEventListener("click", sendSerialCommand);
-  els.evaluateLogsButton.addEventListener("click", evaluateSerialLogs);
-  els.startCameraButton.addEventListener("click", startCamera);
-  els.captureEvidenceButton.addEventListener("click", captureEvidence);
-  els.verifyBehaviorButton.addEventListener("click", verifyBehavior);
-  els.compileFlashButton.addEventListener("click", compileAndFlashFirmware);
-  els.generateReadmeButton.addEventListener("click", () => {
+  els.connectSerialButton?.addEventListener("click", connectSerial);
+  els.disconnectSerialButton?.addEventListener("click", disconnectSerial);
+  els.sendSerialButton?.addEventListener("click", sendSerialCommand);
+  els.evaluateLogsButton?.addEventListener("click", evaluateSerialLogs);
+  els.openRepairButton?.addEventListener("click", openDiagnosticConnection);
+  els.retryDiagnosticButton?.addEventListener("click", prepareDiagnosticRetry);
+  els.verifyBehaviorButton?.addEventListener("click", () => verifyBehavior("pass"));
+  els.manualHelpButton?.addEventListener("click", () => {
+    verifyBehavior("fail");
+    goToRepairStep();
+  });
+  els.continueToCelebrateButton?.addEventListener("click", () => setActiveWorkflowStage(4));
+  els.compileFlashButton?.addEventListener("click", compileAndFlashFirmware);
+  els.testHardwareButton?.addEventListener("click", () => setActiveWorkflowStage(3));
+  els.generateReadmeButton?.addEventListener("click", () => {
     state.readme = buildReadme();
     els.readmePreview.textContent = state.readme;
   });
   els.publishGithubButton?.addEventListener("click", publishToGitHub);
+  els.finishedBuildPhotoInput?.addEventListener("change", (event) => handleCompletionPhoto(event, "finishedBuild"));
+  els.creatorPhotoInput?.addEventListener("change", (event) => handleCompletionPhoto(event, "creator"));
+  els.includeFinishedBuildPhoto?.addEventListener("change", refreshCompletionPreview);
+  els.includeCreatorPhoto?.addEventListener("change", refreshCompletionPreview);
+  els.coverAltText?.addEventListener("input", refreshCompletionPreview);
+  els.shareBuildButton?.addEventListener("click", sharePublishedBuild);
   els.accountButton?.addEventListener("click", handleAccountButton);
+  updateIdeaActions();
+  updatePhotoReadiness();
 }
 
 function showIntro(event) {
   event?.preventDefault();
+  if (resetIsBlocked()) return;
+  stopVoiceCapture();
+  void disconnectSerial({ announce: false });
+  clearPhoto();
+  state.entryMode = "idea";
+  state.finalTranscript = "";
+  state.interimTranscript = "";
+  state.generationId = "";
+  if (els.ideaText) els.ideaText.value = "";
+  if (els.voiceTranscriptBox) els.voiceTranscriptBox.textContent = "Type, tap an example, or use your voice.";
+  if (els.photoFirstStatus) els.photoFirstStatus.textContent = "I’ll look only after you choose or take a photo.";
+  updateIdeaActions();
   document.body.classList.remove("intro-active");
   setActiveWorkflowStage(0, { updateHash: true, replace: true });
+}
+
+function focusIdeaEntry() {
+  setActiveWorkflowStage(0);
+  requestAnimationFrame(() => els.ideaText?.focus());
+}
+
+function startPhotoFirst() {
+  state.entryMode = "photo";
+  els.ideaText.removeAttribute("aria-invalid");
+  setActiveWorkflowStage(1);
+  els.photoInput?.click();
+  if (els.photoFirstStatus) els.photoFirstStatus.textContent = "Opening your camera or photo library…";
+}
+
+function goToRepairStep() {
+  beginAutomaticTestAttempt();
+  state.automaticTestStatus = "pending";
+  updatePublishControls();
+  setActiveWorkflowStage(2);
+  setBuildMode("wiring");
+  if (state.diagnosticFailure?.connectionId) {
+    const index = state.plan?.wiringSteps?.findIndex(
+      ({ connectionId }) => connectionId === state.diagnosticFailure.connectionId,
+    );
+    if (index >= 0) setActiveBuildStep(index);
+  }
+  setStatus(
+    els.behaviorEvaluation,
+    "I moved you back to the wiring guide. Check the repair note on the step you were on.",
+    "warn",
+  );
+}
+
+function updateIdeaActions() {
+  const hasIdea = Boolean(els.ideaText?.value.trim());
+  if (els.ideaNextButton) {
+    els.ideaNextButton.disabled = !hasIdea;
+  }
+  if (els.analyzeButton) {
+    els.analyzeButton.textContent = hasIdea ? "Make my beginner guide" : "Suggest what I can build";
+  }
+}
+
+function handleIdeaChange() {
+  if (state.generationId) {
+    invalidatePendingGeneration();
+    if (state.plan) {
+      state.plan = null;
+      resetBuildEvidence();
+      renderEmptyPlan();
+    }
+  }
+  updateIdeaActions();
+  updatePhotoReadiness();
+}
+
+function updatePhotoReadiness() {
+  const hasPhoto = Boolean(state.imageDataUrl);
+  const labelsConfirmed = Boolean(state.orientationConfirmed);
+  if (els.analyzeButton) els.analyzeButton.disabled = !hasPhoto || !labelsConfirmed;
+  if (!hasPhoto) {
+    setStatus(els.transcriptBox, "Confirm the setup, then take one clear photo from above.", "");
+  } else if (!labelsConfirmed) {
+    setStatus(els.transcriptBox, "Photo added. Confirm that the printed labels are visible before I use it as your map.", "warn");
+  } else {
+    setStatus(
+      els.transcriptBox,
+      els.ideaText?.value.trim()
+        ? "Photo ready. I can now make the guide for your idea."
+        : "Photo ready. I can now suggest a few realistic starter builds.",
+      "ok",
+    );
+  }
+}
+
+function announceStageGuard(requestedIndex, activeIndex) {
+  if (requestedIndex >= 2 && !state.plan) {
+    setStatus(els.transcriptBox, "I need one confirmed photo and a safe parts plan before the first wire.", "warn");
+    els.analyzeButton?.focus();
+    return;
+  }
+  if (requestedIndex >= 3 && state.flashStatus !== "success") {
+    setStatus(els.esp32Status, "Load the board successfully before testing it.", "warn");
+    els.compileFlashButton?.focus();
+    return;
+  }
+  if (requestedIndex >= 4 && state.automaticTestStatus !== "pass") {
+    setStatus(els.logEvaluation, "Pass the fresh board-message check before celebrating or publishing.", "warn");
+    els.evaluateLogsButton?.focus();
+    return;
+  }
+  if (requestedIndex >= 4 && currentManualResult()?.status !== "pass") {
+    setStatus(els.behaviorEvaluation, "Try the finished build and confirm that it worked before publishing.", "warn");
+    els.verifyBehaviorButton?.focus();
+    return;
+  }
+  const stage = WORKFLOW_STAGES[activeIndex];
+  if (stage) els.stageControlHint.textContent = stage.hint;
 }
 
 async function advanceFromIdea() {
@@ -368,6 +815,7 @@ async function advanceFromIdea() {
     if (els.voiceTranscriptBox) els.voiceTranscriptBox.textContent = "Tell me the idea in one sentence first.";
     return;
   }
+  state.entryMode = "idea";
   els.ideaText.removeAttribute("aria-invalid");
   if (serverConfig.hasAccounts && !(await getAccessToken({ interactive: false }))) {
     sessionStorage.setItem("makeable.pendingIdea", idea);
@@ -379,7 +827,19 @@ async function advanceFromIdea() {
 }
 
 function setActiveWorkflowStage(index, options = {}) {
-  const activeIndex = clamp(index, 0, WORKFLOW_STAGES.length - 1);
+  const previousIndex = state.activeWorkflowStageIndex;
+  const requestedIndex = clamp(index, 0, WORKFLOW_STAGES.length - 1);
+  const operationStage = state.flashOperationActive ? 2 : state.publishOperationActive ? 4 : null;
+  if (operationStage !== null && requestedIndex !== operationStage && options.allowDuringOperation !== true) {
+    resetIsBlocked();
+    return;
+  }
+  const activeIndex = resolveWorkflowStage(requestedIndex, {
+    hasPlan: Boolean(state.plan),
+    flashStatus: state.flashStatus,
+    automaticTestStatus: state.automaticTestStatus,
+    manualTestStatus: currentManualResult()?.status || "pending",
+  });
   state.activeWorkflowStageIndex = activeIndex;
   document.body.dataset.stage = String(activeIndex + 1);
 
@@ -394,6 +854,16 @@ function setActiveWorkflowStage(index, options = {}) {
     const buttonIndex = Number(button.dataset.workflowStage || 0);
     button.classList.toggle("is-active", buttonIndex === activeIndex);
     button.classList.toggle("is-complete", buttonIndex < activeIndex);
+    if (buttonIndex === activeIndex) button.setAttribute("aria-current", "step");
+    else button.removeAttribute("aria-current");
+    const resolved = resolveWorkflowStage(buttonIndex, {
+      hasPlan: Boolean(state.plan),
+      flashStatus: state.flashStatus,
+      automaticTestStatus: state.automaticTestStatus,
+      manualTestStatus: currentManualResult()?.status || "pending",
+    });
+    const locked = resolved !== buttonIndex;
+    button.setAttribute("aria-disabled", String(locked));
   });
 
   const stage = WORKFLOW_STAGES[activeIndex];
@@ -401,9 +871,17 @@ function setActiveWorkflowStage(index, options = {}) {
   els.stageControlHint.textContent = stage.hint;
   els.stageBackButton.disabled = activeIndex === 0;
   els.stageNextButton.disabled = activeIndex === WORKFLOW_STAGES.length - 1;
-  els.stageNextButton.textContent = ["Scan my parts", "Build it", "Test my hardware", "Publish my build", "All set"][activeIndex];
+  els.stageNextButton.textContent = ["Check my parts", "Build it", "Test my hardware", "Celebrate", "All set"][activeIndex];
 
-  if (activeIndex === 2 && els.codeWorkspace?.hidden !== false) setBuildMode("wiring");
+  if (activeIndex === 2 && els.codeWorkspace?.hidden !== false) {
+    setBuildMode(state.preparationConfirmed ? "wiring" : "prepare");
+  }
+  if (activeIndex === 3) renderOperatingGuide();
+  if (activeIndex === 4) refreshCompletionPreview();
+
+  if (requestedIndex !== activeIndex && options.silent !== true) {
+    announceStageGuard(requestedIndex, activeIndex);
+  }
 
   if (options.updateHash !== false) {
     const url = `${window.location.pathname}${stage.hash}`;
@@ -413,6 +891,16 @@ function setActiveWorkflowStage(index, options = {}) {
   requestAnimationFrame(() => {
     drawPartsCanvas();
     renderVisualSteps();
+    if (activeIndex !== previousIndex && options.focus !== false) {
+      const activeStage = els.workflowStages[activeIndex];
+      if (activeStage) activeStage.scrollTop = 0;
+      if (window.innerWidth < 900) window.scrollTo({ top: 0, behavior: "auto" });
+      const heading = activeStage?.querySelector("h1");
+      if (heading) {
+        heading.setAttribute("tabindex", "-1");
+        heading.focus({ preventScroll: true });
+      }
+    }
   });
 }
 
@@ -641,35 +1129,247 @@ function bytesToBase64Url(bytes) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
+function currentManualResult() {
+  return state.manualResult?.verificationEpoch === state.verificationEpoch ? state.manualResult : null;
+}
+
+function beginAutomaticTestAttempt() {
+  state.verificationEpoch += 1;
+  state.manualResult = null;
+  if (els.continueToCelebrateButton) els.continueToCelebrateButton.hidden = true;
+  if (els.behaviorEvaluation) {
+    setStatus(els.behaviorEvaluation, "Pass the fresh board check, then try the real behavior again.", "");
+  }
+}
+
+function invalidatePendingGeneration() {
+  state.sessionEpoch += 1;
+  state.generationId = "";
+  if (els.analyzeButton) els.analyzeButton.disabled = false;
+  return state.sessionEpoch;
+}
+
+function beginGenerationContext(ideaText = els.ideaText?.value || "") {
+  state.sessionEpoch += 1;
+  state.generationId = crypto.randomUUID();
+  return {
+    generationId: state.generationId,
+    sessionEpoch: state.sessionEpoch,
+    imageDataUrl: state.imageDataUrl,
+    ideaText: String(ideaText).trim(),
+  };
+}
+
+function isGenerationCurrent(context, plan = null) {
+  return Boolean(
+    context &&
+      state.generationId === context.generationId &&
+      state.sessionEpoch === context.sessionEpoch &&
+      state.imageDataUrl === context.imageDataUrl &&
+      String(els.ideaText?.value || "").trim() === context.ideaText &&
+      (!plan || state.plan === plan),
+  );
+}
+
+function setBlockingOperation(kind, active) {
+  if (kind === "flash") state.flashOperationActive = active;
+  if (kind === "publish") state.publishOperationActive = active;
+  const blocked = state.flashOperationActive || state.publishOperationActive;
+  if (els.homeButton) els.homeButton.disabled = blocked;
+  if (els.homeBrandLink) {
+    els.homeBrandLink.setAttribute("aria-disabled", String(blocked));
+    els.homeBrandLink.classList.toggle("is-disabled", blocked);
+  }
+  els.timelineButtons.forEach((button) => {
+    button.disabled = blocked;
+  });
+  if (els.stageBackButton) els.stageBackButton.disabled = blocked || state.activeWorkflowStageIndex === 0;
+  if (els.stageNextButton) {
+    els.stageNextButton.disabled = blocked || state.activeWorkflowStageIndex === WORKFLOW_STAGES.length - 1;
+  }
+  if (els.photoInput) els.photoInput.disabled = blocked;
+  if (els.clearPhotoButton) els.clearPhotoButton.disabled = blocked;
+  const completionLocked = state.publishOperationActive || Boolean(state.publishedProject);
+  if (els.finishedBuildPhotoInput) els.finishedBuildPhotoInput.disabled = completionLocked;
+  if (els.creatorPhotoInput) els.creatorPhotoInput.disabled = completionLocked;
+  if (els.includeFinishedBuildPhoto) {
+    els.includeFinishedBuildPhoto.disabled = completionLocked || !state.completionMedia.finishedBuild;
+  }
+  if (els.includeCreatorPhoto) {
+    els.includeCreatorPhoto.disabled = completionLocked || !state.completionMedia.creator;
+  }
+  if (els.coverAltText) els.coverAltText.disabled = completionLocked;
+}
+
+function resetIsBlocked() {
+  if (state.flashOperationActive) {
+    setActiveWorkflowStage(2, { allowDuringOperation: true });
+    setStatus(
+      els.esp32Status,
+      "Finish this board load before starting over so the ESP32 is not left half-programmed.",
+      "warn",
+    );
+    return true;
+  }
+  if (state.publishOperationActive) {
+    setActiveWorkflowStage(4, { allowDuringOperation: true });
+    setStatus(els.githubStatus, "Finish this secure save before starting another project.", "warn");
+    return true;
+  }
+  return false;
+}
+
+function resetCompletionState() {
+  state.completionSelectionEpoch.finishedBuild += 1;
+  state.completionSelectionEpoch.creator += 1;
+  state.completionMedia = { finishedBuild: null, creator: null };
+  state.publishedProject = null;
+  state.publishDraft = null;
+  for (const input of [els.finishedBuildPhotoInput, els.creatorPhotoInput]) {
+    if (input) {
+      input.value = "";
+      input.disabled = false;
+    }
+  }
+  for (const consent of [els.includeFinishedBuildPhoto, els.includeCreatorPhoto]) {
+    if (!consent) continue;
+    consent.checked = false;
+    consent.disabled = true;
+  }
+  for (const preview of [els.finishedBuildPreview, els.creatorPhotoPreview]) {
+    if (!preview) continue;
+    preview.hidden = true;
+    preview.removeAttribute("src");
+    preview.alt = "";
+  }
+  if (els.coverAltText) {
+    els.coverAltText.value = "";
+    els.coverAltText.disabled = false;
+  }
+  if (els.projectCoverPreview) {
+    els.projectCoverPreview.src = "images/makeable/scan-parts.svg";
+    els.projectCoverPreview.alt = "Illustrated Makeable electronics build";
+  }
+  if (els.shareBuildButton) els.shareBuildButton.hidden = true;
+  if (els.repoNameInput) {
+    els.repoNameInput.value = "makeable-build";
+    els.repoNameInput.disabled = false;
+  }
+  if (els.privateRepoInput) {
+    els.privateRepoInput.checked = true;
+    els.privateRepoInput.disabled = false;
+  }
+  if (els.publishGithubButton) els.publishGithubButton.textContent = "Publish to GitHub";
+  if (els.githubStatus) setStatus(els.githubStatus, "Your notes stay here with your build session.", "");
+}
+
+function resetBuildEvidence() {
+  beginAutomaticTestAttempt();
+  state.automaticTestStatus = "pending";
+  state.diagnosticFailure = null;
+  state.diagnosticLogOffset = 0;
+  state.compiledFirmware = null;
+  state.flashStatus = "idle";
+  state.flashPhase = "cable";
+  state.preparationConfirmed = false;
+  state.planIssues = [];
+  state.completedConnectionIds = new Set();
+  state.activeBuildStepIndex = 0;
+  state.serialLog = "";
+  state.readme = "";
+  if (els.preparationConfirmed) els.preparationConfirmed.checked = false;
+  if (els.manualObservation) els.manualObservation.value = "";
+  if (els.serialLog) els.serialLog.textContent = "Board messages will appear here after you connect.";
+  if (els.connectSerialButton) els.connectSerialButton.disabled = false;
+  if (els.disconnectSerialButton) els.disconnectSerialButton.disabled = true;
+  if (els.sendSerialButton) els.sendSerialButton.disabled = true;
+  if (els.evaluateLogsButton) els.evaluateLogsButton.disabled = true;
+  if (els.diagnosticRepairCard) els.diagnosticRepairCard.hidden = true;
+  if (els.continueToCelebrateButton) els.continueToCelebrateButton.hidden = true;
+  if (els.logEvaluation) setStatus(els.logEvaluation, "I’ll help read these messages once they appear.", "");
+  if (els.behaviorEvaluation) setStatus(els.behaviorEvaluation, "Try the operating steps, then choose the honest result.", "");
+  if (els.compileFlashButton) {
+    els.compileFlashButton.textContent = "Choose my ESP32";
+    els.compileFlashButton.disabled = !state.compilerReady;
+  }
+  setFlashProgress(0, "Waiting to connect");
+  if (els.esp32Status) {
+    setStatus(
+      els.esp32Status,
+      state.compilerReady
+        ? "Makeable’s ESP32 compiler is ready. Connect your board when you’re ready."
+        : "I’m checking whether the ESP32 compiler is ready.",
+      state.compilerReady ? "ok" : "",
+    );
+  }
+  resetCompletionState();
+  renderFlashState("cable");
+  updatePublishControls();
+}
+
+function resetPhotoConfirmation() {
+  state.orientationConfirmed = false;
+  if (els.orientationConfirmed) els.orientationConfirmed.checked = false;
+}
+
 function handlePhotoUpload(event) {
   const [file] = event.target.files || [];
   if (!file) return;
+  if (state.flashOperationActive || state.publishOperationActive) {
+    event.target.value = "";
+    resetIsBlocked();
+    return;
+  }
+  const photoEpoch = invalidatePendingGeneration();
 
+  state.imageDataUrl = "";
+  state.imageElement = null;
+  state.imageFit = null;
   state.plan = null;
-  state.compiledFirmware = null;
-  state.activeBuildStepIndex = 0;
+  resetPhotoConfirmation();
+  resetBuildEvidence();
+  document.body.classList.remove("has-parts-photo");
+  if (els.ideaFromPhotoPanel) els.ideaFromPhotoPanel.hidden = true;
+  if (els.photoIdeaOptions) els.photoIdeaOptions.innerHTML = "";
   renderEmptyPlan();
   setStatus(els.transcriptBox, "Loading your photo...", "warn");
 
   const reader = new FileReader();
   reader.onload = () => {
+    if (state.sessionEpoch !== photoEpoch) return;
     const img = new Image();
     img.onload = () => {
+      if (state.sessionEpoch !== photoEpoch) return;
       state.imageDataUrl = resizePhotoForAi(img);
       const displayImg = new Image();
       displayImg.onload = () => {
+        if (state.sessionEpoch !== photoEpoch || displayImg.src !== state.imageDataUrl) return;
         state.imageElement = displayImg;
         document.body.classList.add("has-parts-photo");
         drawPartsCanvas();
-        setStatus(els.transcriptBox, "Photo ready. I can name these parts whenever you are ready.", "ok");
+        setActiveWorkflowStage(1);
+        updatePhotoReadiness();
+        if (els.photoFirstStatus) els.photoFirstStatus.textContent = "Photo added. I’ll suggest a few build ideas next.";
       };
-      displayImg.onerror = () => setStatus(els.transcriptBox, "I couldn’t prepare that image. Try another photo.", "danger");
+      displayImg.onerror = () => {
+        if (state.sessionEpoch === photoEpoch) {
+          setStatus(els.transcriptBox, "I couldn’t prepare that image. Try another photo.", "danger");
+        }
+      };
       displayImg.src = state.imageDataUrl;
     };
-    img.onerror = () => setStatus(els.transcriptBox, "I couldn’t read that image. Try a clear JPG or PNG.", "danger");
+    img.onerror = () => {
+      if (state.sessionEpoch === photoEpoch) {
+        setStatus(els.transcriptBox, "I couldn’t read that image. Try a clear JPG or PNG.", "danger");
+      }
+    };
     img.src = String(reader.result || "");
   };
-  reader.onerror = () => setStatus(els.transcriptBox, "I couldn’t load that photo. Try choosing it again.", "danger");
+  reader.onerror = () => {
+    if (state.sessionEpoch === photoEpoch) {
+      setStatus(els.transcriptBox, "I couldn’t load that photo. Try choosing it again.", "danger");
+    }
+  };
   reader.readAsDataURL(file);
 }
 
@@ -691,16 +1391,24 @@ function resizePhotoForAi(img) {
 }
 
 function clearPhoto() {
+  if (state.flashOperationActive || state.publishOperationActive) {
+    resetIsBlocked();
+    return;
+  }
+  invalidatePendingGeneration();
   state.imageDataUrl = "";
   state.imageElement = null;
   state.imageFit = null;
   state.plan = null;
-  state.compiledFirmware = null;
-  state.activeBuildStepIndex = 0;
-  els.photoInput.value = "";
+  resetPhotoConfirmation();
+  resetBuildEvidence();
+  if (els.photoInput) els.photoInput.value = "";
+  if (els.ideaFromPhotoPanel) els.ideaFromPhotoPanel.hidden = true;
+  if (els.photoIdeaOptions) els.photoIdeaOptions.innerHTML = "";
   document.body.classList.remove("has-parts-photo");
   renderEmptyPlan();
   drawPartsCanvas();
+  updatePhotoReadiness();
 }
 
 function drawPartsCanvas() {
@@ -1065,14 +1773,22 @@ async function analyzeHardware() {
     setStatus(els.transcriptBox, "Start with one clear photo of your parts. I’ll use that as the map.", "danger");
     return;
   }
+  if (!state.orientationConfirmed) {
+    els.orientationConfirmed?.focus();
+    setStatus(els.transcriptBox, "Confirm that the printed labels are visible before I use the photo as your map.", "danger");
+    return;
+  }
   if (!idea) {
-    setStatus(els.transcriptBox, "Tell me the goal in plain language. One sentence is enough.", "danger");
+    await suggestProjectIdeas();
     return;
   }
 
   els.analyzeButton.disabled = true;
-  els.analyzeButton.textContent = "Making your guide...";
-  state.generationId = crypto.randomUUID();
+  els.analyzeButton.textContent = "Making your beginner guide…";
+  const generationContext = beginGenerationContext();
+  state.plan = null;
+  resetBuildEvidence();
+  renderEmptyPlan();
 
   try {
     if (!serverConfig.hasOpenAIKey) {
@@ -1086,7 +1802,7 @@ async function analyzeHardware() {
 
     setStatus(
       els.transcriptBox,
-      "I’m looking closely at the photo and planning the safest order. This can take a minute.",
+      "I’m matching the printed labels, checking every required part, and ordering the hardest-to-reach connections first.",
       "warn",
     );
 
@@ -1126,7 +1842,9 @@ async function analyzeHardware() {
 
     const data = await openAiResponse(payload, {
       label: "hardware plan",
+      generationId: generationContext.generationId,
       onProgress: ({ elapsedLabel, message }) => {
+        if (!isGenerationCurrent(generationContext)) return;
         setStatus(
           els.transcriptBox,
           message ||
@@ -1135,18 +1853,36 @@ async function analyzeHardware() {
         );
       },
     });
-    state.plan = normalizePlan(parseStructuredJson(data, "hardware plan"));
-    state.plan.warnings = [...validatePlan(state.plan), ...state.plan.warnings];
-    state.activeBuildStepIndex = 0;
+    if (!isGenerationCurrent(generationContext)) return;
+    const nextPlan = normalizePlan(parseStructuredJson(data, "hardware plan"));
+    state.plan = nextPlan;
+    state.planIssues = validateBeginnerPlan(state.plan);
+    state.plan.warnings = [
+      ...new Set([
+        ...state.plan.warnings,
+        ...state.planIssues.map(({ message }) => message),
+      ]),
+    ];
     renderPlan();
+    const blockers = state.planIssues.filter(({ severity }) => severity === "block");
+    if (blockers.length) {
+      setStatus(
+        els.transcriptBox,
+        `I found the parts, but I stopped before wiring: ${blockers[0].message}`,
+        "danger",
+      );
+      return;
+    }
     setStatus(
       els.transcriptBox,
-      `I found ${state.plan.parts.length} part(s). Now I’m writing the code that matches your build.`,
+      `I confirmed ${state.plan.parts.length} part(s). Now I’m preparing code for this exact plan.`,
       "ok",
     );
     try {
-      await generateFirmwareForPlan(idea);
+      const firmwareReady = await generateFirmwareForPlan(idea, generationContext);
+      if (!firmwareReady || !isGenerationCurrent(generationContext, nextPlan)) return;
       await refreshAccount();
+      if (!isGenerationCurrent(generationContext, nextPlan)) return;
       renderPlan();
       setStatus(
         els.transcriptBox,
@@ -1155,6 +1891,7 @@ async function analyzeHardware() {
       );
     } catch (firmwareError) {
       console.error(firmwareError);
+      if (!isGenerationCurrent(generationContext, nextPlan)) return;
       renderPlan();
       setStatus(
         els.transcriptBox,
@@ -1162,21 +1899,127 @@ async function analyzeHardware() {
         "warn",
       );
     }
+    if (!isGenerationCurrent(generationContext, nextPlan)) return;
     setActiveWorkflowStage(2);
   } catch (error) {
     console.error(error);
-    setStatus(els.transcriptBox, `I got stuck while making the guide: ${error.message}`, "danger");
+    if (isGenerationCurrent(generationContext)) {
+      setStatus(els.transcriptBox, `I got stuck while making the guide: ${error.message}`, "danger");
+    }
   } finally {
-    els.analyzeButton.disabled = false;
-    els.analyzeButton.textContent = "Name my parts";
+    if (isGenerationCurrent(generationContext)) {
+      els.analyzeButton.disabled = false;
+      updateIdeaActions();
+      updatePhotoReadiness();
+    }
   }
 }
 
+async function suggestProjectIdeas() {
+  els.analyzeButton.disabled = true;
+  els.analyzeButton.textContent = "Looking for good starter ideas…";
+  const generationContext = beginGenerationContext();
+  try {
+    if (!serverConfig.hasOpenAIKey) {
+      setStatus(els.transcriptBox, "The AI service is not ready yet, so I can’t inspect this photo.", "danger");
+      return;
+    }
+    setStatus(
+      els.transcriptBox,
+      "I’m identifying only the parts I can see, then I’ll offer two or three realistic starter builds.",
+      "warn",
+    );
+    const data = await openAiResponse(
+      {
+        model: settings.openaiModel,
+        reasoning: { effort: settings.openaiReasoningEffort || DEFAULT_REASONING_EFFORT },
+        input: [
+          {
+            role: "system",
+            content:
+              "You are a patient electronics teacher suggesting projects for a complete beginner. Use only parts clearly visible in the supplied photo. Suggest two or three small, safe, genuinely buildable projects. Do not invent parts, voltage adapters, cables, or capabilities. Output only schema-valid JSON.",
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text:
+                  "Suggest two or three beginner projects supported by the visible parts. Keep each title concrete and each description to one plain-language sentence. Name the visible parts each idea uses.",
+              },
+              { type: "input_image", image_url: state.imageDataUrl, detail: "high" },
+            ],
+          },
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "beginner_project_ideas",
+            strict: true,
+            schema: ideaSuggestionSchema,
+          },
+        },
+      },
+      {
+        label: "project ideas",
+        generationId: generationContext.generationId,
+        onProgress: ({ elapsedLabel }) => {
+          if (!isGenerationCurrent(generationContext)) return;
+          setStatus(els.transcriptBox, `Still checking the parts (${elapsedLabel}). I won’t invent anything that is missing.`, "warn");
+        },
+      },
+    );
+    if (!isGenerationCurrent(generationContext)) return;
+    const result = parseStructuredJson(data, "project ideas");
+    renderIdeaSuggestions(result.suggestions || []);
+    setStatus(els.transcriptBox, "Choose one idea below. I’ll make the exact guide only after you pick.", "ok");
+  } catch (error) {
+    console.error(error);
+    if (isGenerationCurrent(generationContext)) {
+      setStatus(els.transcriptBox, `I couldn’t suggest a build from this photo yet: ${error.message}`, "danger");
+    }
+  } finally {
+    if (isGenerationCurrent(generationContext)) {
+      els.analyzeButton.disabled = false;
+      updateIdeaActions();
+      updatePhotoReadiness();
+    }
+  }
+}
+
+function renderIdeaSuggestions(suggestions) {
+  if (!els.ideaFromPhotoPanel || !els.photoIdeaOptions) return;
+  els.photoIdeaOptions.innerHTML = "";
+  suggestions.forEach((suggestion, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "photo-idea-option";
+    button.innerHTML = `<span>${index + 1}</span><strong></strong><p></p><small></small>`;
+    button.querySelector("strong").textContent = suggestion.title;
+    button.querySelector("p").textContent = suggestion.description;
+    button.querySelector("small").textContent = `Uses: ${(suggestion.usesParts || []).join(", ")}`;
+    button.addEventListener("click", () => {
+      state.entryMode = "photo";
+      els.ideaText.value = suggestion.description;
+      handleIdeaChange();
+      analyzeHardware();
+    });
+    els.photoIdeaOptions.append(button);
+  });
+  els.ideaFromPhotoPanel.hidden = false;
+  els.ideaFromPhotoPanel.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
 function buildAnalysisPrompt(idea) {
+  const hasIdea = Boolean(String(idea || "").trim());
   return [
-    `Project idea: ${idea}`,
+    hasIdea
+      ? `Project idea: ${idea}`
+      : "Project idea: none yet. Suggest the simplest beginner-friendly build the visible parts support.",
     "",
-    "Return a beginner-safe hardware plan for the actual visible parts in this uploaded image.",
+    hasIdea
+      ? "Return a beginner-safe hardware plan for the actual visible parts in this uploaded image."
+      : "Return a beginner-safe hardware plan that suggests a build from the actual visible parts in this uploaded image.",
     "Only include parts that are necessary for the described project. Ignore unrelated visible parts even if you can identify them.",
     "Every returned part must either appear in a wiring step or be required to make those wiring steps possible, such as a controller, sensor, output, current-limiting resistor, power connection, or jumper wire.",
     "Use short label-friendly names, such as ESP32 DevKit, PIR sensor, LED, resistor, and jumper wires.",
@@ -1187,12 +2030,24 @@ function buildAnalysisPrompt(idea) {
     "For a PIR sensor, look for a white Fresnel dome. Do not label a black circular speaker/display/module as PIR unless it visually matches.",
     "For LEDs/resistors, distinguish loose LEDs, resistor bags/strips, jumper wires, servo motors, displays, relay/audio modules, and breadboards if visible.",
     "If a part is ambiguous, name it as 'possible ...' and reduce confidence rather than guessing.",
-    "Prefer ESP32 pins that are usually safe for beginner projects.",
-    "For every wiring step, include fromPartId, toPartId, from, to, pin, and a beginner-friendly wireColor.",
+    "Return schemaVersion 2 and identify the exact board profile, revision confidence, USB connector, and printed RESET/EN and BOOT button labels.",
+    "Use supportStatus exactly_supported only when the manufacturer/model/revision and pin-label layout are genuinely confirmed from the photo. Otherwise use compatible_with_differences or unverified.",
+    "Prefer ESP32 pins that are usually safe for beginner projects; place any boot-risk caveat in the separate warning field.",
+    "For every wiring step, create one atomic connection with a stable connectionId, fromPartId, toPartId, exact fromPrintedPin, exact toPrintedPin, electrical aliases, wireColor, jumper connector gender/type, quickCheck, why, warning, requiredPartIds, and accessibilityRank.",
+    "Also return pinLocationsConfirmed plus tight fromPinBbox and toPinBbox rectangles around the actual visible metal pin or receptacle in this exact photo. Use 0-100 coordinates. Set pinLocationsConfirmed true only when both physical connection points are genuinely visible; wiring will be blocked otherwise.",
+    "The action sentence must literally include both exact printed pin labels. Say D25 when the board prints D25; GPIO 25 may appear only as the secondary electrical alias.",
+    "Never invent a pin position or board geometry. The photographed printed label is the source of truth.",
+    "Order wiring from the most physically constrained or crowded inner connection to the easiest outer connection.",
+    "Assign a distinct wire color to every connection whenever the confirmed wire inventory permits it, and keep that color attached to the same connectionId everywhere.",
+    "Every requiredPartId must refer to a part actually confirmed in the photo.",
+    "Do not introduce an unseen resistor, voltage divider, level shifter, adapter, or cable. If one is electrically required but absent, return the unsafe step clearly enough for the validator to block it and explain the missing part in warnings.",
+    "For HC-SR04-class ultrasonic sensors, treat every ECHO path as potentially 5 V. A protection part named in prose is not enough. Only when its identity and 5 V-to-3.3 V rating are genuinely visible, return the protection part with confidence at least 0.9, compatibilityStatus exactly_supported, and a specific non-generic profileId. Then represent the signal as two separate atomic wiring steps through that part: HC-SR04 ECHO to the photographed 5 V/high-side input pin, then the matching, physically distinct photographed 3.3 V/low-side output pin to the ESP32. Give both edges their own connectionId, exact part ids, exact printed pin labels, distinct endpoint boxes, and requiredPartIds. Use electrical aliases such as '5 V-side input' and '3.3 V-side output' when the printed pins use names like HV1/LV1 or IN/OUT. Loose resistors, ambiguous protection hardware, and a direct ECHO-to-ESP32 step are never enough.",
+    "Each diagnostic test must use connectionId to link a failure to one exact wire and include a concrete failureTitle and recoveryAction.",
+    "Include an operatingGuide that explains what the finished build does, which face/direction to use, what to press or move, the displayed unit, what success looks like, and the difference between RESET/EN and BOOT.",
     "Do not claim certainty for ambiguous modules; put uncertainty in warnings.",
     "Do not generate source code in this vision/planning step.",
     "Instead, return a compact firmwareSpec with chosen pins, libraries, serial protocol markers, and behavior.",
-    "Include diagnostic tests that can be judged from serial logs and simple camera observations.",
+    "Include diagnostic tests that can be judged from serial logs and simple observations.",
   ].join("\n");
 }
 
@@ -1235,6 +2090,7 @@ function parseStructuredJson(data, label) {
 async function openAiResponse(payload, options = {}) {
   const label = options.label || "AI response";
   const progress = typeof options.onProgress === "function" ? options.onProgress : () => {};
+  const generationId = options.generationId || state.generationId;
   const backgroundPayload = {
     ...payload,
     background: true,
@@ -1243,13 +2099,14 @@ async function openAiResponse(payload, options = {}) {
   delete backgroundPayload.stream;
 
   for (let attempt = 0; attempt <= AI_TRANSIENT_RETRY_ATTEMPTS; attempt += 1) {
+    if (generationId && state.generationId !== generationId) throw new Error("This AI request was superseded by a newer build session.");
     try {
       const started = await apiJson("/api/openai/background", {
         method: "POST",
-        generationId: options.generationId || state.generationId,
+        generationId,
         body: JSON.stringify(backgroundPayload),
       });
-      return waitForOpenAiResponse(started, label, progress);
+      return waitForOpenAiResponse(started, label, progress, generationId);
     } catch (error) {
       if (shouldFallbackToDirectOpenAi(error)) break;
       if (!isTransientOpenAiError(error) || attempt === AI_TRANSIENT_RETRY_ATTEMPTS) {
@@ -1276,7 +2133,7 @@ async function openAiResponse(payload, options = {}) {
   try {
     return await apiJson("/api/openai/responses", {
       method: "POST",
-      generationId: options.generationId || state.generationId,
+      generationId,
       body: JSON.stringify(payload),
     });
   } catch (error) {
@@ -1301,7 +2158,7 @@ function isTransientOpenAiError(error) {
   );
 }
 
-async function waitForOpenAiResponse(started, label, progress) {
+async function waitForOpenAiResponse(started, label, progress, generationId) {
   const firstStatus = normalizeOpenAiStatus(started.status);
   if (!started.id || isOpenAiTerminalStatus(firstStatus)) return assertOpenAiResponseUsable(started, label);
 
@@ -1309,6 +2166,9 @@ async function waitForOpenAiResponse(started, label, progress) {
   let pollCount = 0;
   let latest = started;
   while (true) {
+    if (generationId && state.generationId !== generationId) {
+      throw new Error("This AI request was superseded by a newer build session.");
+    }
     const elapsedMs = Date.now() - startedAt;
     progress({
       status: normalizeOpenAiStatus(latest.status),
@@ -1325,7 +2185,7 @@ async function waitForOpenAiResponse(started, label, progress) {
 
     await sleep(Math.min(6500, AI_POLL_BASE_INTERVAL_MS + pollCount * 450));
     latest = await apiJson(`/api/openai/responses/${encodeURIComponent(started.id)}`, {
-      generationId: state.generationId,
+      generationId,
     });
     const status = normalizeOpenAiStatus(latest.status);
     if (isOpenAiTerminalStatus(status)) return assertOpenAiResponseUsable(latest, label);
@@ -1370,8 +2230,9 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function generateFirmwareForPlan(idea) {
-  if (!state.plan) return;
+async function generateFirmwareForPlan(idea, generationContext) {
+  const plan = state.plan;
+  if (!plan || !isGenerationCurrent(generationContext, plan)) return false;
   setStatus(els.transcriptBox, "Preparing the board software securely...", "warn");
 
   const payload = {
@@ -1388,7 +2249,7 @@ async function generateFirmwareForPlan(idea) {
         content: [
           {
             type: "input_text",
-            text: buildFirmwarePrompt(idea, state.plan),
+            text: buildFirmwarePrompt(idea, plan),
           },
         ],
       },
@@ -1405,7 +2266,9 @@ async function generateFirmwareForPlan(idea) {
 
   const data = await openAiResponse(payload, {
     label: "firmware",
+    generationId: generationContext.generationId,
     onProgress: ({ elapsedLabel, message }) => {
+      if (!isGenerationCurrent(generationContext, plan)) return;
       setStatus(
         els.transcriptBox,
         message || `Still preparing the board software (${elapsedLabel}).`,
@@ -1413,17 +2276,24 @@ async function generateFirmwareForPlan(idea) {
       );
     },
   });
-  state.plan.firmware = normalizeFirmware(parseStructuredJson(data, "firmware"));
-  const profile = selectBoardProfile(state.plan);
+  if (!isGenerationCurrent(generationContext, plan)) return false;
+  plan.firmware = normalizeFirmware(parseStructuredJson(data, "firmware"));
+  const profile = selectBoardProfile(plan);
   if (!profile) throw new Error("The generated guide does not contain a supported ESP32 board.");
   setStatus(els.transcriptBox, "Checking the board software with the hosted ESP32 compiler...", "warn");
-  state.compiledFirmware = await compileFirmwareWithAutomaticRepair(profile, {
+  const compiledFirmware = await compileFirmwareWithAutomaticRepair(profile, {
     idea,
+    plan,
+    generationId: generationContext.generationId,
     onProgress(message) {
+      if (!isGenerationCurrent(generationContext, plan)) return;
       setStatus(els.transcriptBox, message, "warn");
     },
   });
+  if (!isGenerationCurrent(generationContext, plan)) return false;
+  state.compiledFirmware = compiledFirmware;
   setStatus(els.transcriptBox, "The guide and verified board software are ready.", "ok");
+  return true;
 }
 
 function buildFirmwarePrompt(idea, plan) {
@@ -1465,7 +2335,8 @@ function buildFirmwarePrompt(idea, plan) {
 }
 
 async function compileFirmwareWithAutomaticRepair(profile, options = {}) {
-  let sketch = state.plan?.firmware?.sketch || "";
+  const targetPlan = options.plan || state.plan;
+  let sketch = targetPlan?.firmware?.sketch || "";
   try {
     return await compileFirmwareSketch(sketch, profile);
   } catch (error) {
@@ -1480,8 +2351,12 @@ async function compileFirmwareWithAutomaticRepair(profile, options = {}) {
       sketch,
       details,
       onProgress: options.onProgress,
+      generationId: options.generationId,
     });
-    state.plan.firmware = repaired;
+    if (options.generationId && state.generationId !== options.generationId) {
+      throw new Error("This firmware request was superseded by a newer build session.");
+    }
+    targetPlan.firmware = repaired;
     sketch = repaired.sketch;
     options.onProgress?.("The repair is ready. Verifying it with the ESP32 compiler...");
     try {
@@ -1507,7 +2382,7 @@ function compilerFailureDetails(error) {
   return String(error?.apiData?.details || "").trim();
 }
 
-async function repairFirmwareForCompilerError({ idea, profile, sketch, details, onProgress }) {
+async function repairFirmwareForCompilerError({ idea, profile, sketch, details, onProgress, generationId }) {
   const payload = {
     model: settings.openaiReasoningModel,
     reasoning: { effort: settings.openaiReasoningEffort || DEFAULT_REASONING_EFFORT },
@@ -1550,6 +2425,7 @@ async function repairFirmwareForCompilerError({ idea, profile, sketch, details, 
   };
   const data = await openAiResponse(payload, {
     label: "firmware repair",
+    generationId,
     onProgress: ({ elapsedLabel, message }) => {
       onProgress?.(message || `Repairing the board software (${elapsedLabel}).`);
     },
@@ -1566,7 +2442,7 @@ function normalizeFirmware(firmware) {
 }
 
 function normalizePlan(plan) {
-  const wiringSteps = Array.isArray(plan.wiringSteps) ? plan.wiringSteps.map(normalizeWiringStep) : [];
+  const wiringSteps = Array.isArray(plan.wiringSteps) ? plan.wiringSteps : [];
   const rawParts = Array.isArray(plan.parts) ? plan.parts : [];
   const firmwareSpec = plan.firmwareSpec || {
     board: "ESP32",
@@ -1577,7 +2453,8 @@ function normalizePlan(plan) {
   };
   const projectParts = filterProjectParts(rawParts, wiringSteps, firmwareSpec, plan.summary || "");
 
-  return {
+  return normalizeBeginnerPlan({
+    ...plan,
     projectTitle: plan.projectTitle || "Makeable Build",
     summary: plan.summary || "",
     parts: projectParts.length ? projectParts : rawParts,
@@ -1587,7 +2464,7 @@ function normalizePlan(plan) {
     firmwareSpec,
     firmware: plan.firmware ? normalizeFirmware(plan.firmware) : null,
     readmeMarkdown: plan.readmeMarkdown || "",
-  };
+  });
 }
 
 function filterProjectParts(parts, wiringSteps, firmwareSpec, summary) {
@@ -1599,12 +2476,15 @@ function filterProjectParts(parts, wiringSteps, firmwareSpec, summary) {
       summary,
       firmwareSpec?.behavior,
       ...(firmwareSpec?.pinAssignments || []).map((pin) => `${pin.label} ${pin.purpose}`),
-      ...wiringSteps.map((step) => `${step.title} ${step.instruction} ${step.from} ${step.to} ${step.fromPartId} ${step.toPartId} ${step.pin}`),
+      ...wiringSteps.map(
+        (step) =>
+          `${step.title} ${step.action || step.instruction} ${step.from} ${step.to} ${step.fromPartId} ${step.toPartId} ${step.fromPrintedPin} ${step.toPrintedPin} ${step.pin}`,
+      ),
     ].join(" "),
   );
 
   wiringSteps.forEach((step) => {
-    [step.fromPartId, step.toPartId, step.from, step.to].forEach((value) => {
+    [step.fromPartId, step.toPartId, step.from, step.to, ...(step.requiredPartIds || [])].forEach((value) => {
       const normalized = normalizeText(value);
       if (normalized) explicitRefs.add(normalized);
     });
@@ -1633,36 +2513,6 @@ function filterProjectParts(parts, wiringSteps, firmwareSpec, summary) {
   });
 }
 
-function normalizeWiringStep(step, index) {
-  return {
-    order: Number.isFinite(step.order) ? step.order : index + 1,
-    title: step.title || `Connection ${index + 1}`,
-    instruction: step.instruction || "",
-    from: step.from || "",
-    to: step.to || "",
-    fromPartId: step.fromPartId || "",
-    toPartId: step.toPartId || "",
-    pin: step.pin || "",
-    wireColor: step.wireColor || "",
-    check: step.check || "",
-  };
-}
-
-function validatePlan(plan) {
-  const warnings = [];
-  const avoidPins = new Set(["GPIO0", "GPIO2", "GPIO12", "GPIO15", "0", "2", "12", "15"]);
-  for (const step of plan.wiringSteps || []) {
-    const pin = String(step.pin || "").toUpperCase().replace(/\s+/g, "");
-    if (avoidPins.has(pin)) {
-      warnings.push(`Review ${step.pin}: it can affect ESP32 boot behavior on some boards.`);
-    }
-  }
-  if (!plan.parts.some((part) => /esp32/i.test(part.name))) {
-    warnings.push("No ESP32 was confidently identified in the image.");
-  }
-  return warnings;
-}
-
 function renderEmptyPlan() {
   const controls = getBuildStepControls();
   els.partsList.innerHTML = "";
@@ -1675,6 +2525,7 @@ function renderEmptyPlan() {
   if (els.buildStepDots) els.buildStepDots.innerHTML = "";
   if (els.prevBuildStepButton) els.prevBuildStepButton.disabled = true;
   if (els.nextBuildStepButton) els.nextBuildStepButton.disabled = true;
+  updatePublishControls();
 }
 
 function renderPlan() {
@@ -1691,7 +2542,8 @@ function renderPlan() {
     row.className = "item-row";
     row.innerHTML = `<strong></strong><span></span>`;
     row.querySelector("strong").textContent = part.name;
-    row.querySelector("span").textContent = `${part.role} · ${Math.round((part.confidence || 0) * 100)}% confidence`;
+    const support = String(part.compatibilityStatus || "").replaceAll("_", " ");
+    row.querySelector("span").textContent = `${part.role} · ${Math.round((part.confidence || 0) * 100)}% confidence${support ? ` · ${support}` : ""}`;
     els.partsList.append(row);
   });
   if (!plan.parts.length) renderEmptyPlan();
@@ -1701,7 +2553,7 @@ function renderPlan() {
     const item = document.createElement("li");
     item.innerHTML = `<strong></strong><span></span>`;
     item.querySelector("strong").textContent = `${step.order}. ${step.title}`;
-    item.querySelector("span").textContent = `${step.instruction} Check: ${step.check}`;
+    item.querySelector("span").textContent = `${wireDescription(step)}. ${step.action} Check: ${step.quickCheck}`;
     els.wiringList.append(item);
   });
 
@@ -1711,13 +2563,22 @@ function renderPlan() {
     row.className = "item-row";
     row.innerHTML = `<strong></strong><span></span>`;
     row.querySelector("strong").textContent = check.name;
-    row.querySelector("span").textContent = `${check.purpose} Expected: ${check.expectedSerial}`;
+    const related = plan.wiringSteps.find(({ connectionId }) => connectionId === check.connectionId);
+    const repair = related ? ` If it fails, open ${wireDescription(related)}.` : "";
+    row.querySelector("span").textContent = `${check.purpose} Expected: ${check.expectedSerial}.${repair}`;
     els.diagnosticsList.append(row);
   });
 
+  state.planIssues = validateBeginnerPlan(plan);
+  renderPreparation();
+  renderWireLegend();
   renderVisualSteps();
+  renderOperatingGuide();
+  renderFlashState(state.flashStatus === "success" ? "success" : state.flashPhase || "cable");
   state.readme = buildReadme();
   els.readmePreview.textContent = state.readme;
+  if (els.projectTitlePreview) els.projectTitlePreview.textContent = plan.projectTitle;
+  updatePublishControls();
 }
 
 function warningToDiagnostic(warning) {
@@ -1729,10 +2590,103 @@ function warningToDiagnostic(warning) {
   };
 }
 
+function renderPreparation() {
+  const plan = state.plan;
+  if (!plan) return;
+  const detectedProfile = selectBoardProfile(plan);
+  const fallbackGuide = boardHumanGuide(detectedProfile?.id || "esp32");
+  const profile = plan.boardProfile || {};
+  const supportStatus = profile.supportStatus || fallbackGuide.supportStatus;
+  const supportLabels = {
+    exactly_supported: "Exact layout confirmed",
+    compatible_with_differences: "Compatible—match printed labels",
+    unverified: "Board layout not verified",
+  };
+  if (els.boardSupportBadge) {
+    els.boardSupportBadge.textContent = supportLabels[supportStatus] || supportLabels.unverified;
+    els.boardSupportBadge.dataset.support = supportStatus;
+  }
+  const boardName = [profile.manufacturer, profile.model, profile.revision]
+    .filter((value) => value && !/^unknown|unconfirmed$/i.test(value))
+    .join(" · ");
+  if (els.boardIdentity) {
+    els.boardIdentity.textContent = `${boardName || detectedProfile?.label || "ESP32 board"}. Reset is printed ${profile.resetLabel || fallbackGuide.resetLabel}; BOOT is printed ${profile.bootLabel || fallbackGuide.bootLabel}.`;
+  }
+  if (els.usbCableGuide) {
+    els.usbCableGuide.textContent = `${plan.preparation?.usbCable || "Use a confirmed USB data cable."} Board connector: ${profile.usbConnector || fallbackGuide.usbConnector}.`;
+  }
+  if (els.usbCableName) els.usbCableName.textContent = plan.preparation?.usbCable || "the confirmed USB data cable";
+  if (els.boardUsbPort) els.boardUsbPort.textContent = profile.usbConnector || fallbackGuide.usbConnector;
+
+  if (els.cableInventoryList) {
+    els.cableInventoryList.innerHTML = "";
+    for (const wire of plan.preparation?.wires || []) {
+      const step = plan.wiringSteps.find(({ connectionId }) => connectionId === wire.connectionId);
+      const item = document.createElement("li");
+      item.textContent = `${wire.color || step?.wireColor || "One"} ${wire.connectorType || step?.wireType || "jumper wire"} · ${wireDescription(step || {})}`;
+      els.cableInventoryList.append(item);
+    }
+  }
+
+  if (els.planIssues) {
+    els.planIssues.innerHTML = "";
+    for (const planIssue of state.planIssues) {
+      const item = document.createElement("p");
+      item.className = `plan-issue plan-issue--${planIssue.severity}`;
+      item.textContent = `${planIssue.severity === "block" ? "Stop: " : "Check: "}${planIssue.message}`;
+      els.planIssues.append(item);
+    }
+    els.planIssues.hidden = state.planIssues.length === 0;
+  }
+  updatePreparationControls();
+}
+
+function updatePreparationControls() {
+  const hasBlocker = state.planIssues.some(({ severity }) => severity === "block");
+  if (els.beginAssemblyButton) {
+    els.beginAssemblyButton.disabled = !state.plan || !state.preparationConfirmed || hasBlocker;
+    els.beginAssemblyButton.textContent = hasBlocker ? "Wiring paused for safety" : "Start connection 1";
+  }
+  if (els.showCodeButton) {
+    els.showCodeButton.disabled = state.completedConnectionIds.size < (state.plan?.wiringSteps?.length || 0);
+  }
+}
+
+function beginAssembly() {
+  state.preparationConfirmed = Boolean(els.preparationConfirmed?.checked);
+  const blocker = state.planIssues.find(({ severity }) => severity === "block");
+  if (blocker) {
+    setStatus(els.esp32Status, `Wiring is paused: ${blocker.message}`, "danger");
+    els.planIssues?.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+  if (!state.preparationConfirmed) {
+    els.preparationConfirmed?.focus();
+    return;
+  }
+  state.activeBuildStepIndex = 0;
+  setBuildMode("wiring");
+  renderVisualSteps();
+}
+
+function renderWireLegend() {
+  if (!els.wireLegend) return;
+  els.wireLegend.innerHTML = "";
+  for (const step of state.plan?.wiringSteps || []) {
+    const item = document.createElement("div");
+    item.className = "wire-legend-item";
+    item.dataset.connectionId = step.connectionId;
+    item.innerHTML = "<i aria-hidden=\"true\"></i><span></span>";
+    item.querySelector("i").style.setProperty("--wire-color", stepColor(step.wireColor, step.order - 1));
+    item.querySelector("span").textContent = wireDescription(step);
+    els.wireLegend.append(item);
+  }
+}
+
 function renderVisualSteps() {
   if (!els.visualStepList) return;
   const plan = state.plan;
-  if (!plan?.wiringSteps?.length || !state.imageElement) {
+  if (!plan?.wiringSteps?.length) {
     renderEmptyPlan();
     return;
   }
@@ -1742,24 +2696,48 @@ function renderVisualSteps() {
   state.activeBuildStepIndex = activeIndex;
   const step = steps[activeIndex];
 
-  const controls = getBuildStepControls();
+  restoreBuildStepControls();
   els.visualStepList.innerHTML = "";
   const card = document.createElement("div");
   card.className = "visual-step-card is-active";
+  const photo = document.createElement("div");
+  photo.className = "step-photo-pane";
   const canvas = document.createElement("canvas");
+  canvas.setAttribute("aria-label", `Photo showing connection ${activeIndex + 1}`);
+  const reference = document.createElement("aside");
+  reference.className = "pin-reference";
+  reference.innerHTML = `<span>Your photo · exact receptacles</span><div class="pin-reference-views"><figure><canvas data-pin-side="from"></canvas><figcaption></figcaption></figure><i aria-hidden="true">→</i><figure><canvas data-pin-side="to"></canvas><figcaption></figcaption></figure></div><p></p>`;
+  reference.querySelector("[data-pin-side='from']").setAttribute("aria-label", `Close-up of ${step.fromPrintedPin} in your photo`);
+  reference.querySelector("[data-pin-side='to']").setAttribute("aria-label", `Close-up of ${step.toPrintedPin} in your photo`);
+  reference.querySelectorAll("figcaption")[0].textContent = step.fromPrintedPin;
+  reference.querySelectorAll("figcaption")[1].textContent = step.toPrintedPin;
+  reference.querySelector("p").textContent = state.imageElement
+    ? "These are crops from your photo—not a guessed board layout. Match the highlighted metal pin or hole, then read the printed label once more."
+    : "The exact crops appear here when the parts photo is available.";
+  photo.append(canvas, reference);
   const copy = document.createElement("div");
   copy.className = "visual-step-copy";
   const meta = document.createElement("p");
   const title = document.createElement("strong");
+  const route = document.createElement("span");
   const body = document.createElement("span");
   meta.className = "step-copy-kicker";
   title.className = "step-copy-title";
+  route.className = "step-copy-route";
   body.className = "step-copy-instruction";
-  meta.textContent = `Move ${step.order || activeIndex + 1} of ${steps.length}`;
-  title.textContent = step.title || "Next connection";
-  body.textContent = step.instruction;
-  copy.append(meta, title, body);
-  if (step.check) {
+  meta.textContent = `Connection ${activeIndex + 1} of ${steps.length}`;
+  title.textContent = wireDescription(step);
+  route.textContent = `${step.fromPrintedPin} → ${step.toPrintedPin}`;
+  body.textContent = step.action;
+  copy.append(meta, title, route, body);
+  const aliases = [step.fromElectricalAlias, step.toElectricalAlias].filter(Boolean);
+  if (aliases.length) {
+    const alias = document.createElement("p");
+    alias.className = "step-copy-alias";
+    alias.textContent = `Electrical name: ${aliases.join(" → ")}. Follow the printed labels above.`;
+    copy.append(alias);
+  }
+  if (step.quickCheck) {
     const check = document.createElement("aside");
     const checkLabel = document.createElement("span");
     const checkText = document.createElement("p");
@@ -1767,34 +2745,57 @@ function renderVisualSteps() {
     checkLabel.className = "step-copy-tip-label";
     checkText.className = "step-copy-tip-text";
     checkLabel.textContent = "Quick check";
-    checkText.textContent = step.check;
+    checkText.textContent = step.quickCheck;
     check.append(checkLabel, checkText);
     copy.append(check);
   }
+  if (step.warning) {
+    const warning = document.createElement("aside");
+    warning.className = "step-copy-warning";
+    warning.innerHTML = "<strong>Stop and check</strong><p></p>";
+    warning.querySelector("p").textContent = step.warning;
+    copy.append(warning);
+  }
+  if (step.why) {
+    const why = document.createElement("details");
+    why.className = "step-copy-why";
+    why.innerHTML = "<summary>Why this connection?</summary><p></p>";
+    why.querySelector("p").textContent = step.why;
+    copy.append(why);
+  }
+  if (els.wireLegend) {
+    els.wireLegend.classList.add("is-inline");
+    copy.append(els.wireLegend);
+  }
+  const controls = getBuildStepControls();
   if (controls) {
     controls.classList.add("is-inline");
-    copy.append(controls);
   }
-  card.append(canvas, copy);
+  card.append(photo, copy);
   els.visualStepList.append(card);
+  restoreBuildStepControls(controls);
 
-  if (els.buildStepCounter) els.buildStepCounter.textContent = `Move ${activeIndex + 1} of ${steps.length}`;
+  if (els.buildStepCounter) els.buildStepCounter.textContent = `Connection ${activeIndex + 1} of ${steps.length}`;
   renderBuildStepDots(steps.length, activeIndex);
   if (els.prevBuildStepButton) els.prevBuildStepButton.disabled = activeIndex === 0;
   if (els.nextBuildStepButton) {
     els.nextBuildStepButton.disabled = false;
-    els.nextBuildStepButton.textContent = activeIndex === steps.length - 1 ? "Connect & load" : "I connected it";
+    els.nextBuildStepButton.textContent = activeIndex === steps.length - 1 ? "All wires connected" : "I connected it";
   }
 
-  requestAnimationFrame(() => drawVisualStep(canvas, step, activeIndex));
+  requestAnimationFrame(() => {
+    drawVisualStep(canvas, step, activeIndex);
+    drawPinReference(reference.querySelector("[data-pin-side='from']"), step.fromPinBbox, step.fromPrintedPin, "#4f46e5");
+    drawPinReference(reference.querySelector("[data-pin-side='to']"), step.toPinBbox, step.toPrintedPin, stepColor(step.wireColor, activeIndex));
+  });
 }
 
 function getBuildStepControls() {
-  return document.querySelector("#plan .carousel-controls");
+  return document.querySelector("#flash .carousel-controls");
 }
 
 function restoreBuildStepControls(controls = getBuildStepControls()) {
-  const panel = document.querySelector("#plan .visual-guide-panel");
+  const panel = document.querySelector("#flash .visual-guide-panel");
   if (!controls || !panel) return;
   controls.classList.remove("is-inline");
   panel.append(controls);
@@ -1806,7 +2807,10 @@ function renderBuildStepDots(count, activeIndex) {
   for (let index = 0; index < count; index += 1) {
     const dot = document.createElement("button");
     dot.type = "button";
-    dot.className = index === activeIndex ? "is-active" : "";
+    const connectionId = state.plan?.wiringSteps?.[index]?.connectionId;
+    dot.className = [index === activeIndex ? "is-active" : "", state.completedConnectionIds.has(connectionId) ? "is-complete" : ""]
+      .filter(Boolean)
+      .join(" ");
     dot.setAttribute("aria-label", `Go to build step ${index + 1}`);
     dot.addEventListener("click", () => setActiveBuildStep(index));
     els.buildStepDots.append(dot);
@@ -1823,7 +2827,10 @@ function setActiveBuildStep(index) {
 function advanceBuildStep() {
   const count = state.plan?.wiringSteps?.length || 0;
   if (!count) return;
+  const step = state.plan.wiringSteps[state.activeBuildStepIndex];
+  if (step?.connectionId) state.completedConnectionIds.add(step.connectionId);
   if (state.activeBuildStepIndex >= count - 1) {
+    if (els.showCodeButton) els.showCodeButton.disabled = false;
     setBuildMode("code");
     return;
   }
@@ -1831,14 +2838,18 @@ function advanceBuildStep() {
 }
 
 function setBuildMode(mode) {
-  const showCode = mode === "code";
-  if (els.wiringWorkspace) els.wiringWorkspace.hidden = showCode;
+  const resolvedMode = mode === "wiring" && !state.preparationConfirmed ? "prepare" : mode;
+  const showPreparation = resolvedMode === "prepare";
+  const showCode = resolvedMode === "code";
+  if (showCode && state.completedConnectionIds.size < (state.plan?.wiringSteps?.length || 0)) return;
+  if (els.buildPreparation) els.buildPreparation.hidden = !showPreparation;
+  if (els.wiringWorkspace) els.wiringWorkspace.hidden = showPreparation || showCode;
   if (els.codeWorkspace) els.codeWorkspace.hidden = !showCode;
-  els.showWiringButton?.classList.toggle("is-active", !showCode);
+  els.showWiringButton?.classList.toggle("is-active", !showPreparation && !showCode);
   els.showCodeButton?.classList.toggle("is-active", showCode);
-  els.showWiringButton?.setAttribute("aria-selected", String(!showCode));
+  els.showWiringButton?.setAttribute("aria-selected", String(!showPreparation && !showCode));
   els.showCodeButton?.setAttribute("aria-selected", String(showCode));
-  if (!showCode) requestAnimationFrame(renderVisualSteps);
+  if (!showPreparation && !showCode) requestAnimationFrame(renderVisualSteps);
 }
 
 function drawVisualStep(canvas, step, index) {
@@ -1861,40 +2872,112 @@ function drawVisualStep(canvas, step, index) {
   if (fromPart) drawStepPartFrame(ctx, fit, fromPart, "#4f46e5");
   if (toPart && toPart !== fromPart) drawStepPartFrame(ctx, fit, toPart, color);
 
-  if (fromPart && toPart && fromPart !== toPart) {
-    const fromBox = partBox(fromPart, fit);
-    const toBox = partBox(toPart, fit);
-    const fromCenter = rectCenter(fromBox);
-    const toCenter = rectCenter(toBox);
-    const fromPoint = pointOnRectEdge(fromBox, toCenter);
-    const toPoint = pointOnRectEdge(toBox, fromCenter);
+  const fromPinBox = photoCoordinateBox(step.fromPinBbox, fit);
+  const toPinBox = photoCoordinateBox(step.toPinBbox, fit);
+  if (fromPinBox && toPinBox) {
+    const fromCenter = rectCenter(fromPinBox);
+    const toCenter = rectCenter(toPinBox);
+    const fromPoint = pointOnRectEdge(fromPinBox, toCenter);
+    const toPoint = pointOnRectEdge(toPinBox, fromCenter);
     drawArrow(ctx, fromPoint.x, fromPoint.y, toPoint.x, toPoint.y, color);
+    drawExactPinFrame(ctx, fromPinBox, "#4f46e5");
+    drawExactPinFrame(ctx, toPinBox, color);
   }
 
   if (fromPart) drawStepPartLabel(ctx, fit, fromPart, "#4f46e5", placedBadges);
   if (toPart && toPart !== fromPart) drawStepPartLabel(ctx, fit, toPart, color, placedBadges);
 
-  if (fromPart && toPart && fromPart !== toPart) {
-    const fromCenter = partCenter(fromPart, fit);
-    const toCenter = partCenter(toPart, fit);
-    drawPlacedStepBadge(
-      ctx,
-      cleanPinLabel(step.pin || "wire"),
-      anchorBox((fromCenter.x + toCenter.x) / 2, (fromCenter.y + toCenter.y) / 2),
-      fit,
-      color,
-      placedBadges,
-    );
+  if (fromPinBox && toPinBox) {
+    drawPlacedStepBadge(ctx, cleanPinLabel(step.fromPrintedPin || "start"), fromPinBox, fit, "#4f46e5", placedBadges);
+    drawPlacedStepBadge(ctx, cleanPinLabel(step.toPrintedPin || step.pin || "target"), toPinBox, fit, color, placedBadges);
   } else {
     drawPlacedStepBadge(
       ctx,
-      cleanPinLabel(step.pin || step.from || "wire"),
+      cleanPinLabel(step.toPrintedPin || step.pin || step.from || "wire"),
       anchorBox(fit.x + fit.width / 2, fit.y + 28),
       fit,
       color,
       placedBadges,
     );
   }
+}
+
+function normalizedPhotoBbox(bbox) {
+  if (!bbox || typeof bbox !== "object") return null;
+  const values = [bbox.x, bbox.y, bbox.width, bbox.height].map(Number);
+  if (!values.every(Number.isFinite)) return null;
+  const scale = Math.max(...values) > 100 ? 0.1 : 1;
+  const [x, y, width, height] = values.map((value) => value * scale);
+  if (x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 100 || y + height > 100) return null;
+  return { x, y, width, height };
+}
+
+function photoCoordinateBox(bbox, fit) {
+  const normalized = normalizedPhotoBbox(bbox);
+  if (!normalized || !fit) return null;
+  return {
+    x: fit.x + (normalized.x / 100) * fit.width,
+    y: fit.y + (normalized.y / 100) * fit.height,
+    width: (normalized.width / 100) * fit.width,
+    height: (normalized.height / 100) * fit.height,
+  };
+}
+
+function drawExactPinFrame(ctx, box, color) {
+  const padding = 5;
+  ctx.save();
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 8;
+  ctx.strokeRect(box.x - padding, box.y - padding, box.width + padding * 2, box.height + padding * 2);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 4;
+  ctx.strokeRect(box.x - padding, box.y - padding, box.width + padding * 2, box.height + padding * 2);
+  ctx.fillStyle = `${color}26`;
+  ctx.fillRect(box.x - padding, box.y - padding, box.width + padding * 2, box.height + padding * 2);
+  ctx.restore();
+}
+
+function drawPinReference(canvas, bbox, label, color) {
+  if (!canvas) return;
+  const { ctx, width, height } = prepareCanvas(canvas);
+  const normalized = normalizedPhotoBbox(bbox);
+  const image = state.imageElement;
+  ctx.fillStyle = "#f3f0e9";
+  ctx.fillRect(0, 0, width, height);
+  if (!image || !normalized) {
+    ctx.fillStyle = "#5f5a53";
+    ctx.font = "700 13px Inter, system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(label || "Pin", width / 2, height / 2 + 5);
+    return;
+  }
+
+  const imageWidth = image.naturalWidth;
+  const imageHeight = image.naturalHeight;
+  const pin = {
+    x: (normalized.x / 100) * imageWidth,
+    y: (normalized.y / 100) * imageHeight,
+    width: (normalized.width / 100) * imageWidth,
+    height: (normalized.height / 100) * imageHeight,
+  };
+  const cropSize = Math.min(
+    imageWidth,
+    imageHeight,
+    Math.max(pin.width * 6, pin.height * 6, Math.min(imageWidth, imageHeight) * 0.14),
+  );
+  const cropX = clamp(pin.x + pin.width / 2 - cropSize / 2, 0, imageWidth - cropSize);
+  const cropY = clamp(pin.y + pin.height / 2 - cropSize / 2, 0, imageHeight - cropSize);
+  ctx.drawImage(image, cropX, cropY, cropSize, cropSize, 0, 0, width, height);
+
+  const scaleX = width / cropSize;
+  const scaleY = height / cropSize;
+  const highlighted = {
+    x: (pin.x - cropX) * scaleX,
+    y: (pin.y - cropY) * scaleY,
+    width: Math.max(8, pin.width * scaleX),
+    height: Math.max(8, pin.height * scaleY),
+  };
+  drawExactPinFrame(ctx, highlighted, color);
 }
 
 function prepareCanvas(canvas) {
@@ -2027,12 +3110,7 @@ function anchorBox(centerX, centerY) {
 
 function cleanPinLabel(value) {
   const text = String(value || "wire").trim();
-  const upper = text.toUpperCase();
-  if (/\bGND\b|GROUND/.test(upper)) return "GND";
-  if (/\b3V3\b|\b3\.3V\b|\bVCC\b|\bVIN\b|\b5V\b/.test(upper)) return upper.match(/3V3|3\.3V|VCC|VIN|5V/)?.[0] || "VCC";
-  const gpio = upper.match(/GPIO\s*([0-9]+)/) || upper.match(/\bD?([0-9]{1,2})\b/);
-  if (gpio) return `GPIO ${gpio[1]}`;
-  return text.replace(/\s+/g, " ").slice(0, 14);
+  return text.replace(/\s+/g, " ").slice(0, 18);
 }
 
 function drawPlacedStepBadge(ctx, text, anchor, fit, color, placedBadges = []) {
@@ -2073,9 +3151,11 @@ async function startVoiceCapture() {
   setVoiceStatus("Getting ready", "warn");
   els.startVoiceButton.disabled = true;
   els.stopVoiceButton.disabled = false;
+  const voiceEpoch = ++state.voiceEpoch;
 
   try {
     const accessToken = await getAccessToken();
+    if (state.voiceEpoch !== voiceEpoch) return;
     const apiBase = String(serverConfig.apiBaseUrl || window.location.origin).replace(/\/$/, "");
     const url = new URL(`${apiBase}/api/deepgram/listen`);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -2086,9 +3166,20 @@ async function startVoiceCapture() {
     url.searchParams.set("utterance_end_ms", "1000");
     url.searchParams.set("vad_events", "true");
 
-    state.deepgramSocket = new WebSocket(url, ["makeable", accessToken]);
-    state.deepgramSocket.onopen = async () => {
-      state.voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const socket = new WebSocket(url, ["makeable", accessToken]);
+    state.deepgramSocket = socket;
+    socket.onopen = async () => {
+      if (state.voiceEpoch !== voiceEpoch || state.deepgramSocket !== socket) {
+        socket.close();
+        return;
+      }
+      const voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (state.voiceEpoch !== voiceEpoch || state.deepgramSocket !== socket) {
+        voiceStream.getTracks().forEach((track) => track.stop());
+        socket.close();
+        return;
+      }
+      state.voiceStream = voiceStream;
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
         : "audio/webm";
@@ -2101,13 +3192,21 @@ async function startVoiceCapture() {
       state.voiceRecorder.start(250);
       setVoiceStatus("Listening", "ok");
     };
-    state.deepgramSocket.onmessage = (message) => handleDeepgramMessage(message.data);
-    state.deepgramSocket.onerror = () => setVoiceStatus("Voice paused", "danger");
-    state.deepgramSocket.onclose = () => {
+    socket.onmessage = (message) => {
+      if (state.voiceEpoch === voiceEpoch && state.deepgramSocket === socket) {
+        handleDeepgramMessage(message.data);
+      }
+    };
+    socket.onerror = () => {
+      if (state.voiceEpoch === voiceEpoch) setVoiceStatus("Voice paused", "danger");
+    };
+    socket.onclose = () => {
+      if (state.voiceEpoch !== voiceEpoch) return;
       if (els.stopVoiceButton.disabled === false) setVoiceStatus("Stopped", "warn");
     };
   } catch (error) {
     console.error(error);
+    if (state.voiceEpoch !== voiceEpoch) return;
     setVoiceStatus(error.message, "danger");
     stopVoiceCapture();
   }
@@ -2128,6 +3227,7 @@ function handleDeepgramMessage(raw) {
     state.finalTranscript = [state.finalTranscript, transcript].filter(Boolean).join(" ").trim();
     state.interimTranscript = "";
     els.ideaText.value = [els.ideaText.value.trim(), transcript].filter(Boolean).join(" ").trim();
+    handleIdeaChange();
   } else {
     state.interimTranscript = transcript;
   }
@@ -2142,20 +3242,28 @@ function handleDeepgramMessage(raw) {
 }
 
 function stopVoiceCapture() {
+  state.voiceEpoch += 1;
+  const socket = state.deepgramSocket;
+  const recorder = state.voiceRecorder;
+  const stream = state.voiceStream;
+  state.voiceRecorder = null;
+  state.voiceStream = null;
+  state.deepgramSocket = null;
   try {
-    if (state.deepgramSocket?.readyState === WebSocket.OPEN) {
-      state.deepgramSocket.send(JSON.stringify({ type: "Finalize" }));
-      state.deepgramSocket.send(JSON.stringify({ type: "CloseStream" }));
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "Finalize" }));
+      socket.send(JSON.stringify({ type: "CloseStream" }));
     }
   } catch {
     // Best effort finalization.
   }
-  state.voiceRecorder?.stop();
-  state.voiceStream?.getTracks().forEach((track) => track.stop());
-  state.deepgramSocket?.close();
-  state.voiceRecorder = null;
-  state.voiceStream = null;
-  state.deepgramSocket = null;
+  try {
+    if (recorder?.state !== "inactive") recorder?.stop();
+  } catch {
+    // The recorder may already be stopping.
+  }
+  stream?.getTracks().forEach((track) => track.stop());
+  socket?.close();
   els.startVoiceButton.disabled = false;
   els.stopVoiceButton.disabled = true;
   setVoiceStatus("Ready", "");
@@ -2172,24 +3280,39 @@ async function connectSerial() {
     return;
   }
 
+  const serialEpoch = ++state.serialEpoch;
   try {
-    state.serialPort = await findOrRequestEspPort();
-    await state.serialPort.open({ baudRate: Number(els.baudRateInput.value) || 115200 });
+    beginAutomaticTestAttempt();
+    const port = await findOrRequestEspPort();
+    if (state.serialEpoch !== serialEpoch) return;
+    await port.open({ baudRate: Number(els.baudRateInput.value) || 115200 });
+    if (state.serialEpoch !== serialEpoch) {
+      await port.close().catch(() => {});
+      return;
+    }
+    state.serialPort = port;
     els.connectSerialButton.disabled = true;
     els.disconnectSerialButton.disabled = false;
     els.sendSerialButton.disabled = false;
+    els.evaluateLogsButton.disabled = false;
     appendSerial("Makeable: I’m listening now. If the board speaks, you’ll see it here.\n");
+    state.diagnosticLogOffset = state.serialLog.length;
+    state.automaticTestStatus = "pending";
+    state.diagnosticFailure = null;
+    renderDiagnosticFailure();
     setStatus(els.logEvaluation, "Connected. Waiting for the board to say something.", "ok");
-    readSerialLoop();
+    readSerialLoop(serialEpoch, port);
   } catch (error) {
     console.error(error);
-    setStatus(els.logEvaluation, `I couldn’t connect yet: ${error.message}`, "danger");
+    if (state.serialEpoch === serialEpoch) {
+      setStatus(els.logEvaluation, `I couldn’t connect yet: ${error.message}`, "danger");
+    }
   }
 }
 
-async function readSerialLoop() {
+async function readSerialLoop(serialEpoch, port) {
   const decoder = new TextDecoderStream();
-  state.serialReadableClosed = state.serialPort.readable.pipeTo(decoder.writable).catch(() => {});
+  state.serialReadableClosed = port.readable.pipeTo(decoder.writable).catch(() => {});
   const reader = decoder.readable.getReader();
   state.serialReader = reader;
 
@@ -2197,27 +3320,31 @@ async function readSerialLoop() {
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
-      if (value) appendSerial(value);
+      if (value && state.serialEpoch === serialEpoch && state.serialPort === port) appendSerial(value);
     }
   } catch (error) {
-    appendSerial(`\n[serial read stopped] ${error.message}\n`);
+    if (state.serialEpoch === serialEpoch) appendSerial(`\n[serial read stopped] ${error.message}\n`);
   } finally {
     try {
       reader.releaseLock();
     } catch {
       // The port may already have released the reader while disconnecting.
     }
-    if (state.serialReader === reader) state.serialReader = null;
+    if (state.serialEpoch === serialEpoch && state.serialReader === reader) state.serialReader = null;
   }
 }
 
-async function disconnectSerial() {
+async function disconnectSerial({ announce = true } = {}) {
+  const disconnectEpoch = ++state.serialEpoch;
   const reader = state.serialReader;
   const readableClosed = state.serialReadableClosed;
   const port = state.serialPort;
   state.serialReader = null;
   state.serialReadableClosed = null;
   state.serialPort = null;
+  els.connectSerialButton.disabled = false;
+  els.disconnectSerialButton.disabled = true;
+  els.sendSerialButton.disabled = true;
 
   try {
     await reader?.cancel();
@@ -2234,10 +3361,9 @@ async function disconnectSerial() {
   } catch (error) {
     if (!/closed|forgotten|lost/i.test(String(error?.message || error))) console.warn(error);
   }
-  els.connectSerialButton.disabled = false;
-  els.disconnectSerialButton.disabled = true;
-  els.sendSerialButton.disabled = true;
-  appendSerial("Makeable: I stopped listening to the board.\n");
+  if (announce && state.serialEpoch === disconnectEpoch) {
+    appendSerial("Makeable: I stopped listening to the board.\n");
+  }
 }
 
 async function sendSerialCommand() {
@@ -2265,177 +3391,198 @@ function appendSerial(text) {
 }
 
 function evaluateSerialLogs() {
-  const log = state.serialLog.trim();
-  if (!log) {
-    setStatus(els.logEvaluation, "Nothing from the board yet. Try pressing reset on the ESP32.", "warn");
+  beginAutomaticTestAttempt();
+  state.automaticTestStatus = "pending";
+  const freshLog = state.serialLog.slice(state.diagnosticLogOffset).trim();
+  const resetLabel = state.plan?.boardProfile?.resetLabel || "RESET / EN";
+  if (!freshLog) {
+    state.automaticTestStatus = "pending";
+    setStatus(
+      els.logEvaluation,
+      `No fresh board message yet. Press the button printed ${resetLabel} once—not BOOT—then wait for a new line.`,
+      "warn",
+    );
+    updatePublishControls();
     return;
   }
 
-  const bad = /(error|failed|fail|nan|timeout|brownout|invalid|panic|rst:0x10)/i.test(log);
-  const expected = state.plan?.diagnosticTests || [];
-  const hits = expected.filter((test) => {
-    const token = String(test.expectedSerial || "").split(/\s+/)[0];
-    return token && log.includes(token);
-  });
-
-  if (bad) {
-    setStatus(els.logEvaluation, "Something looks off. I see words that usually mean the board is stuck or unhappy.", "danger");
-  } else if (expected.length && hits.length >= Math.max(1, Math.ceil(expected.length / 2))) {
-    setStatus(els.logEvaluation, "This looks good. The board is saying the things we expected.", "ok");
-  } else if (/ready|ok|pass|sensor|boot|connected/i.test(log)) {
-    setStatus(els.logEvaluation, "Good sign. The board is awake and talking.", "ok");
+  const failure = findDiagnosticFailure(freshLog, state.plan);
+  if (failure) {
+    state.automaticTestStatus = "fail";
+    state.diagnosticFailure = failure;
+    renderDiagnosticFailure();
+    setStatus(els.logEvaluation, `${failure.title} I linked it to one repair below.`, "danger");
   } else {
-    setStatus(els.logEvaluation, "I can hear the board, but I’m not sure yet. Try the action your project is meant to react to.", "warn");
+    const expected = state.plan?.diagnosticTests || [];
+    const hits = expectedDiagnosticHits(freshLog, expected);
+    const passed = expected.length
+      ? hits.length === expected.length
+      : /ready|ok|pass|sensor|boot|connected/i.test(freshLog);
+    if (passed) {
+      state.automaticTestStatus = "pass";
+      state.diagnosticFailure = null;
+      renderDiagnosticFailure();
+      setStatus(
+        els.logEvaluation,
+        expected.length
+          ? `Board check passed. I found all ${expected.length} expected fresh message${expected.length === 1 ? "" : "s"}.`
+          : "Board check passed. The board is awake and reporting a healthy state.",
+        "ok",
+      );
+    } else {
+      state.automaticTestStatus = "pending";
+      setStatus(
+        els.logEvaluation,
+        "The board is talking, but not all expected messages are here yet. Operate the project once, then check only the new messages again.",
+        "warn",
+      );
+    }
   }
+  updatePublishControls();
 }
 
-async function startCamera() {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    setStatus(els.behaviorEvaluation, "I can’t open the camera in this browser.", "danger");
+function renderDiagnosticFailure() {
+  if (!els.diagnosticRepairCard) return;
+  const failure = state.diagnosticFailure;
+  els.diagnosticRepairCard.hidden = !failure;
+  if (!failure) return;
+  els.diagnosticRepairTitle.textContent = failure.title;
+  els.diagnosticConnection.textContent = failure.connectionId
+    ? `${wireDescription(failure)}. ${failure.recoveryAction}`
+    : failure.recoveryAction;
+  els.diagnosticEvidence.textContent = failure.evidence;
+  els.openRepairButton.hidden = !failure.connectionId;
+}
+
+function openDiagnosticConnection() {
+  const connectionId = state.diagnosticFailure?.connectionId;
+  if (!connectionId || !state.plan) return;
+  const index = state.plan.wiringSteps.findIndex((step) => step.connectionId === connectionId);
+  if (index < 0) return;
+  state.preparationConfirmed = true;
+  if (els.preparationConfirmed) els.preparationConfirmed.checked = true;
+  setActiveWorkflowStage(2);
+  setBuildMode("wiring");
+  setActiveBuildStep(index);
+  requestAnimationFrame(() => els.visualStepList?.scrollIntoView({ behavior: "smooth", block: "start" }));
+}
+
+function prepareDiagnosticRetry() {
+  beginAutomaticTestAttempt();
+  state.diagnosticLogOffset = state.serialLog.length;
+  state.diagnosticFailure = null;
+  state.automaticTestStatus = "pending";
+  renderDiagnosticFailure();
+  const resetLabel = state.plan?.boardProfile?.resetLabel || "RESET / EN";
+  const bootLabel = state.plan?.boardProfile?.bootLabel || "BOOT";
+  setStatus(
+    els.logEvaluation,
+    `Old errors are cleared from this check. Press ${resetLabel} once—not ${bootLabel}—then wait for fresh messages.`,
+    "warn",
+  );
+  updatePublishControls();
+}
+
+function renderOperatingGuide() {
+  if (!els.operatingGuide) return;
+  const guide = state.plan?.operatingGuide;
+  if (!guide) {
+    els.operatingGuide.innerHTML = "<p>Finish the guide and I’ll put the exact operating steps here.</p>";
     return;
   }
-  try {
-    state.cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" },
-      audio: false,
-    });
-    els.cameraPreview.srcObject = state.cameraStream;
-    await els.cameraPreview.play();
-    els.captureEvidenceButton.disabled = false;
-    setStatus(els.behaviorEvaluation, "Camera ready. Point it at the project when you want me to check.", "ok");
-  } catch (error) {
-    console.error(error);
-    setStatus(els.behaviorEvaluation, `I couldn’t open the camera yet: ${error.message}`, "danger");
+  els.operatingGuide.innerHTML = "";
+  const summary = document.createElement("p");
+  summary.className = "operating-summary";
+  summary.textContent = guide.summary;
+  const list = document.createElement("ol");
+  for (const step of guide.steps) {
+    const item = document.createElement("li");
+    item.textContent = step;
+    list.append(item);
   }
+  const unit = document.createElement("p");
+  unit.className = "operating-unit";
+  unit.textContent = guide.unit
+    ? `Reading unit: ${guide.unit}.`
+    : "This project does not require a displayed measurement unit.";
+  const reset = document.createElement("p");
+  reset.className = "operating-reset";
+  reset.textContent = guide.resetInstruction;
+  els.operatingGuide.append(summary, list, unit, reset);
+  if (els.manualSuccessQuestion) els.manualSuccessQuestion.textContent = guide.successQuestion;
 }
 
-function captureEvidence() {
-  if (!state.cameraStream) return "";
-  const video = els.cameraPreview;
-  const canvas = document.createElement("canvas");
-  canvas.width = video.videoWidth || 1280;
-  canvas.height = video.videoHeight || 720;
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
-  state.evidencePhotos.unshift({ dataUrl, takenAt: new Date().toISOString() });
-  state.evidencePhotos = state.evidencePhotos.slice(0, 6);
-  renderEvidence();
-  return dataUrl;
-}
-
-function renderEvidence() {
-  els.evidenceStrip.innerHTML = "";
-  state.evidencePhotos.forEach((photo) => {
-    const img = document.createElement("img");
-    img.src = photo.dataUrl;
-    img.alt = `Evidence captured at ${photo.takenAt}`;
-    els.evidenceStrip.append(img);
-  });
-}
-
-async function verifyBehavior() {
-  await refreshServerConfig();
-  let latest = state.evidencePhotos[0]?.dataUrl || "";
-  if (!latest && state.cameraStream) latest = captureEvidence();
-  if (!latest) {
-    setStatus(els.behaviorEvaluation, "Take one photo of the build first, then I can check it.", "warn");
-    return;
-  }
-  if (!serverConfig.hasOpenAIKey) {
-    setStatus(els.behaviorEvaluation, "The AI key is not ready yet, so I can’t check the photo.", "warn");
-    return;
-  }
-
-  els.verifyBehaviorButton.disabled = true;
-  els.verifyBehaviorButton.textContent = "Checking...";
-  state.generationId = crypto.randomUUID();
-  try {
-    const payload = {
-      model: settings.openaiReasoningModel,
-      reasoning: { effort: settings.openaiReasoningEffort || DEFAULT_REASONING_EFFORT },
-      input: [
-        {
-          role: "system",
-          content:
-            "You verify beginner electronics behavior from a webcam frame and serial logs. Be conservative and return schema-valid JSON.",
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: [
-                `Project: ${state.plan?.projectTitle || "Unknown"}`,
-                `Goal: ${els.ideaText.value.trim()}`,
-                `Recent serial logs:\n${state.serialLog.slice(-3000) || "No logs captured."}`,
-                "Judge whether the visible behavior matches the requested project.",
-              ].join("\n\n"),
-            },
-            { type: "input_image", image_url: latest, detail: "high" },
-          ],
-        },
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "behavior_verification",
-          strict: true,
-          schema: behaviorSchema,
-        },
-      },
-    };
-    const data = await openAiResponse(payload, {
-      label: "visual check",
-      onProgress: ({ elapsedLabel, message }) => {
-        setStatus(
-          els.behaviorEvaluation,
-          message ||
-          `I’m comparing the photo and board messages (${elapsedLabel}). Keep the project in view.`,
-          "warn",
-        );
-      },
-    });
-    await refreshAccount();
-    const result = JSON.parse(extractOutputText(data));
-    const tone = result.status === "pass" ? "ok" : result.status === "fail" ? "danger" : "warn";
+function verifyBehavior(status = "pass") {
+  if (status === "pass" && state.automaticTestStatus !== "pass") {
     setStatus(
       els.behaviorEvaluation,
-      `${friendlyBehaviorStatus(result.status)} ${result.observations.join(" ")} Next, ${result.nextStep}`,
-      tone,
+      "First pass the fresh board-message check on the left, then confirm the real behavior.",
+      "warn",
     );
-  } catch (error) {
-    console.error(error);
-    setStatus(els.behaviorEvaluation, `I couldn’t finish the visual check: ${error.message}`, "danger");
-  } finally {
-    els.verifyBehaviorButton.disabled = false;
-    els.verifyBehaviorButton.textContent = "Check behavior";
+    els.evaluateLogsButton?.focus();
+    return;
   }
-}
-
-function friendlyBehaviorStatus(status) {
-  if (status === "pass") return "Looks right.";
-  if (status === "fail") return "Something is off.";
-  if (status === "needs_attention") return "Let’s check this carefully.";
-  return "I’m not fully sure yet.";
+  const observation = String(els.manualObservation?.value || "").trim();
+  const observations = [observation || "I followed the operating steps and observed the expected result."];
+  const nextStep =
+    status === "pass"
+      ? "Celebrate or publish the verified build."
+      : "Open the linked connection, repair it, and repeat both checks.";
+  state.manualResult = { status, observations, nextStep, verificationEpoch: state.verificationEpoch };
+  if (state.plan) {
+    state.plan.tests = state.plan.tests || {};
+    state.plan.tests.manual = {
+      acknowledged: true,
+      requestedAction: state.plan.operatingGuide?.successQuestion || "Did the finished project work?",
+      action: status === "pass" ? "It worked." : "Help me fix it.",
+      evaluation: { status, observations, nextStep },
+    };
+  }
+  updatePublishControls();
+  setStatus(
+    els.behaviorEvaluation,
+    status === "pass"
+      ? "Manual check passed. No camera evidence was requested or required."
+      : "This build is not marked complete. I’ll take you back to the exact connection to inspect.",
+    status === "pass" ? "ok" : "warn",
+  );
 }
 
 async function refreshEsp32Status() {
   try {
     const status = await apiJson("/api/esp32/status");
-    const tone = status.hasEsp32Compiler && status.hasEsp32Core ? "ok" : "warn";
+    state.compilerReady = Boolean(status.hasEsp32Compiler && status.hasEsp32Core);
+    const tone = state.compilerReady ? "ok" : "warn";
     setStatus(
       els.esp32Status,
-      status.hasEsp32Compiler && status.hasEsp32Core
+      state.compilerReady
         ? "Makeable’s ESP32 compiler is ready. Connect your board when you’re ready."
         : "The ESP32 compiler is warming up. Try again in a moment.",
       tone,
     );
-    els.compileFlashButton.disabled = !(status.hasEsp32Compiler && status.hasEsp32Core);
+    els.compileFlashButton.disabled = !state.compilerReady;
   } catch (error) {
+    state.compilerReady = false;
     setStatus(els.esp32Status, `The ESP32 compiler is not ready yet: ${error.message}`, "danger");
     els.compileFlashButton.disabled = true;
   }
+}
+
+function renderFlashState(phase = "cable") {
+  const normalized = ["cable", "permission", "compile", "load", "success", "error"].includes(phase)
+    ? phase
+    : "cable";
+  state.flashPhase = normalized;
+  const order = ["cable", "permission", "compile", "load"];
+  const currentIndex = normalized === "success" ? order.length : Math.max(0, order.indexOf(normalized));
+  els.flashStateItems.forEach((item) => {
+    const itemIndex = order.indexOf(item.dataset.flashState);
+    item.classList.toggle("is-current", normalized !== "success" && itemIndex === currentIndex);
+    item.classList.toggle("is-complete", normalized === "success" || itemIndex < currentIndex);
+  });
+  const succeeded = normalized === "success";
+  if (els.compileFlashButton) els.compileFlashButton.hidden = succeeded;
+  if (els.testHardwareButton) els.testHardwareButton.hidden = !succeeded;
 }
 
 async function compileAndFlashFirmware() {
@@ -2456,24 +3603,39 @@ async function compileAndFlashFirmware() {
     return;
   }
 
+  setBlockingOperation("flash", true);
+  beginAutomaticTestAttempt();
+  state.automaticTestStatus = "pending";
   els.compileFlashButton.disabled = true;
-  els.compileFlashButton.textContent = "Connecting...";
-  setFlashProgress(0, "Finding your board");
+  els.compileFlashButton.textContent = "Choose your ESP32";
+  renderFlashState("permission");
+  setFlashProgress(null, "Waiting for browser permission");
+  state.flashStatus = "idle";
+  setStatus(
+    els.esp32Status,
+    "Your browser will show a device chooser now. Select the ESP32 you just connected; this permission stays in this browser.",
+    "warn",
+  );
+  updatePublishControls();
 
   let port;
   try {
     if (state.serialPort) await disconnectSerial();
     port = await findOrRequestEspPort();
   } catch (error) {
+    renderFlashState("cable");
     els.compileFlashButton.disabled = false;
-    els.compileFlashButton.textContent = "Connect & load automatically";
+    els.compileFlashButton.textContent = "Choose my ESP32";
     setStatus(els.esp32Status, `No problem. Choose the ESP32 again when you’re ready. ${error.message}`, "warn");
-    setFlashProgress(0, "");
+    setFlashProgress(0, "Waiting to connect");
+    setBlockingOperation("flash", false);
     return;
   }
 
   try {
     els.compileFlashButton.textContent = "Preparing code...";
+    renderFlashState("compile");
+    setFlashProgress(null, "Preparing and checking firmware");
     setStatus(els.esp32Status, "I’m preparing firmware for your ESP32.", "warn");
     appendSerial("\nMakeable: Preparing the code for your board.\n");
 
@@ -2486,23 +3648,38 @@ async function compileAndFlashFirmware() {
             },
           });
     state.compiledFirmware = compiled;
+    updatePublishControls();
     appendSerial("Makeable: Code is ready. Now I’m sending it to the board.\n");
     if (compiled.stderr) appendSerial(`Makeable: Setup note from the compiler:\n${compiled.stderr}\n`);
 
     els.compileFlashButton.textContent = "Loading board...";
+    renderFlashState("load");
+    setFlashProgress(0, "Starting the real board loader");
     const testAdapter = globalThis.__MAKEABLE_FLASH_TEST_ADAPTER__;
     if (typeof testAdapter === "function") await testAdapter({ port, images: compiled.images, profile });
     else await flashFirmwareImages(port, compiled.images);
-    setStatus(els.esp32Status, "Done. The firmware is on your ESP32. Continue when you’re ready to watch it work.", "ok");
-    setFlashProgress(100, "Done");
+    state.flashStatus = "success";
+    state.automaticTestStatus = "pending";
+    state.diagnosticLogOffset = state.serialLog.length;
+    renderFlashState("success");
+    updatePublishControls();
+    setStatus(els.esp32Status, "Firmware is on the board. The only next step is to test the real hardware.", "ok");
+    setFlashProgress(100, "Firmware loaded successfully");
   } catch (error) {
     console.error(error);
     appendSerial(`\nMakeable: I couldn’t finish loading the board. ${error.message}\n`);
     setStatus(els.esp32Status, `I couldn’t finish loading the ESP32: ${error.message}`, "danger");
     setFlashProgress(0, "Needs retry");
+    state.flashStatus = "error";
+    renderFlashState("error");
+    updatePublishControls();
   } finally {
-    els.compileFlashButton.disabled = false;
-    els.compileFlashButton.textContent = "Connect & load automatically";
+    if (state.flashStatus !== "success") {
+      els.compileFlashButton.hidden = false;
+      els.compileFlashButton.disabled = false;
+      els.compileFlashButton.textContent = "Try loading again";
+    }
+    setBlockingOperation("flash", false);
   }
 }
 
@@ -2569,8 +3746,17 @@ function base64ToBinaryString(base64) {
 }
 
 function setFlashProgress(percent, label) {
-  els.flashProgressBar.style.width = `${clamp(percent, 0, 100)}%`;
-  els.flashProgressBar.textContent = label || "";
+  const indeterminate = percent == null;
+  els.flashProgress?.classList.toggle("is-indeterminate", indeterminate);
+  if (indeterminate) {
+    els.flashProgress?.removeAttribute("aria-valuenow");
+    els.flashProgressBar.style.width = "36%";
+  } else {
+    const value = clamp(percent, 0, 100);
+    els.flashProgress?.setAttribute("aria-valuenow", String(value));
+    els.flashProgressBar.style.width = `${value}%`;
+  }
+  if (els.flashProgressLabel) els.flashProgressLabel.textContent = label || "";
 }
 
 function buildReadme() {
@@ -2578,19 +3764,43 @@ function buildReadme() {
   if (!plan) return "Create your guide first, then I’ll write the project notes here.";
   const generated = new Date().toISOString();
   const firmwareNotes = plan.firmware?.notes || "Review all wiring before powering the board.";
-  const parts = plan.parts.map((part) => `- ${part.name}: ${part.role}`).join("\n");
+  const parts = plan.parts
+    .map((part) => `- **${part.name}** — ${part.role}${part.connectorType ? ` (${part.connectorType})` : ""}`)
+    .join("\n");
   const wiring = plan.wiringSteps
-    .map((step) => `${step.order}. ${step.title}: ${step.instruction}`)
+    .map(
+      (step) =>
+        `${step.order}. **${wireDescription(step)}**  \n   ${step.action}  \n   Check: ${step.quickCheck}${step.warning ? `  \n   ⚠️ ${step.warning}` : ""}`,
+    )
     .join("\n");
   const checks = plan.diagnosticTests
-    .map((test) => `- ${test.name}: ${test.userAction} Expected serial: \`${test.expectedSerial}\``)
+    .map((test) => {
+      const related = plan.wiringSteps.find(({ connectionId }) => connectionId === test.connectionId);
+      return `- **${test.name}** — ${test.userAction} Expected serial: \`${test.expectedSerial}\`.${related ? ` Repair link: ${wireDescription(related)}.` : ""}`;
+    })
     .join("\n");
   const warnings = plan.warnings.length
     ? `\n## Warnings\n\n${plan.warnings.map((warning) => `- ${warning}`).join("\n")}\n`
     : "";
-  const evidence = state.evidencePhotos.length
-    ? `\n## Evidence\n\nCaptured ${state.evidencePhotos.length} camera frame(s) during verification.\n`
-    : "";
+  const guide = plan.operatingGuide;
+  const operation = [
+    guide?.summary,
+    ...(guide?.steps || []).map((step, index) => `${index + 1}. ${step}`),
+    guide?.unit ? `Reading unit: ${guide.unit}.` : "",
+    guide?.resetInstruction,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const alt = String(els.coverAltText?.value || "Finished Makeable hardware build")
+    .replace(/[\[\]\r\n]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const media = [
+    els.includeFinishedBuildPhoto?.checked ? `![${alt}](images/finished-build.svg)` : "",
+    els.includeCreatorPhoto?.checked ? `![Creator with ${alt}](images/creator-and-build.svg)` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   return `# ${plan.projectTitle}
 
@@ -2599,6 +3809,8 @@ Generated by Makeable on ${generated}.
 ## Idea
 
 ${els.ideaText.value.trim() || plan.summary}
+
+${media ? `## Finished build\n\n${media}\n` : ""}
 
 ## Parts
 
@@ -2612,14 +3824,205 @@ ${wiring || "Wiring pending."}
 
 ${checks || "- Diagnostics pending."}
 ${warnings}
+## How to use the finished build
+
+${operation || "Follow the operating instructions shown in Makeable."}
+
+## Verification
+
+- Firmware compiled: ${state.compiledFirmware ? "passed" : "not recorded"}
+- Firmware loaded to board: ${state.flashStatus === "success" ? "passed" : "not recorded"}
+- Fresh board-message check: ${state.automaticTestStatus}
+- Manual real-world check: ${currentManualResult()?.status || "not recorded"}
+- Camera evidence: not required
+
 ## Board software
 
 Makeable securely prepares and loads the board software from the browser. No source-code download or desktop IDE is required.
-${evidence}
+
 ## Notes
 
 ${firmwareNotes}
 `;
+}
+
+function updatePublishControls() {
+  const selectedMedia = Boolean(
+    els.includeFinishedBuildPhoto?.checked || els.includeCreatorPhoto?.checked,
+  );
+  const hasMediaDescription = !selectedMedia || Boolean(els.coverAltText?.value.trim());
+  const mediaPublishingSupported = !selectedMedia || serverConfig.githubAtomicPublishSupported === true;
+  const ready = Boolean(
+    state.plan &&
+      !state.publishedProject &&
+      state.compiledFirmware &&
+      state.flashStatus === "success" &&
+      state.automaticTestStatus === "pass" &&
+      currentManualResult()?.status === "pass" &&
+      hasMediaDescription &&
+      mediaPublishingSupported,
+  );
+  if (els.publishGithubButton) els.publishGithubButton.disabled = !ready;
+  const automaticPassed = state.automaticTestStatus === "pass";
+  if (els.verifyBehaviorButton) els.verifyBehaviorButton.disabled = !automaticPassed;
+  if (els.manualHelpButton) els.manualHelpButton.disabled = !automaticPassed;
+  if (els.continueToCelebrateButton) {
+    els.continueToCelebrateButton.hidden = currentManualResult()?.status !== "pass";
+  }
+  els.testTabItems?.forEach((item, index) => {
+    item.classList.toggle("is-active", automaticPassed ? index === 1 : index === 0);
+  });
+  if (els.publishGateNote) {
+    if (state.publishedProject) {
+      els.publishGateNote.textContent = "Published. GitHub keeps the files you chose in project history; manage or remove them from GitHub.";
+    } else if (!state.plan) {
+      els.publishGateNote.textContent = "Create the guide first, then publishing will unlock.";
+    } else if (!state.compiledFirmware || state.flashStatus !== "success") {
+      els.publishGateNote.textContent = "Load the firmware onto the board first.";
+    } else if (state.automaticTestStatus !== "pass") {
+      els.publishGateNote.textContent = "Pass the fresh board-message check before publishing.";
+    } else if (!currentManualResult()) {
+      els.publishGateNote.textContent = "Try the finished build and record the result before publishing.";
+    } else if (currentManualResult().status !== "pass") {
+      els.publishGateNote.textContent = "Fix the build and pass the manual check before publishing.";
+    } else if (!hasMediaDescription) {
+      els.publishGateNote.textContent = "Describe the photo you chose to publish.";
+    } else if (!mediaPublishingSupported) {
+      els.publishGateNote.textContent = "This preview server cannot publish photos atomically yet. Uncheck the photo to publish notes only; your photo stays in this browser.";
+    } else {
+      els.publishGateNote.textContent = "Verified and ready. Checked photos and notes will be saved together in one private-by-default update.";
+    }
+  }
+  els.timelineButtons.forEach((button) => {
+    const buttonIndex = Number(button.dataset.workflowStage || 0);
+    const resolved = resolveWorkflowStage(buttonIndex, {
+      hasPlan: Boolean(state.plan),
+      flashStatus: state.flashStatus,
+      automaticTestStatus: state.automaticTestStatus,
+      manualTestStatus: currentManualResult()?.status || "pending",
+    });
+    button.setAttribute("aria-disabled", String(resolved !== buttonIndex));
+  });
+}
+
+async function handleCompletionPhoto(event, kind) {
+  const [file] = event.target.files || [];
+  if (!file || !["finishedBuild", "creator"].includes(kind)) return;
+  if (state.publishOperationActive) {
+    event.target.value = "";
+    resetIsBlocked();
+    return;
+  }
+  const sessionEpoch = state.sessionEpoch;
+  const selectionEpoch = ++state.completionSelectionEpoch[kind];
+  const selectionIsCurrent = () =>
+    state.sessionEpoch === sessionEpoch && state.completionSelectionEpoch[kind] === selectionEpoch;
+  try {
+    const rawDataUrl = await readFileAsDataUrl(file);
+    if (!selectionIsCurrent()) return;
+    const image = await loadImage(rawDataUrl);
+    if (!selectionIsCurrent()) return;
+    const resized = resizeCompletionPhoto(image);
+    if (!selectionIsCurrent()) return;
+    const mediaPath = kind === "finishedBuild" ? "images/finished-build.svg" : "images/creator-and-build.svg";
+    state.completionMedia[kind] = {
+      dataUrl: resized.dataUrl,
+      content: rasterDataUrlToSvg(resized.dataUrl, resized.width, resized.height),
+      path: mediaPath,
+    };
+    state.publishedProject = null;
+    if (els.shareBuildButton) els.shareBuildButton.hidden = true;
+    const preview = kind === "finishedBuild" ? els.finishedBuildPreview : els.creatorPhotoPreview;
+    const consent = kind === "finishedBuild" ? els.includeFinishedBuildPhoto : els.includeCreatorPhoto;
+    preview.src = resized.dataUrl;
+    preview.alt = kind === "finishedBuild" ? "Selected finished-build photo" : "Selected creator photo";
+    preview.hidden = false;
+    consent.disabled = false;
+    consent.checked = false;
+    refreshCompletionPreview();
+  } catch (error) {
+    console.error(error);
+    if (selectionIsCurrent()) {
+      setStatus(els.githubStatus, `I couldn’t prepare that optional photo: ${error.message}`, "danger");
+    }
+  }
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("The photo could not be read."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(source) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("The selected file is not a readable image."));
+    image.src = source;
+  });
+}
+
+function resizeCompletionPhoto(image) {
+  const sourceWidth = Math.max(1, Number(image.naturalWidth) || 1);
+  const sourceHeight = Math.max(1, Number(image.naturalHeight) || 1);
+  // Keep two separately consented photos plus the README below the server's
+  // bounded atomic-publish payload, even after SVG wrapping and JSON escaping.
+  const targetDataUrlLength = 160_000;
+  const maxSides = [900, 760, 640, 520, 420];
+  const qualities = [0.78, 0.68, 0.58, 0.48, 0.42];
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  let latest = null;
+
+  for (const maxSide of maxSides) {
+    const scale = Math.min(1, maxSide / sourceWidth, maxSide / sourceHeight);
+    canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+    canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    for (const quality of qualities) {
+      latest = {
+        dataUrl: canvas.toDataURL("image/jpeg", quality),
+        width: canvas.width,
+        height: canvas.height,
+      };
+      if (latest.dataUrl.length <= targetDataUrlLength) return latest;
+    }
+  }
+
+  if (!latest || latest.dataUrl.length > targetDataUrlLength) {
+    throw new Error("That photo is too detailed to publish safely. Try a closer crop.");
+  }
+  return latest;
+}
+
+function rasterDataUrlToSvg(dataUrl, width, height) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><image width="${width}" height="${height}" href="${dataUrl}" /></svg>`;
+}
+
+function refreshCompletionPreview() {
+  const finished = state.completionMedia.finishedBuild;
+  const creator = state.completionMedia.creator;
+  const selected =
+    (els.includeFinishedBuildPhoto?.checked && finished) ||
+    (els.includeCreatorPhoto?.checked && creator) ||
+    null;
+  if (els.projectCoverPreview) {
+    els.projectCoverPreview.src = selected?.dataUrl || "images/makeable/scan-parts.svg";
+    els.projectCoverPreview.alt = selected
+      ? String(els.coverAltText?.value || "Selected project cover").trim()
+      : "Illustrated Makeable electronics build";
+  }
+  if (els.projectTitlePreview) els.projectTitlePreview.textContent = state.plan?.projectTitle || "My Makeable project";
+  state.readme = buildReadme();
+  if (els.readmePreview) els.readmePreview.textContent = state.readme;
+  updatePublishControls();
 }
 
 async function publishToGitHub() {
@@ -2629,47 +4032,150 @@ async function publishToGitHub() {
     setStatus(els.githubStatus, "Create the guide first, then I can save the project notes.", "warn");
     return;
   }
-  state.readme = state.readme || buildReadme();
-  els.githubStatus.textContent = "Creating a home for your project...";
+  if (!state.compiledFirmware || state.flashStatus !== "success") {
+    setStatus(els.githubStatus, "Load the board first, then I can publish the project notes.", "warn");
+    return;
+  }
+  if (state.automaticTestStatus !== "pass" || currentManualResult()?.status !== "pass") {
+    setStatus(els.githubStatus, "Pass both the fresh board check and the real-world check before publishing.", "warn");
+    return;
+  }
+  if (
+    (els.includeFinishedBuildPhoto?.checked || els.includeCreatorPhoto?.checked) &&
+    !els.coverAltText?.value.trim()
+  ) {
+    els.coverAltText?.focus();
+    setStatus(els.githubStatus, "Add a short description for the photo you chose to publish.", "warn");
+    return;
+  }
+  const selectedMedia = [
+    els.includeFinishedBuildPhoto?.checked ? state.completionMedia.finishedBuild : null,
+    els.includeCreatorPhoto?.checked ? state.completionMedia.creator : null,
+  ].filter(Boolean);
+  if (selectedMedia.length && serverConfig.githubAtomicPublishSupported !== true) {
+    setStatus(
+      els.githubStatus,
+      "I won’t send a photo through a partial upload. Uncheck the photo to publish notes only; it will stay in this browser.",
+      "warn",
+    );
+    return;
+  }
+  state.readme = buildReadme();
+  const readmeToPublish = state.readme;
+  const projectTitleToPublish = state.plan.projectTitle;
+  els.githubStatus.textContent = state.publishDraft?.repoName === repoName
+    ? "Resuming your secure project save..."
+    : "Creating a home for your project...";
   els.publishGithubButton.disabled = true;
+  let publishPhase = "create";
+  setBlockingOperation("publish", true);
 
   try {
-    let owner = settings.githubOwner;
-    try {
+    let draft = state.publishDraft?.repoName === repoName ? state.publishDraft : null;
+    if (!draft) {
       const repo = await apiJson("/api/github/repos", {
         method: "POST",
         body: JSON.stringify({
           name: repoName,
-          description: "Hardware project generated with Makeable",
+          description: "Verified hardware project generated with Makeable",
           private: isPrivate,
         }),
       });
-      owner = repo.owner?.login || owner;
-    } catch (error) {
-      if (!String(error.message).includes("422") || !owner) throw error;
-      els.githubStatus.textContent = "I found the project space. Now I’m saving the files...";
+      const owner = repo.owner?.login || settings.githubOwner;
+      const publishCapability = repo.publishCapability;
+      if (!owner || !publishCapability) throw new Error("GitHub did not return a secure publishing authorization.");
+      draft = {
+        repoName,
+        owner,
+        isPrivate,
+        url: repo.html_url || `https://github.com/${owner}/${repoName}`,
+        publishCapability,
+      };
+      state.publishDraft = draft;
+      if (els.repoNameInput) els.repoNameInput.disabled = true;
+      if (els.privateRepoInput) els.privateRepoInput.disabled = true;
+    }
+    publishPhase = "upload";
+    const { owner, publishCapability } = draft;
+
+    if (selectedMedia.length) {
+      els.githubStatus.textContent = "Saving your checked photo and project notes together…";
+      await apiJson("/api/github/publish-project", {
+        method: "POST",
+        body: JSON.stringify({
+          owner,
+          repo: repoName,
+          files: [
+            ...selectedMedia.map(({ path, content }) => ({ path, content })),
+            { path: "README.md", content: readmeToPublish },
+          ],
+          message: "Publish verified Makeable project",
+          publishCapability,
+        }),
+      });
+    } else {
+      await apiJson("/api/github/upload-file", {
+        method: "POST",
+        body: JSON.stringify({
+          owner,
+          repo: repoName,
+          path: "README.md",
+          content: readmeToPublish,
+          message: "Add Makeable README",
+          publishCapability,
+        }),
+      });
     }
 
-    if (!owner) throw new Error("GitHub publishing is not configured on the server.");
-
-    await apiJson("/api/github/upload-file", {
-      method: "POST",
-      body: JSON.stringify({
-        owner,
-        repo: repoName,
-        path: "README.md",
-        content: state.readme,
-        message: "Add Makeable README",
-      }),
-    });
-
-    const repoUrl = `https://github.com/${owner}/${repoName}`;
+    const repoUrl = draft.url;
+    state.publishedProject = { url: repoUrl, title: projectTitleToPublish };
     els.githubStatus.innerHTML = `Saved: <a href="${repoUrl}" target="_blank" rel="noreferrer">${repoUrl}</a>`;
+    if (els.shareBuildButton) els.shareBuildButton.hidden = false;
+    if (els.publishGithubButton) els.publishGithubButton.textContent = "Published to GitHub";
+    for (const input of [
+      els.finishedBuildPhotoInput,
+      els.creatorPhotoInput,
+      els.includeFinishedBuildPhoto,
+      els.includeCreatorPhoto,
+      els.coverAltText,
+    ]) {
+      if (input) input.disabled = true;
+    }
   } catch (error) {
     console.error(error);
-    setStatus(els.githubStatus, `I couldn’t save it yet: ${error.message}`, "danger");
+    const message = Number(error?.status) === 422 && publishPhase === "create"
+      ? "That repository name already exists. Choose a new name so Makeable can publish securely."
+      : publishPhase === "upload"
+        ? `I couldn’t finish saving it yet: ${error.message} You can retry without creating another repository.`
+        : `I couldn’t create the repository yet: ${error.message}`;
+    setStatus(els.githubStatus, message, "danger");
   } finally {
-    els.publishGithubButton.disabled = false;
+    setBlockingOperation("publish", false);
+    updatePublishControls();
+  }
+}
+
+async function sharePublishedBuild() {
+  const project = state.publishedProject;
+  if (!project) return;
+  const shareData = {
+    title: project.title,
+    text: `I built and tested “${project.title}” with Makeable.`,
+    url: project.url,
+  };
+  try {
+    if (navigator.share) {
+      await navigator.share(shareData);
+    } else if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(`${shareData.text} ${shareData.url}`);
+      setStatus(els.githubStatus, "Share link copied to your clipboard.", "ok");
+    } else {
+      window.prompt("Copy this project link", project.url);
+    }
+  } catch (error) {
+    if (error?.name !== "AbortError") {
+      setStatus(els.githubStatus, `I couldn’t open sharing: ${error.message}`, "warn");
+    }
   }
 }
 

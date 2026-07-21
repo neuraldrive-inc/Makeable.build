@@ -135,6 +135,7 @@ function publicConfig(env) {
     cognitoRedirectUri: env.COGNITO_REDIRECT_URI || "",
     googleClientId: env.GOOGLE_CLIENT_ID || "",
     hasGoogleSignIn: Boolean(env.GOOGLE_CLIENT_ID),
+    githubAtomicPublishSupported: false,
     hasEsp32Compiler: false,
     hostedMode: true,
     firmwareCompileSupported: Boolean(env.MAKEABLE_API_BASE_URL),

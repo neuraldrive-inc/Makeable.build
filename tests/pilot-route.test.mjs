@@ -19,6 +19,7 @@ test("the current production app stays packaged as a self-contained pilot", asyn
     "pilot/app.js",
     "pilot/styles.css",
     "pilot/lib/board-profiles.mjs",
+    "pilot/lib/beginner-plan.mjs",
     "pilot/images/makeable/icon-chat.svg",
   ]) {
     await access(path.join(root, "dist", relativePath));
@@ -60,6 +61,25 @@ test("the current production app stays packaged as a self-contained pilot", asyn
 
   await assert.rejects(access(path.join(root, "dist", "app.js")));
   await assert.rejects(access(path.join(root, "dist", "styles.css")));
+});
+
+test("the pilot exposes both beginner entry paths and the gated five-stage workflow", async () => {
+  const pilotHtml = await readFile(path.join(root, "pilot", "index.html"), "utf8");
+  const pilotApp = await readFile(path.join(root, "pilot", "app.js"), "utf8");
+  assert.match(pilotHtml, /How would you like to <span>start\?<\/span>/);
+  assert.match(pilotHtml, /id="startPhotoFirstButton"/);
+  assert.match(pilotHtml, /<strong>Check parts<\/strong>/);
+  assert.match(pilotHtml, /No camera permission\. No proof photo\./);
+  assert.match(pilotHtml, /id="includeFinishedBuildPhoto"[^>]*disabled/);
+  assert.match(pilotHtml, /id="includeCreatorPhoto"[^>]*disabled/);
+  assert.match(pilotApp, /validateBeginnerPlan/);
+  assert.match(pilotApp, /automaticTestStatus === "pass"/);
+  assert.match(pilotApp, /const mediaPath = kind === "finishedBuild" \? "images\/finished-build\.svg"/);
+  assert.match(pilotApp, /apiJson\("\/api\/github\/publish-project"/);
+  assert.match(pilotApp, /selectedMedia\.map\(\(\{ path, content \}\) => \(\{ path, content \}\)\)/);
+  assert.match(pilotApp, /githubAtomicPublishSupported === true/);
+  assert.doesNotMatch(pilotApp, /contentBase64/);
+  assert.doesNotMatch(pilotApp, /async function startCamera/);
 });
 
 test("Netlify serves the landing at root and rewrites only the pilot entrypoint", async () => {

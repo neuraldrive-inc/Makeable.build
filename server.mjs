@@ -17,6 +17,10 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { WebSocket, WebSocketServer } from "ws";
 import { getBoardProfile, supportedBoardSummary } from "./lib/board-profiles.mjs";
 import { createGoogleWaitlistResult } from "./lib/acquisition.mjs";
+import {
+  createPublishCapability,
+  verifyPublishCapability,
+} from "./lib/publish-capability.mjs";
 import { waitlistSignupKey } from "./lib/waitlist-storage.mjs";
 import {
   clearWaitlistSessionCookie,
@@ -31,6 +35,16 @@ const initialEnv = getEnv();
 const port = Number(initialEnv.PORT || 8787);
 const MAX_REQUEST_BYTES = 512 * 1024;
 const MAX_SKETCH_BYTES = 96 * 1024;
+const MAX_GITHUB_PROJECT_FILES = 12;
+const MAX_GITHUB_PROJECT_CONTENT_BYTES = 400 * 1024;
+const GITHUB_PROJECT_ARTIFACT_PATHS = new Set([
+  "README.md",
+  "build-guide/README.md",
+  "parts-list/README.md",
+  "test-results/README.md",
+  "images/finished-build.svg",
+  "images/creator-and-build.svg",
+]);
 const DEFAULT_OPENAI_MODEL = "gpt-5.6-terra";
 const DEFAULT_OPENAI_REASONING_EFFORT = "low";
 const DEFAULT_OPENAI_SERVICE_TIER = "priority";
@@ -170,6 +184,12 @@ const server = createServer(async (req, res) => {
       const user = await requireUser(req, res, env);
       if (!user) return;
       return uploadGitHubFile(req, res, env, user);
+    }
+
+    if (url.pathname === "/api/github/publish-project" && req.method === "POST") {
+      const user = await requireUser(req, res, env);
+      if (!user) return;
+      return publishGitHubProject(req, res, env, user);
     }
 
     if (url.pathname === "/api/health") {
@@ -360,6 +380,7 @@ function publicConfig(env) {
     cognitoRedirectUri: env.COGNITO_REDIRECT_URI || "",
     googleClientId: env.GOOGLE_CLIENT_ID || "",
     hasGoogleSignIn: Boolean(env.GOOGLE_CLIENT_ID),
+    githubAtomicPublishSupported: true,
     hostedMode: true,
     firmwareCompileSupported: Boolean(findArduinoCli(env)),
     supportedBoards: supportedBoardSummary(),
@@ -1137,14 +1158,17 @@ async function createGitHubRepo(req, res, env, user) {
     return sendJson(res, { error: "GITHUB_TOKEN is missing in .env" }, 401);
   }
   const body = await readJsonBody(req);
-  const upstream = await fetch("https://api.github.com/user/repos", {
+  const upstream = await fetch(`${githubApiOrigin(env)}/user/repos`, {
     method: "POST",
     headers: githubHeaders(env),
     body: JSON.stringify({
       name: body.name,
       description: body.description || "Hardware project generated with Makeable",
       private: Boolean(body.private),
-      auto_init: false,
+      // GitHub cannot create refs in a completely empty repository. A benign
+      // initial commit lets the later multi-file publish advance one ref only
+      // after every consented file and the README are ready.
+      auto_init: true,
     }),
   });
   const text = await upstream.text();
@@ -1178,6 +1202,9 @@ async function uploadGitHubFile(req, res, env, user) {
   if (!owner || !repo || !filePath) {
     return sendJson(res, { error: "owner, repo, and path are required" }, 400);
   }
+  if (!isAllowedGitHubProjectArtifactPath(filePath)) {
+    return sendJson(res, { error: `Path is not an allowed Makeable project artifact: ${filePath}` }, 400);
+  }
   if (
     !verifyPublishCapability(
       body.publishCapability,
@@ -1190,9 +1217,10 @@ async function uploadGitHubFile(req, res, env, user) {
 
   const encodedPath = filePath.split("/").map(encodeURIComponent).join("/");
   const branchQuery = body.branch ? `?ref=${encodeURIComponent(body.branch)}` : "";
+  const apiOrigin = githubApiOrigin(env);
   let sha;
   const existing = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}${branchQuery}`,
+    `${apiOrigin}/repos/${owner}/${repo}/contents/${encodedPath}${branchQuery}`,
     { headers: githubHeaders(env) },
   );
   if (existing.ok) {
@@ -1210,7 +1238,7 @@ async function uploadGitHubFile(req, res, env, user) {
   };
 
   const upstream = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`,
+    `${apiOrigin}/repos/${owner}/${repo}/contents/${encodedPath}`,
     {
       method: "PUT",
       headers: githubHeaders(env),
@@ -1218,6 +1246,237 @@ async function uploadGitHubFile(req, res, env, user) {
     },
   );
   return pipeJson(upstream, res);
+}
+
+async function publishGitHubProject(req, res, env, user) {
+  if (!env.GITHUB_TOKEN) {
+    return sendJson(res, { error: "GITHUB_TOKEN is missing in .env" }, 401);
+  }
+
+  const body = await readJsonBody(req);
+  const owner = String(body.owner || env.GITHUB_OWNER || "").trim();
+  const repo = String(body.repo || "").trim();
+  if (!owner || !repo) {
+    return sendJson(res, { error: "owner and repo are required" }, 400);
+  }
+  if (!isValidGitHubOwner(owner) || !isValidGitHubRepositoryName(repo)) {
+    return sendJson(res, { error: "owner or repo is not a valid GitHub name" }, 400);
+  }
+  if (
+    !verifyPublishCapability(
+      body.publishCapability,
+      { userId: user.userId, owner, repositoryName: repo },
+      env.GITHUB_TOKEN,
+    )
+  ) {
+    return sendJson(res, { error: "This GitHub upload authorization is missing or expired." }, 403);
+  }
+
+  const fileResult = normalizedGitHubProjectFiles(body.files);
+  if (fileResult.error) return sendJson(res, { error: fileResult.error }, 400);
+
+  if (body.branch !== undefined && typeof body.branch !== "string") {
+    return sendJson(res, { error: "branch must be a string" }, 400);
+  }
+  const requestedBranch = String(body.branch || "").trim();
+  if (requestedBranch && !isValidGitReferenceName(requestedBranch)) {
+    return sendJson(res, { error: "branch is not a valid Git reference" }, 400);
+  }
+
+  if (body.message !== undefined && typeof body.message !== "string") {
+    return sendJson(res, { error: "message must be a string" }, 400);
+  }
+  const message = String(body.message || "Publish Makeable project").trim();
+  if (!message || Buffer.byteLength(message, "utf8") > 1_000) {
+    return sendJson(res, { error: "message must be between 1 and 1,000 UTF-8 bytes" }, 400);
+  }
+
+  const apiOrigin = githubApiOrigin(env);
+  const repositoryPath = `${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+  const repositoryResponse = await fetch(`${apiOrigin}/repos/${repositoryPath}`, {
+    headers: githubHeaders(env),
+  });
+  if (!repositoryResponse.ok) return pipeJson(repositoryResponse, res);
+  const repository = await repositoryResponse.json();
+  const branch = requestedBranch || String(repository.default_branch || "main").trim();
+  if (!isValidGitReferenceName(branch)) {
+    return sendJson(res, { error: "The repository default branch is not a valid Git reference." }, 502);
+  }
+
+  const encodedBranch = branch.split("/").map(encodeURIComponent).join("/");
+  const refResponse = await fetch(
+    `${apiOrigin}/repos/${repositoryPath}/git/ref/heads/${encodedBranch}`,
+    { headers: githubHeaders(env) },
+  );
+  if (!refResponse.ok) {
+    if (refResponse.status === 404 || refResponse.status === 409) {
+      return sendJson(
+        res,
+        { error: "The repository is not initialized yet. Retry after GitHub finishes its initial commit." },
+        409,
+      );
+    }
+    return pipeJson(refResponse, res);
+  }
+  const ref = await refResponse.json();
+  const headSha = String(ref?.object?.sha || "");
+  if (!headSha) {
+    return sendJson(res, { error: "GitHub returned a branch without a commit." }, 502);
+  }
+  const baseCommitResponse = await fetch(
+    `${apiOrigin}/repos/${repositoryPath}/git/commits/${encodeURIComponent(headSha)}`,
+    { headers: githubHeaders(env) },
+  );
+  if (!baseCommitResponse.ok) return pipeJson(baseCommitResponse, res);
+  const baseCommit = await baseCommitResponse.json();
+  const baseTreeSha = String(baseCommit?.tree?.sha || "");
+  if (!baseTreeSha) {
+    return sendJson(res, { error: "GitHub returned a commit without a tree." }, 502);
+  }
+
+  const treeEntries = [];
+  for (const file of fileResult.files) {
+    const blobResponse = await fetch(`${apiOrigin}/repos/${repositoryPath}/git/blobs`, {
+      method: "POST",
+      headers: githubHeaders(env),
+      body: JSON.stringify({ content: file.content, encoding: "utf-8" }),
+    });
+    if (!blobResponse.ok) return pipeJson(blobResponse, res);
+    const blob = await blobResponse.json();
+    const blobSha = String(blob?.sha || "");
+    if (!blobSha) return sendJson(res, { error: "GitHub returned a blob without an id." }, 502);
+    treeEntries.push({ path: file.path, mode: "100644", type: "blob", sha: blobSha });
+  }
+
+  const treeResponse = await fetch(`${apiOrigin}/repos/${repositoryPath}/git/trees`, {
+    method: "POST",
+    headers: githubHeaders(env),
+    body: JSON.stringify({
+      base_tree: baseTreeSha,
+      tree: treeEntries,
+    }),
+  });
+  if (!treeResponse.ok) return pipeJson(treeResponse, res);
+  const tree = await treeResponse.json();
+  const treeSha = String(tree?.sha || "");
+  if (!treeSha) return sendJson(res, { error: "GitHub returned a tree without an id." }, 502);
+
+  const commitResponse = await fetch(`${apiOrigin}/repos/${repositoryPath}/git/commits`, {
+    method: "POST",
+    headers: githubHeaders(env),
+    body: JSON.stringify({
+      message,
+      tree: treeSha,
+      parents: [headSha],
+    }),
+  });
+  if (!commitResponse.ok) return pipeJson(commitResponse, res);
+  const commit = await commitResponse.json();
+  const commitSha = String(commit?.sha || "");
+  if (!commitSha) return sendJson(res, { error: "GitHub returned a commit without an id." }, 502);
+
+  const updateRefResponse = await fetch(
+    `${apiOrigin}/repos/${repositoryPath}/git/refs/heads/${encodedBranch}`,
+    {
+      method: "PATCH",
+      headers: githubHeaders(env),
+      body: JSON.stringify({ sha: commitSha, force: false }),
+    },
+  );
+  if (!updateRefResponse.ok) return pipeJson(updateRefResponse, res);
+
+  const repositoryUrl = String(
+    repository.html_url || `https://github.com/${owner}/${repo}`,
+  ).replace(/\/$/, "");
+  return sendJson(res, {
+    ok: true,
+    owner,
+    repo,
+    branch,
+    commitSha,
+    commitUrl: `${repositoryUrl}/commit/${commitSha}`,
+    files: fileResult.files.map((file) => file.path),
+  });
+}
+
+function normalizedGitHubProjectFiles(files) {
+  if (!Array.isArray(files) || files.length === 0) {
+    return { error: "files must contain at least one UTF-8 file" };
+  }
+  if (files.length > MAX_GITHUB_PROJECT_FILES) {
+    return { error: `files cannot contain more than ${MAX_GITHUB_PROJECT_FILES} entries` };
+  }
+
+  const normalized = [];
+  const paths = new Set();
+  let contentBytes = 0;
+  for (const file of files) {
+    if (!file || typeof file.path !== "string" || typeof file.content !== "string") {
+      return { error: "Every file needs a string path and UTF-8 string content" };
+    }
+    const filePath = file.path;
+    if (!isAllowedGitHubProjectArtifactPath(filePath)) {
+      return { error: `Path is not an allowed Makeable project artifact: ${filePath}` };
+    }
+    const segments = filePath.split("/");
+    const unsafePath =
+      filePath !== filePath.trim() ||
+      filePath.startsWith("/") ||
+      filePath.endsWith("/") ||
+      filePath.includes("\\") ||
+      /[\u0000-\u001f\u007f]/.test(filePath) ||
+      segments.some((segment) => !segment || segment === "." || segment === "..");
+    if (unsafePath) return { error: `File path is not safe: ${filePath || "(empty)"}` };
+    if (paths.has(filePath)) return { error: `File path is duplicated: ${filePath}` };
+    paths.add(filePath);
+    contentBytes += Buffer.byteLength(file.content, "utf8");
+    normalized.push({ path: filePath, content: file.content });
+  }
+  if (contentBytes > MAX_GITHUB_PROJECT_CONTENT_BYTES) {
+    return {
+      error: `Project files cannot exceed ${MAX_GITHUB_PROJECT_CONTENT_BYTES} UTF-8 bytes`,
+    };
+  }
+  return { files: normalized };
+}
+
+function isAllowedGitHubProjectArtifactPath(filePath) {
+  return typeof filePath === "string" && GITHUB_PROJECT_ARTIFACT_PATHS.has(filePath);
+}
+
+function isValidGitHubOwner(owner) {
+  return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(owner);
+}
+
+function isValidGitHubRepositoryName(repo) {
+  return /^[A-Za-z0-9_.-]{1,100}$/.test(repo);
+}
+
+function isValidGitReferenceName(reference) {
+  if (!reference || Buffer.byteLength(reference, "utf8") > 255) return false;
+  if (
+    reference === "@" ||
+    reference.startsWith("/") ||
+    reference.endsWith("/") ||
+    reference.endsWith(".") ||
+    reference.includes("//") ||
+    reference.includes("..") ||
+    reference.includes("@{") ||
+    /[\u0000-\u0020\u007f~^:?*[\\]/.test(reference)
+  ) {
+    return false;
+  }
+  return reference.split("/").every(
+    (component) =>
+      component &&
+      !component.startsWith(".") &&
+      !component.endsWith(".lock"),
+  );
+}
+
+function githubApiOrigin(env) {
+  const configured = env.NODE_ENV === "test" ? String(env.GITHUB_API_ORIGIN || "") : "";
+  return (configured || "https://api.github.com").replace(/\/+$/, "");
 }
 
 function githubHeaders(env) {

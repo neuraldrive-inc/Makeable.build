@@ -6,12 +6,12 @@
     <base href="/pilot/" />
     <meta name="robots" content="noindex, nofollow" />
     <meta name="theme-color" content="#f7f1e7" />
-    <title>Makeable | Build real hardware</title>
+    <title>Start with an idea or a photo · Makeable</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23ef2d83'/%3E%3Cpath d='M18 43V21l14 14 14-14v22' stroke='white' stroke-width='7' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=makeable-workbench-20260716" />
+    <link rel="stylesheet" href="./styles.css?v=makeable-pilot-20260720-final" />
     <script src="/config.local.js"></script>
   </head>
   <body>
@@ -23,19 +23,19 @@
 
       <nav class="workflow-timeline" id="workflowTimeline" aria-label="Build stages">
         <button class="timeline-step is-active" data-workflow-stage="0" type="button">
-          <span class="step-number">1</span><span class="step-note step-note--pink"><img src="images/makeable/icon-chat.svg" alt="" /><strong>Describe</strong></span>
+          <span class="step-number">1</span><span class="step-note step-note--pink"><img src="images/makeable/icon-chat.svg" alt="" /><strong>Start</strong></span>
         </button>
         <button class="timeline-step" data-workflow-stage="1" type="button">
-          <span class="step-number">2</span><span class="step-note step-note--blush"><img src="images/makeable/icon-camera.svg" alt="" /><strong>Scan Parts</strong></span>
+          <span class="step-number">2</span><span class="step-note step-note--blush"><img src="images/makeable/icon-camera.svg" alt="" /><strong>Check parts</strong></span>
         </button>
         <button class="timeline-step" data-workflow-stage="2" type="button">
-          <span class="step-number">3</span><span class="step-note step-note--lilac"><img src="images/makeable/icon-code.svg" alt="" /><strong>Build + Load</strong></span>
+          <span class="step-number">3</span><span class="step-note step-note--lilac"><img src="images/makeable/icon-code.svg" alt="" /><strong>Build</strong></span>
         </button>
         <button class="timeline-step" data-workflow-stage="3" type="button">
           <span class="step-number">4</span><span class="step-note step-note--mint"><img src="images/makeable/icon-bolt.svg" alt="" /><strong>Test</strong></span>
         </button>
         <button class="timeline-step" data-workflow-stage="4" type="button">
-          <span class="step-number">5</span><span class="step-note step-note--yellow"><img src="images/makeable/icon-globe.svg" alt="" /><strong>Finish</strong></span>
+          <span class="step-number">5</span><span class="step-note step-note--yellow"><img src="images/makeable/icon-globe.svg" alt="" /><strong>Celebrate</strong></span>
         </button>
       </nav>
 
@@ -52,47 +52,67 @@
 
     <main class="shell">
       <section class="workflow-stage is-active" id="capture" data-stage-index="0">
-        <header class="stage-heading">
+        <header class="stage-heading stage-heading--centered start-heading">
           <div>
-            <h1>What do you<br />want to <span>make?</span></h1>
-            <p>Tell us like you’d tell a friend.</p>
+            <h1>How would you like to <span>start?</span></h1>
+            <p>Start with an idea, or show me the parts you already have.</p>
           </div>
-          <svg class="sparkles" viewBox="0 0 110 82" aria-hidden="true"><path d="m38 4 8 22 19 9-19 8-8 24-8-24-19-8 19-9 8-22ZM83 39l4 12 11 5-11 5-4 13-5-13-10-5 10-5 5-12Z" /></svg>
         </header>
 
-        <div class="idea-paper paper-sheet tape-blue">
-          <label class="sr-only" for="ideaText">Describe the hardware project you want to make</label>
-          <textarea id="ideaText" rows="4" placeholder="Build something that..."></textarea>
-          <img class="idea-doodle" src="images/makeable/plant-doodle.svg" alt="A hand-drawn plant and water drop" />
-          <div class="idea-underline" aria-hidden="true"></div>
-          <div class="idea-tools">
-            <label class="paper-button add-sketch" for="partsPhotoInput"><img src="images/makeable/icon-paperclip.svg" alt="" /> Add a sketch</label>
-            <div class="voice-row">
-              <button class="paper-button" id="startVoiceButton" type="button">Use my voice</button>
+        <div class="start-choice-grid">
+          <article class="start-path paper-sheet tape-blue" aria-labelledby="idea-path-title">
+            <img class="start-path-icon" src="images/makeable/icon-chat.svg" alt="" />
+            <h2 id="idea-path-title">I know what I want to build</h2>
+            <label class="sr-only" for="ideaText">Describe the hardware project you want to make</label>
+            <textarea id="ideaText" rows="4" placeholder="A plant that tells me when it needs water…"></textarea>
+            <div class="idea-prompt-row" aria-label="Example ideas">
+              <button class="idea-prompt" data-idea="Build a pet feeder that serves food on a schedule." type="button">Pet feeder</button>
+              <button class="idea-prompt" data-idea="Build a mini fan that turns on when the room gets warm." type="button">Mini fan</button>
+              <button class="idea-prompt" data-idea="Build a self-watering plant that checks when the soil is dry." type="button">Plant helper</button>
+            </div>
+            <button class="torn-button torn-button--pink start-path-primary" id="ideaNextButton" type="button">Start with my idea</button>
+            <div class="voice-row voice-row--quiet">
+              <button class="paper-button" id="startVoiceButton" type="button">Tell me instead</button>
               <button class="paper-button" id="stopVoiceButton" type="button" disabled>Stop</button>
               <span class="status-pill" id="voiceStatus">Ready</span>
             </div>
-            <button class="torn-button torn-button--pink" id="ideaNextButton" type="button">Start my build</button>
-          </div>
-          <div class="voice-transcript" id="voiceTranscriptBox" aria-live="polite">Your words will appear here while you talk.</div>
-        </div>
+            <div class="voice-transcript" id="voiceTranscriptBox" aria-live="polite">Your words will appear here while you talk.</div>
+          </article>
 
-        <div class="idea-suggestions" aria-label="Example project ideas">
-          <div class="messy-note">Messy ideas<br />welcome.<svg viewBox="0 0 90 38" aria-hidden="true"><path d="M4 5c16 2 28 7 39 19M36 16l8 8-12 3" /></svg></div>
-          <button class="idea-prompt note-card note-card--blush tape-grid-pink" data-idea="Build a pet feeder that serves food on a schedule." type="button"><span>♨</span>A pet feeder</button>
-          <button class="idea-prompt note-card note-card--lilac tape-blue" data-idea="Build a mini fan that turns on when the room gets warm." type="button"><span>✺</span>A mini fan</button>
-          <button class="idea-prompt note-card note-card--mint tape-grid-mint" data-idea="Build a self-watering plant that checks when the soil is dry." type="button"><span>♧</span>A plant helper</button>
+          <div class="start-or" aria-hidden="true">or</div>
+
+          <article class="start-path start-path--photo paper-sheet tape-blue" aria-labelledby="photo-path-title">
+            <img class="start-path-icon" src="images/makeable/icon-camera.svg" alt="" />
+            <h2 id="photo-path-title">Show me what I have</h2>
+            <div class="start-photo-preview" aria-hidden="true"><img src="images/makeable/scan-parts.svg" alt="" /></div>
+            <button class="torn-button torn-button--pink start-path-primary" id="startPhotoFirstButton" type="button">Take or choose a photo</button>
+            <p>Makeable will suggest a few things you can build.</p>
+            <div class="start-photo-status" id="photoFirstStatus" role="status" aria-live="polite">No idea needed yet.</div>
+          </article>
         </div>
       </section>
 
       <section class="workflow-stage" id="plan" data-stage-index="1" hidden>
         <header class="stage-heading stage-heading--row">
           <div>
-            <h1>Show me what’s<br />on your <span>desk.</span></h1>
-            <p>Put your parts in one photo. I’ll name them for you.</p>
+            <h1>Let’s get one<br /><span>useful photo.</span></h1>
+            <p>The labels in this photo become your map later.</p>
           </div>
-          <aside class="sticky-note sticky-note--white tape-yellow">Your photo is only used to recognize your parts.</aside>
+          <aside class="sticky-note sticky-note--white tape-yellow">Your photo is used only to recognize parts and plan this build.</aside>
         </header>
+
+        <section class="photo-prep paper-sheet" aria-labelledby="photo-prep-title">
+          <div>
+            <span class="section-number">Before the photo</span>
+            <h2 id="photo-prep-title">Make every printed label visible.</h2>
+          </div>
+          <ol>
+            <li><b>1</b><span>Turn every board and sensor label-side up.</span></li>
+            <li><b>2</b><span>Spread the parts and jumper-wire ends apart.</span></li>
+            <li><b>3</b><span>Keep the USB connector and both board buttons visible.</span></li>
+          </ol>
+          <label class="confirmation-check"><input id="orientationConfirmed" type="checkbox" /><span>My parts are label-side up and easy to see.</span></label>
+        </section>
 
         <div class="scan-paper paper-sheet tape-blue">
           <div class="canvas-frame">
@@ -101,67 +121,96 @@
           </div>
           <div class="scan-copy">
             <strong>Drop a photo here</strong>
-            <span>or choose from your computer</span>
+            <span>or choose one from your computer</span>
           </div>
           <div class="scan-actions">
-            <label class="torn-button torn-button--coral file-button"><input id="partsPhotoInput" type="file" accept="image/*" />Upload my parts</label>
+            <label class="torn-button torn-button--coral file-button"><input id="partsPhotoInput" type="file" accept="image/*" capture="environment" />Take or choose a photo</label>
             <button class="paper-button" id="clearPhotoButton" type="button">Clear photo</button>
-            <button class="torn-button torn-button--pink" id="analyzeButton" type="button">Name my parts</button>
+            <button class="torn-button torn-button--pink" id="analyzeButton" type="button">Suggest what I can build</button>
           </div>
-          <div class="status-strip scan-status" id="transcriptBox" aria-live="polite">Choose one clear photo, then I’ll find the parts for your idea.</div>
+          <div class="status-strip scan-status" id="transcriptBox" aria-live="polite">Confirm the photo setup, then choose one clear photo.</div>
         </div>
 
+        <section class="idea-from-photo paper-sheet" id="ideaFromPhotoPanel" hidden aria-labelledby="idea-from-photo-title">
+          <div>
+            <span class="section-number">Your build idea</span>
+            <h2 id="idea-from-photo-title">Pick the idea that feels useful.</h2>
+            <p>I’ll only suggest projects supported by the parts I can actually see.</p>
+          </div>
+          <div class="photo-idea-options" id="photoIdeaOptions"></div>
+        </section>
+
         <div class="recognized-paper paper-sheet">
-          <div class="recognized-heading"><span>We recognized these parts:</span><strong id="partsCountLabel">Waiting for a photo</strong></div>
+          <div class="recognized-heading"><span>Parts for this build</span><strong id="partsCountLabel">Waiting for a photo</strong></div>
           <div class="parts-list" id="partsList"></div>
         </div>
         <ol class="sr-only" id="wiringList"></ol>
         <div class="sr-only" id="diagnosticsList"></div>
 
         <div class="scan-tips" aria-label="Photo tips">
-          <span><b>☀</b> Use good light</span><span><b>⌁</b> Spread parts out</span><span><b>▣</b> Shoot from above</span>
+          <span><b>☀</b> Use good light</span><span><b>⌁</b> Keep labels readable</span><span><b>▣</b> Shoot from above</span>
         </div>
       </section>
 
       <section class="workflow-stage" id="flash" data-stage-index="2" hidden>
         <header class="stage-heading stage-heading--build">
           <div>
-            <h1>Build it one<br />connection at a <span>time.</span></h1>
-            <p>Your own photo becomes the map. When it’s wired, we’ll give it a brain.</p>
+            <h1>One wire. Two<br /><span>exact places.</span></h1>
+            <p>I’ll use the labels printed on your parts.</p>
           </div>
           <div class="build-mode-switch" role="tablist" aria-label="Build and load views">
-            <button class="is-active" id="showWiringButton" type="button" role="tab">Wiring guide</button>
-            <button id="showCodeButton" type="button" role="tab">Connect + load</button>
+            <button class="is-active" id="showWiringButton" type="button" role="tab" aria-selected="true">Wiring guide</button>
+            <button id="showCodeButton" type="button" role="tab" aria-selected="false" disabled>Connect + load</button>
           </div>
         </header>
 
-        <div class="build-workspace" id="wiringWorkspace">
+        <section class="build-preparation paper-sheet tape-blue" id="buildPreparation" aria-labelledby="build-preparation-title">
+          <div class="build-preparation-heading">
+            <div><span class="section-number">Before the first wire</span><h2 id="build-preparation-title">Put the exact pieces beside you.</h2></div>
+            <span class="support-badge" id="boardSupportBadge">Checking board support</span>
+          </div>
+          <div class="preparation-grid">
+            <div><h3>Board and USB cable</h3><p id="boardIdentity">Waiting for the plan.</p><p id="usbCableGuide">I’ll name the cable after I identify the board.</p></div>
+            <div><h3>Jumper wires</h3><ul class="cable-inventory" id="cableInventoryList"><li>Waiting for the wiring plan.</li></ul></div>
+          </div>
+          <div class="plan-issues" id="planIssues" role="alert" hidden></div>
+          <label class="confirmation-check"><input id="preparationConfirmed" type="checkbox" /><span>I have these parts and my wire ends match the guide.</span></label>
+          <button class="torn-button torn-button--pink" id="beginAssemblyButton" type="button">Start connection 1</button>
+        </section>
+
+        <div class="build-workspace" id="wiringWorkspace" hidden>
           <div class="visual-guide-panel">
             <div class="carousel-header">
-              <h2>Your next move</h2>
-              <span id="buildStepCounter">Step 0 of 0</span>
+              <h2>Only this connection</h2>
+              <span id="buildStepCounter">Connection 0 of 0</span>
             </div>
             <div class="visual-step-list" id="visualStepList"></div>
+            <div class="wire-legend" id="wireLegend" aria-label="Wire legend"></div>
             <div class="carousel-controls">
               <button class="paper-button" id="prevBuildStepButton" type="button">← Back</button>
               <div class="carousel-dots" id="buildStepDots" aria-label="Build step progress"></div>
               <button class="torn-button torn-button--coral" id="nextBuildStepButton" type="button">I connected it</button>
             </div>
           </div>
-          <aside class="sticky-note sticky-note--yellow tape-yellow"><b>Why?</b> One careful connection at a time makes hardware much easier to debug.</aside>
         </div>
 
         <div class="code-workspace" id="codeWorkspace" hidden>
           <div class="flash-stage-grid flash-stage-grid--automatic">
             <div class="web-flash-panel paper-sheet tape-blue">
-              <h2>Your build is wired.<br />Let’s give it a brain.</h2>
-              <aside class="sticky-note sticky-note--white tape-grid-pink">Connect your ESP32 with a USB cable.</aside>
-              <div class="connection-steps">
-                <p><b>1</b> Plug the USB cable into your computer.</p><p><b>2</b> Click once to allow this board the first time.</p><p><b>3</b> Makeable prepares and loads everything automatically.</p>
-              </div>
-              <button class="torn-button torn-button--coral" id="compileFlashButton" type="button">Connect &amp; load automatically</button>
-              <div class="flash-progress"><span id="flashProgressBar"></span></div>
-              <div class="status-strip" id="esp32Status">The ESP32 compiler is online. Connect your board when you’re ready.</div>
+              <span class="section-number">Connect the board</span>
+              <h2>Now give your build its instructions.</h2>
+              <div class="usb-cable-card"><span>Use</span><strong id="usbCableName">the confirmed USB data cable</strong><p>Plug it into the port marked <b id="boardUsbPort">USB</b> on the board.</p></div>
+              <ol class="flash-state-list" id="flashStateList">
+                <li data-flash-state="cable" class="is-current"><b>1</b><span><strong>Connect the cable</strong><small>Leave the board on the table.</small></span></li>
+                <li data-flash-state="permission"><b>2</b><span><strong>Choose your ESP32</strong><small>Your browser asks once so Makeable can load this board.</small></span></li>
+                <li data-flash-state="compile"><b>3</b><span><strong>Prepare the firmware</strong><small>I’ll show the active stage while this runs.</small></span></li>
+                <li data-flash-state="load"><b>4</b><span><strong>Load the board</strong><small>Progress comes from the real loader.</small></span></li>
+              </ol>
+              <button class="torn-button torn-button--coral" id="compileFlashButton" type="button">Choose my ESP32</button>
+              <button class="torn-button torn-button--mint" id="testHardwareButton" type="button" hidden>Test my hardware</button>
+              <div class="flash-progress" id="flashProgress" role="progressbar" aria-label="Firmware loading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="flashProgressBar"></span></div>
+              <div class="flash-progress-label" id="flashProgressLabel" aria-live="polite">Waiting to connect</div>
+              <div class="status-strip" id="esp32Status">I’ll explain the browser permission before it appears.</div>
             </div>
           </div>
         </div>
@@ -169,47 +218,79 @@
 
       <section class="workflow-stage" id="verify" data-stage-index="3" hidden>
         <header class="stage-heading stage-heading--row">
-          <div><h1>Let’s check the<br /><span>hardware.</span></h1><p>First I’ll listen to the board. Then you’ll show me what happens in the real world.</p></div>
-          <div class="test-tabs"><span class="is-active"><b>1</b> Automatic check</span><i></i><span><b>2</b> Your turn</span></div>
+          <div><h1>First listen.<br /><span>Then try it yourself.</span></h1><p>No camera permission. No proof photo. Just a clear check of the real build.</p></div>
+          <div class="test-tabs"><span class="is-active"><b>1</b> Board check</span><i></i><span><b>2</b> Real-world check</span></div>
         </header>
         <div class="verify-command-grid paper-sheet tape-blue">
           <div class="serial-panel">
             <div class="op-header"><span>1</span><div><h2>Board messages</h2><p>Keep everything plugged in while I listen.</p></div></div>
             <div class="inline-form"><label>Listening speed<input id="baudRateInput" type="number" min="9600" step="1" value="115200" /></label><button class="torn-button torn-button--mint" id="connectSerialButton" type="button">Listen to board</button><button class="paper-button" id="disconnectSerialButton" type="button" disabled>Stop</button></div>
             <pre class="terminal" id="serialLog">Board messages will appear here after you connect.</pre>
-            <div class="inline-form"><input id="serialCommandInput" type="text" placeholder="Optional message to the board" /><button class="paper-button" id="sendSerialButton" type="button" disabled>Send</button><button class="paper-button" id="evaluateLogsButton" type="button">Check messages</button></div>
+            <div class="inline-form"><input id="serialCommandInput" type="text" placeholder="Optional message to the board" /><button class="paper-button" id="sendSerialButton" type="button" disabled>Send</button><button class="torn-button torn-button--mint" id="evaluateLogsButton" type="button" disabled>Check fresh messages</button></div>
             <div class="status-strip" id="logEvaluation">I’ll help read these messages once they appear.</div>
+            <section class="diagnostic-repair" id="diagnosticRepairCard" hidden aria-labelledby="diagnosticRepairTitle">
+              <span class="repair-label">One specific repair</span>
+              <h3 id="diagnosticRepairTitle">The expected signal was not detected.</h3>
+              <p id="diagnosticConnection">I’ll identify the exact connection here.</p>
+              <p id="diagnosticEvidence"></p>
+              <div class="button-row"><button class="torn-button torn-button--coral" id="openRepairButton" type="button">Open connection</button><button class="paper-button" id="retryDiagnosticButton" type="button">Retry with fresh messages</button></div>
+            </section>
           </div>
-          <div class="camera-panel">
-            <div class="op-header"><span>2</span><div><h2>Your turn</h2><p>Point the camera at the project so I can see it working.</p></div></div>
-            <div class="camera-frame"><video id="cameraPreview" playsinline muted></video><div class="camera-placeholder">Show me your build</div></div>
-            <div class="button-row"><button class="torn-button torn-button--pink" id="startCameraButton" type="button">Open camera</button><button class="paper-button" id="captureEvidenceButton" type="button" disabled>Take photo</button><button class="paper-button" id="verifyBehaviorButton" type="button">Check behavior</button></div>
-            <div class="evidence-strip" id="evidenceStrip"></div><div class="status-strip" id="behaviorEvaluation">I’ll look at a photo when you are ready.</div>
+          <div class="manual-panel">
+            <div class="op-header"><span>2</span><div><h2>Use the finished build</h2><p>I’ll explain what to point, press, read, and expect.</p></div></div>
+            <div class="operating-guide" id="operatingGuide"><p>Finish the guide and I’ll put the exact operating steps here.</p></div>
+            <label class="manual-observation-label" for="manualObservation">Optional note about what you saw</label>
+            <textarea id="manualObservation" class="manual-observation" rows="3" placeholder="Example: the display reads 30.3 cm and changes when I move the object closer."></textarea>
+            <p class="manual-question" id="manualSuccessQuestion">Did the finished project behave as described?</p>
+            <div class="button-row"><button class="torn-button torn-button--mint" id="verifyBehaviorButton" type="button" disabled>It worked</button><button class="paper-button" id="manualHelpButton" type="button" disabled>Help me fix it</button></div>
+            <p class="manual-note">This check never asks for camera permission.</p>
+            <div class="status-strip" id="behaviorEvaluation">Try the operating steps, then choose the honest result.</div>
+            <button class="torn-button torn-button--coral manual-next-button" id="continueToCelebrateButton" type="button" hidden>Celebrate this build →</button>
           </div>
         </div>
       </section>
 
       <section class="workflow-stage" id="document" data-stage-index="4" hidden>
-        <header class="stage-heading stage-heading--row"><div><h1>You built it.<br /><span>Nice work.</span></h1><p>Makeable keeps the guide, parts list, and test results together while you build.</p></div><svg class="sparkles" viewBox="0 0 110 82" aria-hidden="true"><path d="m38 4 8 22 19 9-19 8-8 24-8-24-19-8 19-9 8-22ZM83 39l4 12 11 5-11 5-4 13-5-13-10-5 10-5 5-12Z" /></svg></header>
+        <header class="stage-heading stage-heading--row"><div><h1>You made<br /><span>something real.</span></h1><p>Celebrate it, save the guide, or simply keep building. The photos are optional.</p></div><svg class="sparkles" viewBox="0 0 110 82" aria-hidden="true"><path d="m38 4 8 22 19 9-19 8-8 24-8-24-19-8 19-9 8-22ZM83 39l4 12 11 5-11 5-4 13-5-13-10-5 10-5 5-12Z" /></svg></header>
+        <div class="achievement-banner" role="status"><span aria-hidden="true">✦</span><div><strong>First build complete</strong><p>Achievement unlocked once for this verified project.</p></div></div>
+        <div class="completion-media paper-sheet" aria-labelledby="completion-photo-title">
+          <div><span class="section-number">Optional</span><h2 id="completion-photo-title">Add a finished-build photo.</h2><p>Choose what you’re comfortable publishing. A photo is never required.</p></div>
+          <div class="completion-photo-grid">
+            <div class="completion-photo-option"><strong>Finished hardware only</strong><span>Use this as the project cover.</span><label class="paper-button" for="finishedBuildPhotoInput">Take or choose photo</label><input id="finishedBuildPhotoInput" class="sr-only" type="file" accept="image/*" capture="environment" /><img id="finishedBuildPreview" alt="" hidden /><label class="media-consent"><input id="includeFinishedBuildPhoto" type="checkbox" disabled /> Include in GitHub</label></div>
+            <div class="completion-photo-option"><strong>Me with my build</strong><span>Kept separate and never included automatically.</span><label class="paper-button" for="creatorPhotoInput">Take or choose photo</label><input id="creatorPhotoInput" class="sr-only" type="file" accept="image/*" capture="user" /><img id="creatorPhotoPreview" alt="" hidden /><label class="media-consent"><input id="includeCreatorPhoto" type="checkbox" disabled /> Include in GitHub</label></div>
+          </div>
+          <label class="publish-field" for="coverAltText"><span>Cover-photo description</span><input id="coverAltText" type="text" placeholder="A finished distance sensor build on my desk" /></label>
+        </div>
         <div class="doc-grid paper-sheet tape-blue">
           <div class="doc-actions">
             <div class="package-list"><span>✓ project notes</span><span>✓ build guide</span><span>✓ parts list</span><span>✓ test results</span></div>
             <button class="paper-button" id="generateReadmeButton" type="button">Refresh project notes</button>
+            <div class="publish-panel">
+              <label class="publish-field" for="repoNameInput">
+                <span>Repository name</span>
+                <input id="repoNameInput" type="text" value="makeable-build" autocomplete="off" />
+              </label>
+              <label class="publish-check">
+                <input id="privateRepoInput" type="checkbox" checked />
+                <span>Keep this repository private</span>
+              </label>
+              <button class="torn-button torn-button--coral" id="publishGithubButton" type="button" disabled>Publish to GitHub</button>
+              <p class="publish-note" id="publishGateNote">Finish the manual check to unlock publishing.</p>
+              <button class="paper-button" id="shareBuildButton" type="button" hidden>Share my build</button>
+            </div>
             <div class="status-strip" id="githubStatus">Your notes stay here with your build session.</div>
           </div>
-          <div class="readme-card"><div class="project-preview"><img src="images/makeable/self-watering-kit.png" alt="Illustrated self-watering plant electronics build" /><strong>My Makeable project</strong><span>Tested &amp; working</span></div><pre class="readme-preview" id="readmePreview">Your project notes will appear here.</pre></div>
+          <div class="readme-card"><div class="project-preview"><img id="projectCoverPreview" src="images/makeable/scan-parts.svg" alt="Generic Makeable project placeholder" /><strong id="projectTitlePreview">My Makeable project</strong><span>Tested &amp; working</span></div><pre class="readme-preview" id="readmePreview">Your project notes will appear here.</pre></div>
         </div>
       </section>
     </main>
 
     <footer class="stage-controls" aria-label="Stage navigation">
       <button class="paper-button" id="stageBackButton" type="button">← Back</button>
-      <div class="stage-control-copy" aria-live="polite"><strong id="stageControlTitle">Step 1: Describe</strong><span id="stageControlHint">Tell Makeable what you want to build.</span></div>
+      <div class="stage-control-copy" aria-live="polite"><strong id="stageControlTitle">Step 1: Start</strong><span id="stageControlHint">Start with an idea or show me the parts you have.</span></div>
       <button class="torn-button torn-button--coral" id="stageNextButton" type="button">Continue</button>
     </footer>
 
-    <aside class="orientation-card" aria-label="Landscape mode recommended"><img src="images/makeable/icon-code.svg" alt="" /><h2>Turn sideways to build.</h2><p>Makeable works like a wide workbench, with your photo and next move side by side.</p></aside>
-
-    <script type="module" src="./app.js?v=makeable-workbench-20260716"></script>
+    <script type="module" src="./app.js?v=makeable-pilot-20260720-final"></script>
   </body>
 </html>
