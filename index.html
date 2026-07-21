@@ -34,6 +34,49 @@
   <body class="waitlist-page">
     <a class="waitlist-skip" href="#main">Skip to Makeable</a>
 
+    <!--
+      Reusable torn-paper edge filters. Applied via CSS `filter: url(...)`
+      to background-only layers (poster backing, panel edges, seams) so the
+      rectangular edges fray into fibrous torn paper without warping text.
+    -->
+    <svg class="paper-filters" width="0" height="0" aria-hidden="true" focusable="false">
+      <defs>
+        <filter id="torn-paper" x="-6%" y="-12%" width="112%" height="124%">
+          <feTurbulence
+            type="fractalNoise"
+            baseFrequency="0.012 0.06"
+            numOctaves="4"
+            seed="21"
+            result="tornNoise"
+          />
+          <feDisplacementMap
+            in="SourceGraphic"
+            in2="tornNoise"
+            scale="7"
+            xChannelSelector="R"
+            yChannelSelector="G"
+          />
+        </filter>
+
+        <filter id="torn-paper-fine" x="-10%" y="-14%" width="120%" height="128%">
+          <feTurbulence
+            type="fractalNoise"
+            baseFrequency="0.028 0.09"
+            numOctaves="3"
+            seed="8"
+            result="tornNoiseFine"
+          />
+          <feDisplacementMap
+            in="SourceGraphic"
+            in2="tornNoiseFine"
+            scale="4.5"
+            xChannelSelector="R"
+            yChannelSelector="G"
+          />
+        </filter>
+      </defs>
+    </svg>
+
     <header class="waitlist-nav">
       <a class="makeable-wordmark" href="/" aria-label="Makeable home">
         <span class="makeable-wordmark-text" aria-hidden="true">Makeable</span>
@@ -130,6 +173,14 @@
             </section>
           </div>
         </div>
+
+        <span class="hero-tear" data-hero-tear aria-hidden="true">
+          <svg class="hero-tear-svg" preserveAspectRatio="none">
+            <path class="hero-tear-shadow"></path>
+            <path class="hero-tear-underlayer"></path>
+            <path class="hero-tear-paper"></path>
+          </svg>
+        </span>
       </section>
 
       <div class="landing-story-column" data-scroll-story>
@@ -149,11 +200,13 @@
 
         <div class="comparison paper-card" data-comparison data-recognition-visible="true">
           <section class="desk-half desk-half--before" aria-label="Your desk: OLED display, PIR sensor, and ESP32 DevKit">
-            <img class="desk-reference-photo" src="/assets/landing/reference-your-desk.jpg" alt="" />
+            <img class="desk-reference-photo" src="/assets/landing/desk-parts.jpeg" alt="" />
+            <span class="desk-pill desk-pill--before">Your desk</span>
           </section>
           <section class="desk-half desk-half--after" aria-label="Makeable sees: OLED display, PIR motion sensor, and ESP32 DevKit">
-            <img class="desk-reference-photo desk-reference-photo--unlabelled" src="/assets/landing/reference-your-desk.jpg" alt="" />
-            <img class="desk-reference-photo desk-reference-photo--annotated" src="/assets/landing/reference-makeable-sees.jpg" alt="" />
+            <img class="desk-reference-photo desk-reference-photo--unlabelled" src="/assets/landing/desk-parts.jpeg" alt="" />
+            <img class="desk-reference-photo desk-reference-photo--annotated" src="/assets/landing/desk-parts-labelled.jpeg" alt="" />
+            <span class="desk-pill desk-pill--after">Makeable sees</span>
           </section>
           <span class="comparison-divider" aria-hidden="true"></span>
           <button class="comparison-toggle" type="button" data-comparison-toggle aria-pressed="true" aria-label="Hide Makeable part labels">
@@ -248,8 +301,8 @@
                 <span class="story-number">03</span>
                 <h2>Test</h2>
               </div>
-              <p class="story-caption">We’ll test everything.</p>
               <span class="story-copy-arrow story-doodle-arrow" aria-hidden="true"></span>
+              <p class="story-caption">We’ll test everything.</p>
             </div>
             <figure class="story-visual" data-story-frame="test">
               <div class="test-hardware-crop">
@@ -306,24 +359,24 @@
         </section>
 
       </div>
-    </main>
 
-    <footer class="waitlist-footer" aria-label="Legal and footer links">
-      <a class="makeable-wordmark makeable-wordmark--footer" href="/" aria-label="Makeable home">
-        <span class="makeable-wordmark-text" aria-hidden="true">Makeable</span>
-        <span class="makeable-logo-spark" aria-hidden="true"></span>
-      </a>
-      <p class="footer-purpose">
-        Makeable is an AI hardware prototyping studio that turns the parts on your desk
-        into wiring plans, working firmware, and guided tests.
-      </p>
-      <p>
-        <a href="/privacy/">Privacy</a>
-        <span aria-hidden="true">·</span>
-        <a href="/terms/">Terms</a>
-      </p>
-      <p>© <span data-current-year></span> Makeable</p>
-    </footer>
+      <footer class="waitlist-footer" aria-label="Legal and footer links">
+        <a class="makeable-wordmark makeable-wordmark--footer" href="/" aria-label="Makeable home">
+          <span class="makeable-wordmark-text" aria-hidden="true">Makeable</span>
+          <span class="makeable-logo-spark" aria-hidden="true"></span>
+        </a>
+        <p class="footer-purpose">
+          Makeable is an AI hardware prototyping studio that turns the parts on your desk
+          into wiring plans, working firmware, and guided tests.
+        </p>
+        <p class="footer-links">
+          <a href="/privacy/">Privacy</a>
+          <span aria-hidden="true">·</span>
+          <a href="/terms/">Terms</a>
+        </p>
+        <p>© <span data-current-year></span> Makeable</p>
+      </footer>
+    </main>
 
     <script src="/config.local.js"></script>
     <script type="module" src="/landing.js"></script>
