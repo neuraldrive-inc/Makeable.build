@@ -1991,7 +1991,7 @@ async function analyzeHardware() {
         {
           role: "system",
           content:
-            "You are Makeable, an expert hardware build agent for beginners. Identify only the actual visible parts needed for the user's stated project, produce tight normalized bounding boxes for those required parts, make conservative ESP32 wiring choices, flag uncertainty, avoid unsafe pins, and output only schema-valid JSON. Always return the most plausible visible controller as a part, including a Possible ESP32 name when there is ESP32-family evidence, even when confidence is low. Ignore visible parts that are unrelated to the requested build. Never use canned/demo component names or boxes. Do not generate source code in this step.",
+            "You are Makeable's visual hardware planner for beginners. From the photo and chosen idea, return one schema-valid ESP32 build plan. Identify only real project parts, use readable labels, keep uncertainty honest, and never invent components or photo geometry. No source code in this step.",
         },
         {
           role: "user",
@@ -2130,9 +2130,9 @@ async function suggestProjectIdeas(generationContext = beginGenerationContext())
         reasoning: { effort: settings.openaiReasoningEffort || DEFAULT_REASONING_EFFORT },
         input: [
           {
-            role: "system",
-            content:
-              "You are a patient electronics teacher suggesting projects for a complete beginner. Use only parts clearly visible in the supplied photo. Suggest two or three small, practical, genuinely buildable projects. For an ESP32 development board with an ordinary low-current sensor, display, or onboard output, assume the board and project can run from the board’s USB data cable; do not invent a battery, power bank, level-shifter board, or separate supply. Treat the USB cable as normal board setup, even when it is not in the parts photo. Avoid motors, pumps, heaters, large LED strips, and other high-current ideas unless suitable external power hardware is visible. Output only schema-valid JSON.",
+          role: "system",
+          content:
+              "You suggest two or three beginner projects from a parts photo. Use visible hardware only. Prefer useful ESP32 sensor or display builds powered by the board's USB cable; do not invent a battery, converter, or level-shifter. Avoid high-current ideas unless a suitable visible supply is present. Return only schema-valid JSON.",
           },
           {
             role: "user",
@@ -2140,7 +2140,7 @@ async function suggestProjectIdeas(generationContext = beginGenerationContext())
               {
                 type: "input_text",
                 text:
-                  "Suggest two or three beginner projects supported by the visible parts. Keep each title concrete and each description to one plain-language sentence. Name the visible parts each idea uses.",
+                  "Suggest two or three concrete, one-sentence projects. Name the visible parts each one uses.",
               },
               { type: "input_image", image_url: generationContext.imageDataUrl, detail: "high" },
             ],
@@ -2222,42 +2222,18 @@ function buildAnalysisPrompt(idea) {
       : "Project idea: none yet. Suggest the simplest beginner-friendly build the visible parts support.",
     "",
     hasIdea
-      ? "Return a beginner-safe hardware plan for the actual visible parts in this uploaded image."
-      : "Return a beginner-safe hardware plan that suggests a build from the actual visible parts in this uploaded image.",
-    "Only include parts that are necessary for the described project. Ignore unrelated visible parts even if you can identify them.",
-    "Every returned part must either appear in a wiring step or be required to make those wiring steps possible, such as a controller, sensor, output, current-limiting resistor, power connection, or jumper wire.",
-    "Use short label-friendly names, such as ESP32 DevKit, PIR sensor, LED, resistor, and jumper wires.",
-    "Do not use example/demo/static values. Every part name and bounding box must be based on visual evidence in this exact photo.",
-    "Use tight bounding boxes around each physical component. Coordinates may be 0-100 percentages or 0-1000 normalized image coordinates.",
-    "Assign stable part ids like esp32_main, pir_sensor, led_pack, resistor_strip, servo_motor. Use those ids in wiringSteps.fromPartId and wiringSteps.toPartId.",
-    "For an ESP32 DevKit, look for the module with a metal RF shield, USB connector, boot/reset buttons, and two rows of pins.",
-    "For a PIR sensor, look for a white Fresnel dome. Do not label a black circular speaker/display/module as PIR unless it visually matches.",
-    "For LEDs/resistors, distinguish loose LEDs, resistor bags/strips, jumper wires, servo motors, displays, relay/audio modules, and breadboards if visible.",
-    "If a part is ambiguous, name it as 'possible ...' and reduce confidence rather than guessing.",
-    "Return schemaVersion 2 and identify the exact board profile, USB connector, and printed RESET/EN and BOOT button labels.",
-    "Return powerPlan. For ordinary low-current sensors, small displays, and onboard outputs, set mode usb_board_power, reason ordinary_low_current, highCurrentLoads [], externalSupplies [], externalPowerRequired false, keepUsbConnected true, and explain plainly that the USB data cable powers the ESP32 and build so no battery is needed. Name the confirmed 3V3 or USB-backed 5V/VBUS/VIN rail used by external modules. Use external_supply_required with reason high_current_load only for a genuinely high-current or separately powered load such as a motor, servo, pump, heater, LED strip, fan, electromagnet, amplifier, siren, lamp, or switched load. For each actual load, add highCurrentLoads evidence with its exact visible part id, a reason, known required voltage/current (use 0 only when unknown), and a concise source such as a printed rating or known part specification. For every actual visible battery pack or separate supply, add externalSupplies evidence with its exact part id, output voltage, maximum current (0 only when genuinely unknown), and the printed or known rating used; never invent a supply. For an explicitly portable or untethered request without a confirmed portable supply, keep mode usb_board_power, reason untethered_requested, both arrays empty, and let the user build and test over USB now; describe portable power as a later decision, not a prerequisite.",
-    "The USB data cable is board setup, not a photographed project part. Leave USB unplugged while moving jumper wires; for a separate-load-supply build, disconnect that supply too. Plug USB in at Connect + load, and keep it connected while using a USB-powered build.",
-    "Set boardProfile.identityConfidence to your probability from 0 to 1 that the visible controller is in the ESP32 family. This is family identity confidence, not confidence in the exact manufacturer, revision, layout, or pin positions.",
-    "Never omit a visible controller because its identity is uncertain. If ESP32-family identityConfidence is at least 0.55, include it as a part whose name or type contains 'Possible ESP32' and use compatible_with_differences unless the exact layout is genuinely confirmed. Below 0.55, still include the best candidate and its honest score so the user can see why a clearer photo is needed.",
-    "Use supportStatus exactly_supported only when the manufacturer/model/revision and pin-label layout are genuinely confirmed from the photo. Use compatible_with_differences for an ESP32-family match of at least 0.55 whose exact revision differs or remains uncertain. Use unverified when ESP32-family confidence is below 0.55 or the visible evidence is insufficient.",
-    "Prefer ESP32 pins that are usually safe for beginner projects; place any boot-risk caveat in the separate warning field.",
-    "For every wiring step, create one atomic connection with a stable connectionId, fromPartId, toPartId, exact fromPrintedPin, exact toPrintedPin, electrical aliases, wireColor, jumper connector gender/type, quickCheck, why, warning, requiredPartIds, and accessibilityRank.",
-    "Map every required connection for each external module, including its power and ground jumpers. A classic HC-SR04 needs four explicit module connections: VCC, GND, TRIG, and ECHO. USB powers the ESP32 board but does not replace the VCC and GND jumpers from the board rail to the sensor.",
-    "For every low-voltage high-current load, include the confirmed external supply as a photographed part and explicitly map the load's supply-power path plus the common ground path back to the ESP32. Do not route the load's power through the ESP32 board, wire a motor, servo, pump, heater, LED strip, or other substantial load directly to a GPIO, or pretend its supply is present when it is not. Never generate exposed mains-voltage wiring; keep code planning separate and require a properly enclosed certified interface and qualified help for the mains side.",
-    "Also return pinLocationsConfirmed plus tight fromPinBbox and toPinBbox rectangles around the actual visible metal pin or receptacle in this exact photo. Use 0-100 coordinates. Set pinLocationsConfirmed true only when both physical connection points are genuinely visible. When a marker position is uncertain, keep the viable exact-label wiring step, set pinLocationsConfirmed false, and treat only the photo overlay as approximate guidance rather than blocking or omitting the connection.",
-    "The action sentence must literally include both exact printed pin labels. Say D25 when the board prints D25; GPIO 25 may appear only as the secondary electrical alias.",
-    "Never invent a pin position or board geometry. The photographed printed label is the source of truth.",
-    "Order wiring from the most physically constrained or crowded inner connection to the easiest outer connection.",
-    "Assign a distinct wire color to every connection whenever the confirmed wire inventory permits it, and keep that color attached to the same connectionId everywhere.",
-    "Every requiredPartId must refer to a part actually confirmed in the photo.",
-    "Do not introduce an unseen resistor, voltage-divider module, level-shifter board, adapter, battery, or power supply. Keep the project moving with the visible parts and put a concise, honest caveat in the separate warning field when a component is being used outside its published rating.",
-    "For a classic HC-SR04 ultrasonic sensor, use the direct photographed ECHO-to-ESP32 connection when that is the user’s available setup and add a short warning that its 5 V ECHO can exceed the ESP32’s published 3.6 V GPIO range. Do not require a level-shifter board, step-down converter, or battery. You may mention two ordinary resistors as the lower-risk optional protection, but never insert unseen resistors into the primary wiring. If an exact 3.3 V-compatible ultrasonic variant is genuinely confirmed, direct ECHO needs no voltage warning.",
-    "Each diagnostic test must use connectionId to link a failure to one exact wire and include a concrete failureTitle and recoveryAction.",
-    "Include an operatingGuide that explains what the finished build does, which face/direction to use, what to press or move, the displayed unit, what success looks like, and the difference between RESET/EN and BOOT.",
-    "Do not claim certainty for ambiguous modules; put uncertainty in warnings.",
-    "Do not generate source code in this vision/planning step.",
-    "Instead, return a compact firmwareSpec with chosen pins, libraries, serial protocol markers, and behavior.",
-    "Include diagnostic tests that can be judged from serial logs and simple observations.",
+      ? "Build a clear, beginner-friendly plan from the parts in this image."
+      : "Suggest the clearest beginner-friendly plan from the parts in this image.",
+    "Include only parts needed for this project. Give each a short name, stable id, honest confidence, and tight photo bounds. If uncertain, say 'possible …' instead of guessing.",
+    "Identify the likely ESP32, its USB connector, readable RESET/EN and BOOT labels, visible pin labels, and an ESP32-family confidence score. Keep a likely ESP32 visible even below 0.55; use unverified or compatible_with_differences when its exact layout is not proven.",
+    "Treat the USB data cable and jumper wires as setup equipment, not photo-detected parts. Still draft every required jumper: connector type, a simple guide colour, and one connection per step. If wire colours are not visible, choose easy distinct guide colours rather than pretending the photo proves them.",
+    "Use readable printed board labels in every action. When a known module's tiny connector legend cannot be read, use its standard connector name, mark the label for the user to check, and do not invent its physical position.",
+    "For ordinary low-current sensors, displays, LEDs, and onboard outputs, use usb_board_power: the USB cable powers the ESP32 and no battery is needed. Power each small module from a clearly labelled matching board rail—3V3 for 3.3 V modules, or 5V/VIN/VBUS for 5 V modules—and connect GND. A different rail label is not a reason to stop the build or invent a converter.",
+    "Use external_supply_required only for a real high-current or separately powered load. Then include the visible supply, its rating, the load power path, and a shared ground. Never route that load's power through the ESP32, drive it from a GPIO, or map exposed mains wiring.",
+    "If the user wants a portable build but no portable supply is confirmed, plan usb_board_power now and describe portable power as a later choice.",
+    "Choose ordinary beginner-safe ESP32 signal pins and put any caveat in warnings. Map VCC, GND, and every needed signal for each module. For a classic HC-SR04, map VCC, GND, TRIG, and direct ECHO; warn that direct 5 V ECHO is outside the published ESP32 GPIO range, but do not require a battery, converter, resistor, or level-shifter.",
+    "Use one atomic wiring step with stable ids, exact endpoints, aliases, connector type, quick check, purpose, warning, required parts, and accessibility order. Repeat both endpoint labels exactly in the action sentence. Keep a viable label-based step when its photo marker is uncertain; set pinLocationsConfirmed false instead of blocking the build.",
+    "Add a short operating guide, connection-linked diagnostics, and a compact firmwareSpec with pins, libraries, serial markers, and behavior. Do not generate source code yet.",
   ].join("\n");
 }
 
@@ -2452,7 +2428,7 @@ async function generateFirmwareForPlan(idea, generationContext) {
       {
         role: "system",
         content:
-          "You are Makeable's ESP32 firmware engineer. Generate a compact, compile-ready ESP32 Arduino-core C++ sketch from the provided hardware plan. Support ESP32-family targets only. Use only the libraries explicitly listed as available in the user prompt. Output only schema-valid JSON. Do not include markdown fences. Keep the sketch under 180 lines unless absolutely required.",
+          "You are Makeable's ESP32 firmware engineer. Generate a compact, compile-ready Arduino-core C++ sketch from the supplied ESP32 plan. Preserve its pins and diagnostics, use only listed libraries, return schema-valid JSON without markdown, and stay under 180 lines unless necessary.",
       },
       {
         role: "user",
@@ -2533,15 +2509,11 @@ function buildFirmwarePrompt(idea, plan) {
     ),
     "",
     "Requirements:",
-    "- Generate one complete ESP32 Arduino-core C++ sketch.",
-    "- Include Serial.begin(115200).",
-    "- Print CIRCUITCODEX_DIAGNOSTIC_READY in setup().",
-    "- Print clear diagnostic markers matching the diagnostic tests.",
-    "- Avoid unsafe boot pins unless the plan explicitly requires them.",
-    "- If the hardware plan is uncertain, make the sketch conservative and explain the assumption in notes.",
-    `- Use only these hosted compiler libraries: ${HOSTED_FIRMWARE_LIBRARIES.join(", ")}.`,
-    "- Do not invent headers, packages, classes, methods, pin aliases, or APIs that are not supplied by those libraries.",
-    "- Do not include markdown fences in the sketch string.",
+    "- Return one complete ESP32 Arduino-core C++ sketch with Serial.begin(115200).",
+    "- Print CIRCUITCODEX_DIAGNOSTIC_READY in setup and the plan's diagnostic markers.",
+    "- Keep boot-pin use and assumptions explicit in notes.",
+    `- Use only these hosted libraries: ${HOSTED_FIRMWARE_LIBRARIES.join(", ")}. Do not invent APIs or headers.`,
+    "- Return the sketch string without markdown fences.",
   ].join("\n");
 }
 
@@ -2601,7 +2573,7 @@ async function repairFirmwareForCompilerError({ idea, profile, sketch, details, 
       {
         role: "system",
         content:
-          "You repair ESP32 Arduino-core C++ after a real compiler failure. Return a complete corrected sketch, not a patch. Preserve the intended behavior and pin assignments. Use only the explicitly available libraries. Resolve every reported diagnostic. Output only schema-valid JSON without markdown fences.",
+          "Repair the complete ESP32 Arduino-core sketch after a real compiler failure. Preserve behavior and pins, use only listed libraries, fix every reported error, and return schema-valid JSON without markdown.",
       },
       {
         role: "user",
@@ -2619,7 +2591,7 @@ async function repairFirmwareForCompilerError({ idea, profile, sketch, details, 
               "Original sketch:",
               sketch,
               "",
-              "Return the complete corrected firmware. Do not add a library that is not available.",
+              "Return the complete corrected firmware using only those libraries.",
             ].join("\n"),
           },
         ],

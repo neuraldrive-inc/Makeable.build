@@ -403,6 +403,32 @@ test("direct classic HC-SR04 ECHO warns honestly but the project continues", asy
   await expect(page.locator("#nextBuildStepButton")).toBeEnabled();
 });
 
+test("a generated OLED guide stays startable when the tiny module legend needs a user check", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "One browser covers automatic action-label repair");
+  const plan = beginnerPlan();
+  plan.parts[1] = {
+    ...plan.parts[1],
+    name: "Small I2C OLED display",
+    type: "display",
+    role: "Shows motion status",
+  };
+  plan.wiringSteps[1] = {
+    ...plan.wiringSteps[1],
+    title: "Connect OLED data",
+    action: "Connect the blue jumper from the OLED to the ESP32.",
+    instruction: "Connect the blue jumper from the OLED to the ESP32.",
+    fromPrintedPin: "SDA (check OLED legend)",
+    toPrintedPin: "D25",
+    fromElectricalAlias: "I2C data",
+    wireColor: "blue",
+  };
+
+  await page.evaluate((nextPlan) => window.__MAKEABLE_TEST_API__.loadPlan(nextPlan), plan);
+  await expect(page.locator("#planIssues")).not.toContainText("must name both printed pin labels");
+  await expect(page.locator("#cableInventoryList")).toContainText("SDA (check OLED legend) → D25");
+  await expect(page.locator("#beginAssemblyButton")).toHaveText("Start connection 1");
+});
+
 test("an incomplete HC-SR04 map pauses only wiring while code remains available", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "One browser covers the assembly-only completeness gate");
   const plan = unsafeUltrasonicPlan();

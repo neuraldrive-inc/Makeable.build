@@ -301,7 +301,7 @@ test("a board match cannot hide missing external wiring while a board-only plan 
   );
 });
 
-test("an imprecise connection still blocks while classic HC-SR04 voltage is advisory", () => {
+test("normalization repairs a shorthand wiring sentence while classic HC-SR04 voltage stays advisory", () => {
   const raw = basePlan();
   raw.parts[1] = { id: "sonar", name: "HC-SR04 ultrasonic sensor", type: "sensor", role: "Distance" };
   raw.wiringSteps = [
@@ -317,8 +317,10 @@ test("an imprecise connection still blocks while classic HC-SR04 voltage is advi
       requiredPartIds: ["sonar", "board"],
     },
   ];
-  const issues = validateBeginnerPlan(normalizeBeginnerPlan(raw));
-  assert.ok(issues.some(({ code, severity }) => code === "imprecise-labels" && severity === "block"));
+  const plan = normalizeBeginnerPlan(raw);
+  const issues = validateBeginnerPlan(plan);
+  assert.match(plan.wiringSteps[0].action, /ECHO → D25/);
+  assert.equal(issues.some(({ code, severity }) => code === "imprecise-labels" && severity === "block"), false);
   assert.ok(issues.some(({ code, severity }) => code === "unconfirmed-echo-voltage" && severity === "warn"));
   assert.equal(issues.some(({ code, severity }) => code === "unconfirmed-echo-voltage" && severity === "block"), false);
 });
@@ -835,15 +837,32 @@ test("every ultrasonic ECHO path must independently confirm voltage protection",
   assert.ok(issues.some(({ code, connectionId }) => code === "unconfirmed-echo-voltage" && connectionId === "direct-echo"));
 });
 
-test("printed pin labels require exact tokens instead of substrings", () => {
+test("normalization appends exact endpoint labels when a generated action uses a partial pin name", () => {
   const raw = basePlan();
   raw.wiringSteps[0] = {
     ...raw.wiringSteps[0],
     action: "Connect the yellow female-to-female wire from OUT to D25.",
     toPrintedPin: "D2",
   };
-  const issues = validateBeginnerPlan(normalizeBeginnerPlan(raw));
-  assert.ok(issues.some(({ code }) => code === "imprecise-labels"));
+  const plan = normalizeBeginnerPlan(raw);
+  const issues = validateBeginnerPlan(plan);
+  assert.match(plan.wiringSteps[0].action, /OUT → D2/);
+  assert.equal(issues.some(({ code }) => code === "imprecise-labels"), false);
+});
+
+test("normalization keeps a user-checkable module legend while making a real OLED wire actionable", () => {
+  const raw = basePlan();
+  raw.wiringSteps[0] = {
+    ...raw.wiringSteps[0],
+    action: "Connect the blue jumper from OLED SDA to ESP32 D25.",
+    fromPrintedPin: "SDA (check OLED legend)",
+    toPrintedPin: "D25",
+  };
+  const plan = normalizeBeginnerPlan(raw);
+  const issues = validateBeginnerPlan(plan);
+  assert.equal(plan.wiringSteps[0].action, "Connect the blue jumper from OLED SDA to ESP32 D25.");
+  assert.match(wireDescription(plan.wiringSteps[0]), /SDA \(check OLED legend\) → D25/);
+  assert.equal(issues.some(({ code }) => code === "imprecise-labels"), false);
 });
 
 test("uncertain photo markers stay visible as guidance instead of blocking wiring", () => {

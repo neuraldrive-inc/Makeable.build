@@ -438,10 +438,11 @@ function normalizeStep(step = {}, index) {
   const fromPrintedPin = clean(step.fromPrintedPin || endpointPin(step.from), clean(step.from, "START"));
   const toPrintedPin = clean(step.toPrintedPin || step.pin || endpointPin(step.to), clean(step.to, "TARGET"));
   const color = clean(step.wireColor, DEFAULT_WIRE_COLORS[index % DEFAULT_WIRE_COLORS.length]);
-  const action = clean(
+  const suppliedAction = clean(
     step.action || step.instruction,
     `Connect the ${color} wire from ${fromPrintedPin} to ${toPrintedPin}.`,
   );
+  const action = actionWithEndpointLabels(suppliedAction, fromPrintedPin, toPrintedPin);
   return {
     ...step,
     order: finite(step.order, index + 1),
@@ -474,6 +475,14 @@ function normalizeStep(step = {}, index) {
       : [clean(step.fromPartId), clean(step.toPartId)].filter(Boolean),
     accessibilityRank: finite(step.accessibilityRank, index + 1),
   };
+}
+
+function actionWithEndpointLabels(action, fromPrintedPin, toPrintedPin) {
+  if (actionNamesExactPin(action, fromPrintedPin) && actionNamesExactPin(action, toPrintedPin)) {
+    return action;
+  }
+  const sentence = clean(action).replace(/[.\s]+$/, "");
+  return `${sentence || "Connect the wire"}. (${fromPrintedPin} → ${toPrintedPin}).`;
 }
 
 function normalizeBoardProfile(profile = {}) {
@@ -799,12 +808,20 @@ function canonicalPin(value) {
 }
 
 function actionNamesExactPin(action, pin) {
-  const expected = canonicalPin(pin);
-  if (!expected) return false;
-  const flexibleLabel = [...expected]
-    .map((character) => character.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .join("\\s*");
-  return new RegExp(`(?:^|[^A-Z0-9])${flexibleLabel}(?=$|[^A-Z0-9])`, "i").test(clean(action));
+  return actionPinAlternatives(pin).some((expected) => {
+    const flexibleLabel = [...expected]
+      .map((character) => character.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("\\s*");
+    return new RegExp(`(?:^|[^A-Z0-9])${flexibleLabel}(?=$|[^A-Z0-9])`, "i").test(clean(action));
+  });
+}
+
+function actionPinAlternatives(pin) {
+  return clean(pin)
+    .replace(/\s*\([^)]*(?:check|confirm|verify)[^)]*\)/gi, " ")
+    .split(/\s+or\s+|\s*\/\s*/i)
+    .map((value) => canonicalPin(value))
+    .filter(Boolean);
 }
 
 function isConfirmedPinBox(bbox) {

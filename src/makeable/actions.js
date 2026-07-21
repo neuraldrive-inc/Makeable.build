@@ -840,23 +840,20 @@ export async function requestHardwarePlan({
           type: "input_text",
           text: [
             `Project idea: ${projectIntent}`,
-            "Regenerate the beginner-safe guide and firmware from this confirmed inventory.",
-            "Treat this as the confirmed inventory; do not re-identify or add photographed parts.",
-            JSON.stringify(confirmedParts),
-            "Inventory-first reasoning rules:",
-            "- Maximize the meaningful safe use of all safely compatible confirmed parts. Prefer a cohesive input → controller logic → output behavior over a minimal controller-only or bare-GPIO demonstration.",
-            "- Confirmed part names and physical types are authoritative. Their role labels may be stale from an earlier project or fallback, so reassign roles from the actual hardware capabilities.",
-            "- Treat sensors as inputs and displays as outputs. If a confirmed controller, sensor, and display can form a complete useful build, mark it ready and use all three.",
-            "- Do not require an actuator, motor, relay, or switch merely to make an observable result when a confirmed display can show that result.",
-            "- Classify an OLED, LCD, screen, or e-paper check as a display diagnostic, never an actuator. Reserve actuator for outputs that create physical motion, heat, fluid flow, or power switching.",
-            "- Treat a computer and USB data cable used only to program or monitor the controller as setup equipment, not missing project parts. Mention setup equipment in notes or warnings, never missingParts.",
-            "- The summary must clearly explain each confirmed part’s role and how information or control flows between them.",
-            "- If the exact idea is impossible, rank alternatives by how many safely compatible confirmed functional parts they use, with the fullest useful build first.",
-            "Return honest feasibility, missing parts, compatible alternatives, wiring, firmware, and stable diagnostics.",
-            "Set missingParts.required true only for parts essential to complete, load, or safely test this build. Mark nice-to-have accessories false, and never let optional parts make feasibility missing.",
+            "Create the guide and firmware from this confirmed inventory only; do not re-identify or add parts.",
+            `Confirmed inventory: ${JSON.stringify(confirmedParts)}`,
+            "Maximize meaningful safe use of all safely compatible confirmed parts.",
+            "Use the fullest useful safe combination: sensors are inputs, displays show results, and a display is not an actuator. USB data cable/computer are setup, not missing parts.",
+            "Do not require an actuator or switch merely because a display can show the result.",
+            "Classify OLED, LCD, screen, and e-paper checks as display diagnostics, never actuators.",
+            "For ordinary low-current ESP32 sensor or display builds, USB powers the board. Connect module VCC to a matching labelled board rail (3V3, 5V, VIN, or VBUS) plus GND; do not invent a battery, converter, or separate supply.",
+            "Confirmed part names and types are authoritative; role labels may be stale, so reassign roles from their hardware capabilities.",
+            "The summary must clearly explain each confirmed part's role and the input → controller → output flow. If the idea cannot work, offer the best compatible alternative.",
+            "Mark only indispensable parts as required missing; optional accessories never make the project unavailable.",
+            "Return feasibility, wiring, firmware, diagnostics, and any honest missing parts.",
             hostedFirmwareRequirements(),
             firmwareDiagnosticRequirements(),
-            "Never invent prices, sellers, stock, or checkout.",
+            "Never invent shopping details.",
           ].join("\n\n"),
         },
       ]
@@ -865,17 +862,14 @@ export async function requestHardwarePlan({
           type: "input_text",
           text: [
             `Project idea: ${projectIntent}`,
-            "Identify only actual visible parts needed for the idea.",
-            "Use tight 0-100 percentage bounds and conservative confidence.",
-            "Propose alternatives that maximize meaningful safe use of the detected compatible parts. Prefer sensor → controller → display behavior over controller-only GPIO demonstrations, and do not invent an actuator or switch when a display already provides useful output.",
-            "Classify OLED, LCD, screen, and e-paper checks as display diagnostics, never actuators.",
-            "Treat a computer and USB data cable used only for programming or monitoring as setup equipment, not missing project parts.",
-            "Write the summary as a clear role-by-role explanation of how the visible parts work together.",
-            "Return honest feasibility, missing parts, inventory-compatible alternatives, and stable diagnostics.",
-            "Set missingParts.required true only for parts essential to complete, load, or safely test this build. Mark nice-to-have accessories false, and never let optional parts make feasibility missing.",
+            "Identify only needed visible parts with tight 0–100 bounds and honest confidence.",
+            "Prefer a useful sensor → ESP32 → display build when the compatible parts support it. A screen is a display diagnostic, not an actuator; do not invent an actuator or switch just to make output visible.",
+            "Treat USB cable/computer as setup, not missing parts. Explain each part's role and flow.",
+            "For ordinary low-current ESP32 sensor or display builds, USB powers the board. Connect module VCC to a matching labelled board rail (3V3, 5V, VIN, or VBUS) plus GND; do not invent a battery, converter, or separate supply.",
+            "Return feasibility, compatible alternatives, wiring, firmware, diagnostics, and only indispensable missing parts.",
             hostedFirmwareRequirements(),
             firmwareDiagnosticRequirements(),
-            "Do not invent prices, sellers, stock, or checkout.",
+            "Never invent shopping details.",
           ].join("\n\n"),
         },
         { type: "input_image", image_url: imageDataUrl, detail: "high" },
@@ -889,8 +883,8 @@ export async function requestHardwarePlan({
       {
         role: "system",
         content: confirmation
-          ? "You are Makeable's hardware planner. Regenerate a safe guide and compile-ready firmware from confirmed parts. Return only schema-valid JSON."
-          : "You are Makeable's visual hardware planner. Identify visible components conservatively. Return only schema-valid JSON.",
+          ? "You are Makeable's hardware planner. Build a safe, compile-ready guide from the confirmed inventory. Return only schema-valid JSON."
+          : "You are Makeable's visual hardware planner. Identify visible project parts and make a practical ESP32 guide. Return only schema-valid JSON.",
       },
       { role: "user", content: userContent },
     ],
@@ -953,7 +947,7 @@ async function repairHardwarePlanFirmware({
       {
         role: "system",
         content:
-          "You repair Arduino firmware rejected by Makeable’s deterministic diagnostic validator. Preserve the supplied hardware behavior, wiring, pins, libraries, and diagnostic IDs. Return only schema-valid firmware JSON.",
+          "Repair firmware rejected by Makeable's diagnostic validator. Preserve the supplied behavior, wiring, pins, libraries, and diagnostic IDs. Return only schema-valid firmware JSON.",
       },
       {
         role: "user",
@@ -962,7 +956,7 @@ async function repairHardwarePlanFirmware({
             type: "input_text",
             text: [
               `Project intent: ${projectIntent}`,
-              "The hardware plan is already approved. Replace only the rejected firmware.",
+              "The hardware plan is approved. Replace only the rejected firmware.",
               JSON.stringify({
                 projectTitle: plan.projectTitle,
                 summary: plan.summary,
@@ -1574,7 +1568,7 @@ async function repairCompilerFailure({
       {
         role: "system",
         content:
-          "You repair ESP32 Arduino-core C++ after a real compiler failure. Return the complete corrected sketch as schema-valid JSON. Preserve behavior, pins, and Makeable diagnostic markers.",
+          "Repair the complete ESP32 Arduino-core sketch after a compiler failure. Preserve behavior, pins, and Makeable diagnostic markers. Return schema-valid JSON.",
       },
       {
         role: "user",
@@ -1691,7 +1685,7 @@ export async function evaluateManualTest({
       {
         role: "system",
         content:
-          "You conservatively evaluate beginner electronics from the requested action, one current camera frame, and recent serial markers. Do not infer success from the request alone. Return only schema-valid JSON.",
+          "Evaluate the requested electronics behavior using only the current camera frame and serial markers. Do not infer success from the request alone. Return only schema-valid JSON.",
       },
       {
         role: "user",
@@ -1702,7 +1696,7 @@ export async function evaluateManualTest({
               `Project: ${cleanText(projectTitle, "Makeable project")}`,
               `Requested real-world action: ${cleanText(requestedAction, "Observe the requested behavior.")}`,
               `Recent serial output:\n${String(serialOutput || "No serial output captured.").slice(-3000)}`,
-              "Judge only the visible and serial evidence. Give one actionable next step.",
+              "Judge only this visible and serial evidence. Give one actionable next step.",
             ].join("\n\n"),
           },
           { type: "input_image", image_url: imageDataUrl, detail: "high" },
