@@ -117,7 +117,12 @@ test("the pilot guides users from flashing into a camera-free test and behavior 
   assert.match(pilotHtml, /id="testHardwareNowButton"[^>]*>Let’s test it</);
   assert.match(pilotHtml, /id="behaviorSummary"/);
   assert.match(pilotHtml, /id="codeFunctionList"/);
+  assert.match(pilotHtml, /id="openBehaviorTuneButton"/);
+  assert.match(pilotHtml, /id="behaviorTuneDialog"/);
   assert.match(pilotHtml, /id="behaviorChangeForm"/);
+  assert.match(pilotHtml, /id="verifyPublishButton"/);
+  assert.match(pilotHtml, /Try something else with this wiring/);
+  assert.match(pilotHtml, /<dialog class="behavior-tune-dialog"[\s\S]*?<form class="behavior-change-form"/);
   assert.match(pilotHtml, /class="verify-primary-grid"/);
   assert.match(pilotHtml, /class="listener-toolbar"/);
   assert.match(pilotHtml, /class="command-card"/);
@@ -132,14 +137,19 @@ test("the pilot guides users from flashing into a camera-free test and behavior 
   assert.match(pilotScript, /function startFlashSuccessTransition\(\)/);
   assert.match(pilotScript, /window\.setInterval[\s\S]*goToTestStage\(\)/);
   assert.match(pilotScript, /async function applyBehaviorChange\(event\)/);
+  assert.match(pilotScript, /function openBehaviorTuneDialog\(\)/);
+  assert.match(pilotScript, /function closeBehaviorTuneDialog\(\)/);
+  assert.match(pilotScript, /verifyPublishButton\?\.addEventListener\("click", \(\) => setActiveWorkflowStage\(4\)\)/);
   assert.match(pilotScript, /async function regenerateFirmwareForBehaviorChange\(change\)/);
   assert.match(pilotScript, /connectSerial\(\{ automatic: true \}\)/);
   assert.doesNotMatch(pilotScript, /function startCamera|function captureEvidence|function verifyBehavior|facingMode: "environment"/);
 
-  assert.match(pilotStyles, /\.terminal\s*\{[\s\S]*?height: 218px/);
+  assert.match(pilotStyles, /\.terminal\s*\{[\s\S]*?height: 248px/);
   assert.match(pilotStyles, /\.test-action/);
   assert.match(pilotStyles, /\.terminal-shell/);
   assert.match(pilotStyles, /\.command-composer/);
   assert.match(pilotStyles, /\.behavior-change-form/);
+  assert.match(pilotStyles, /body\[data-stage="4"\] \.stage-controls/);
+  assert.match(pilotStyles, /\.verify-completion-bar/);
   assert.doesNotMatch(pilotStyles, /\.camera-frame|#cameraPreview|\.camera-placeholder/);
 });

@@ -156,10 +156,16 @@ const els = {
   logEvaluation: $("#logEvaluation"),
   behaviorSummary: $("#behaviorSummary"),
   codeFunctionList: $("#codeFunctionList"),
+  openBehaviorTuneButton: $("#openBehaviorTuneButton"),
+  behaviorTuneDialog: $("#behaviorTuneDialog"),
+  closeBehaviorTuneButton: $("#closeBehaviorTuneButton"),
+  cancelBehaviorTuneButton: $("#cancelBehaviorTuneButton"),
   behaviorChangeForm: $("#behaviorChangeForm"),
   behaviorChangeInput: $("#behaviorChangeInput"),
   applyBehaviorChangeButton: $("#applyBehaviorChangeButton"),
   behaviorChangeStatus: $("#behaviorChangeStatus"),
+  verifyBackButton: $("#verifyBackButton"),
+  verifyPublishButton: $("#verifyPublishButton"),
   compileFlashButton: $("#compileFlashButton"),
   flashProgressBar: $("#flashProgressBar"),
   esp32Status: $("#esp32Status"),
@@ -386,7 +392,15 @@ function bindEvents() {
   els.disconnectSerialButton.addEventListener("click", disconnectSerial);
   els.sendSerialButton.addEventListener("click", sendSerialCommand);
   els.evaluateLogsButton.addEventListener("click", evaluateSerialLogs);
+  els.openBehaviorTuneButton?.addEventListener("click", openBehaviorTuneDialog);
+  els.closeBehaviorTuneButton?.addEventListener("click", closeBehaviorTuneDialog);
+  els.cancelBehaviorTuneButton?.addEventListener("click", closeBehaviorTuneDialog);
+  els.behaviorTuneDialog?.addEventListener("click", (event) => {
+    if (event.target === els.behaviorTuneDialog) closeBehaviorTuneDialog();
+  });
   els.behaviorChangeForm.addEventListener("submit", applyBehaviorChange);
+  els.verifyBackButton?.addEventListener("click", () => setActiveWorkflowStage(2));
+  els.verifyPublishButton?.addEventListener("click", () => setActiveWorkflowStage(4));
   els.compileFlashButton.addEventListener("click", compileAndFlashFirmware);
   els.testHardwareNowButton.addEventListener("click", goToTestStage);
   els.generateReadmeButton.addEventListener("click", () => {
@@ -427,6 +441,20 @@ function openPhotoPrepDialog() {
 
 function closePhotoPrepDialog() {
   if (els.photoPrepDialog?.open) els.photoPrepDialog.close();
+}
+
+function openBehaviorTuneDialog() {
+  setStatus(
+    els.behaviorChangeStatus,
+    "Heads up: your current build stays unchanged until you submit this update.",
+    "",
+  );
+  if (!els.behaviorTuneDialog.open) els.behaviorTuneDialog.showModal();
+  requestAnimationFrame(() => els.behaviorChangeInput.focus({ preventScroll: true }));
+}
+
+function closeBehaviorTuneDialog() {
+  if (els.behaviorTuneDialog?.open) els.behaviorTuneDialog.close();
 }
 
 function renderPhotoPrepStep() {
@@ -2637,6 +2665,7 @@ async function applyBehaviorChange(event) {
   els.behaviorChangeInput.disabled = true;
   setStatus(els.behaviorChangeStatus, "Updating the behavior and checking the new code...", "warn");
   stopFlashSuccessTransition({ hide: true });
+  closeBehaviorTuneDialog();
   setActiveWorkflowStage(2);
   setBuildMode("code");
   setStatus(els.esp32Status, "Updating the behavior you requested. I’ll reload the board next.", "warn");

@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23ef2d83'/%3E%3Cpath d='M18 43V21l14 14 14-14v22' stroke='white' stroke-width='7' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=makeable-workbench-20260721-photo-prep-2" />
+    <link rel="stylesheet" href="./styles.css?v=makeable-workbench-20260721-test-focus" />
     <script src="/config.local.js"></script>
   </head>
   <body>
@@ -220,22 +220,19 @@
                 <p id="behaviorSummary">Create your guide first, then I’ll explain the behavior here.</p>
               </div>
               <ul class="code-function-list" id="codeFunctionList"></ul>
+              <button class="wiring-tune-trigger" id="openBehaviorTuneButton" type="button">
+                <span aria-hidden="true">↻</span>
+                <span><strong>Try something else with this wiring</strong><small>Change the behavior without rewiring the build.</small></span>
+                <b aria-hidden="true">→</b>
+              </button>
             </section>
           </div>
 
-          <form class="test-card behavior-change-form" id="behaviorChangeForm">
-            <div class="tune-intro">
-              <div class="op-header"><span>3</span><div><h2>Tune the behavior</h2><p>Ask for one small adjustment. I’ll update, verify, and reload the code.</p></div></div>
-            </div>
-            <div class="tune-composer">
-              <label class="sr-only" for="behaviorChangeInput">Describe the behavior change</label>
-              <textarea id="behaviorChangeInput" rows="3" placeholder="For example: keep the message on screen for 5 seconds."></textarea>
-            </div>
-            <div class="tune-actions">
-              <button class="test-action test-action--accent" id="applyBehaviorChangeButton" type="submit">Update code &amp; reload</button>
-              <div class="status-strip" id="behaviorChangeStatus">Nothing changes until you submit an update.</div>
-            </div>
-          </form>
+          <footer class="verify-completion-bar">
+            <div class="verify-completion-copy"><span aria-hidden="true">✓</span><div><strong>Everything working the way you want?</strong><p>Save the guide, code behavior, and test notes as one finished build.</p></div></div>
+            <button class="verify-back-button" id="verifyBackButton" type="button">← Back to wiring</button>
+            <button class="verify-publish-button" id="verifyPublishButton" type="button">Publish my build <span aria-hidden="true">→</span></button>
+          </footer>
         </div>
       </section>
 
@@ -285,6 +282,24 @@
       </div>
     </dialog>
 
-    <script type="module" src="./app.js?v=makeable-workbench-20260721-photo-prep-2"></script>
+    <dialog class="behavior-tune-dialog" id="behaviorTuneDialog" aria-labelledby="behaviorTuneTitle" aria-describedby="behaviorTuneDescription">
+      <form class="behavior-change-form" id="behaviorChangeForm">
+        <header class="behavior-tune-header">
+          <div><span>Small change · same wiring</span><h2 id="behaviorTuneTitle">Tune the behavior</h2><p id="behaviorTuneDescription">Tell me what the current build should do differently. I’ll update the code, check it, and take you back to reload the board.</p></div>
+          <button class="behavior-tune-close" id="closeBehaviorTuneButton" type="button" aria-label="Close behavior tuning">×</button>
+        </header>
+        <div class="tune-composer">
+          <label for="behaviorChangeInput">What should the board do differently?</label>
+          <textarea id="behaviorChangeInput" rows="7" placeholder="For example: keep the message on screen for 5 seconds."></textarea>
+        </div>
+        <div class="tune-heads-up"><span aria-hidden="true">i</span><p class="status-strip tune-status-copy" id="behaviorChangeStatus" aria-live="polite">Heads up: your current build stays unchanged until you submit this update.</p></div>
+        <footer class="tune-actions">
+          <button class="behavior-tune-cancel" id="cancelBehaviorTuneButton" type="button">Keep current behavior</button>
+          <button class="test-action test-action--accent" id="applyBehaviorChangeButton" type="submit">Update code &amp; reload</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <script type="module" src="./app.js?v=makeable-workbench-20260721-test-focus"></script>
   </body>
 </html>
