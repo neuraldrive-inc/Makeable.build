@@ -10,6 +10,7 @@ function beginnerPlan() {
       manufacturer: "Espressif-compatible",
       model: "ESP32 DevKit",
       revision: "Photo-confirmed layout",
+      identityConfidence: 0.99,
       supportStatus: "exactly_supported",
       usbConnector: "Micro-USB",
       resetLabel: "EN",
@@ -219,6 +220,69 @@ test("exact-label assembly unlocks a linear flash, automatic test, manual test, 
   await expect(page.getByRole("heading", { name: /You made something real/i })).toBeFocused();
   await expect(page.getByRole("button", { name: "Publish to GitHub" })).toBeEnabled();
   await expect(page.getByText(/Verified and ready/i)).toBeVisible();
+});
+
+test("the pilot shows the ESP32 score and explains the 55 percent boundary", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "One browser covers the board-confidence presentation");
+  const plan = beginnerPlan();
+  plan.boardProfile.identityConfidence = 0.54;
+  plan.boardProfile.supportStatus = "compatible_with_differences";
+  plan.parts[0].confidence = 0.54;
+  plan.wiringSteps = [];
+  plan.preparation.wires = [];
+  plan.diagnosticTests = [];
+
+  await page.evaluate((nextPlan) => window.__MAKEABLE_TEST_API__.loadPlan(nextPlan), plan);
+  await expect(page.locator("#planIssues")).toContainText("ESP32 match: 54%");
+  await expect(page.locator("#planIssues")).toContainText("at least 55%");
+  await expect(page.locator("#beginAssemblyButton")).toHaveText("Wiring paused for safety");
+
+  await page.locator('[data-workflow-stage="1"]').click();
+  await expect(page.locator("#boardConfidence")).toBeVisible();
+  await expect(page.locator("#boardConfidenceValue")).toHaveText("54% ESP32 match");
+  await expect(page.locator("#boardConfidenceDetail")).toContainText("Below the 55% minimum");
+  await expect(page.locator("#partsCountLabel")).toHaveText("2 parts found");
+  await expect(page.locator("#partsList")).toContainText("ESP32 DevKit");
+});
+
+test("a 55 percent match distinguishes missing external wiring from a board-only build", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "One browser covers the zero-wiring decision");
+  const externalBuild = beginnerPlan();
+  externalBuild.boardProfile.identityConfidence = 0.55;
+  externalBuild.boardProfile.supportStatus = "compatible_with_differences";
+  externalBuild.wiringSteps = [];
+  externalBuild.preparation.wires = [];
+  externalBuild.diagnosticTests = [];
+
+  await page.evaluate((plan) => window.__MAKEABLE_TEST_API__.loadPlan(plan), externalBuild);
+  await expect(page.locator("#planIssues")).toContainText("parts that need wiring");
+  await expect(page.locator("#beginAssemblyButton")).toHaveText("Wiring paused for safety");
+  await expect(page.locator("#cableInventoryList")).toContainText("No safe jumper-wire map");
+
+  const boardOnly = beginnerPlan();
+  boardOnly.boardProfile.identityConfidence = 0.55;
+  boardOnly.boardProfile.supportStatus = "compatible_with_differences";
+  boardOnly.parts = [boardOnly.parts[0]];
+  boardOnly.wiringSteps = [];
+  boardOnly.preparation.requiredPartIds = ["board"];
+  boardOnly.preparation.wires = [];
+  boardOnly.diagnosticTests = [];
+  boardOnly.firmwareSpec.pinAssignments = [];
+
+  await page.evaluate((plan) => window.__MAKEABLE_TEST_API__.loadPlan(plan), boardOnly);
+  await expect(page.locator("#planIssues")).toBeHidden();
+  await expect(page.locator("#beginAssemblyButton")).toHaveText("No wiring needed — continue to load");
+  await expect(page.locator("#cableInventoryList")).toContainText("No jumper wires are needed");
+  await expect(page.locator("#showWiringButton")).toBeHidden();
+  await page.getByLabel("My board and USB data cable are ready.").check();
+  await page.locator("#beginAssemblyButton").click();
+  await expect(page.locator("#showCodeButton")).toHaveAttribute("aria-selected", "true");
+
+  await page.evaluate((plan) => window.__MAKEABLE_TEST_API__.loadPlan(plan), beginnerPlan());
+  await expect(page.locator("#buildPreparation")).toBeVisible();
+  await expect(page.locator("#codeWorkspace")).toBeHidden();
+  await expect(page.locator("#showWiringButton")).toBeVisible();
+  await expect(page.locator("#preparationConfirmed")).not.toBeChecked();
 });
 
 test("a fresh diagnostic failure opens one exact wire and retry clears stale errors", async ({ page }) => {
@@ -513,6 +577,9 @@ test("an account-free local guide finishes without a cloud account refresh", asy
   test.skip(testInfo.project.name !== "desktop", "One browser covers the account-free generation contract");
   const generatedPlan = beginnerPlan();
   delete generatedPlan.firmware;
+  generatedPlan.boardProfile.identityConfidence = 0.55;
+  generatedPlan.boardProfile.supportStatus = "compatible_with_differences";
+  generatedPlan.parts[0].confidence = 0.55;
   let accountRequests = 0;
 
   await page.route("**/api/account", (route) => {
@@ -550,6 +617,7 @@ test("an account-free local guide finishes without a cloud account refresh", asy
 
   await expect(page.locator("#transcriptBox")).toContainText("Your guide and code are ready");
   await expect(page.locator('[data-workflow-stage="2"]')).toHaveAttribute("aria-current", "step");
+  await expect(page.locator("#boardIdentity")).toContainText("55% ESP32-family confidence (55% minimum)");
   await expect.poll(() => accountRequests).toBe(0);
   await expect(page.locator("#transcriptBox")).not.toContainText("couldn’t finish the code");
 });

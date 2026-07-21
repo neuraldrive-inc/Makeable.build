@@ -986,6 +986,41 @@ body.has-parts-photo .scan-copy {
   font-weight: 700;
 }
 
+.board-confidence {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 15px;
+  padding: 12px 14px;
+  border: 2px solid #d7a516;
+  border-radius: 10px;
+  background: #fff7cf;
+}
+
+.board-confidence[hidden] { display: none; }
+
+.board-confidence[data-result="pass"] {
+  border-color: #27866c;
+  background: #dcf8ed;
+}
+
+.board-confidence > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  color: var(--blue);
+  font-family: var(--display);
+  font-size: 1.15rem;
+}
+
+.board-confidence div { display: grid; gap: 2px; }
+.board-confidence strong { font-family: var(--display); }
+.board-confidence small { color: var(--muted); font-weight: 700; line-height: 1.35; }
+
 .parts-list {
   display: flex;
   flex-wrap: wrap;

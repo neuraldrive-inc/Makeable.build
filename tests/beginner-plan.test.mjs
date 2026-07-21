@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  ESP32_IDENTITY_CONFIDENCE_THRESHOLD,
+  esp32IdentityAssessment,
   expectedDiagnosticHits,
   findDiagnosticFailure,
   normalizeBeginnerPlan,
@@ -18,6 +20,7 @@ function basePlan() {
       manufacturer: "Espressif-compatible",
       model: "ESP32 DevKit",
       revision: "Confirmed from photo",
+      identityConfidence: 0.98,
       supportStatus: "exactly_supported",
       usbConnector: "Micro-USB",
       resetLabel: "EN",
@@ -25,7 +28,7 @@ function basePlan() {
       printedLabels: ["D25", "3V3", "GND"],
     },
     parts: [
-      { id: "board", name: "ESP32 DevKit", type: "controller", role: "Controller", bbox: { x: 20, y: 50, width: 20, height: 30 } },
+      { id: "board", name: "ESP32 DevKit", type: "controller", role: "Controller", confidence: 0.98, bbox: { x: 20, y: 50, width: 20, height: 30 } },
       { id: "sensor", name: "PIR sensor", type: "sensor", role: "Motion input", bbox: { x: 50, y: 35, width: 20, height: 30 } },
     ],
     wiringSteps: [
@@ -151,6 +154,140 @@ test("normalization orders crowded connections first and preserves physical labe
   assert.equal(plan.wiringSteps[0].toElectricalAlias, "GPIO 25");
   assert.equal(wireDescription(plan.wiringSteps[0]), "Yellow wire · Connection 1 · OUT → D25");
   assert.deepEqual(validateBeginnerPlan(plan), []);
+});
+
+test("ESP32 identity uses a visible 55 percent threshold and reports the actual score", () => {
+  assert.equal(ESP32_IDENTITY_CONFIDENCE_THRESHOLD, 0.55);
+
+  const below = basePlan();
+  below.boardProfile.identityConfidence = 0.54;
+  const belowPlan = normalizeBeginnerPlan(below);
+  const belowAssessment = esp32IdentityAssessment(belowPlan);
+  const belowIssue = validateBeginnerPlan(belowPlan).find(({ code }) => code === "low-esp32-confidence");
+  assert.equal(belowAssessment.percent, 54);
+  assert.equal(belowAssessment.accepted, false);
+  assert.match(belowIssue?.message || "", /ESP32 match: 54%/);
+  assert.match(belowIssue?.message || "", /at least 55%/);
+
+  const roundedBoundary = basePlan();
+  roundedBoundary.boardProfile.identityConfidence = 0.549;
+  const roundedAssessment = esp32IdentityAssessment(normalizeBeginnerPlan(roundedBoundary));
+  assert.equal(roundedAssessment.percent, 54.9);
+  assert.equal(roundedAssessment.accepted, false);
+
+  const boundary = basePlan();
+  boundary.boardProfile.identityConfidence = 0.55;
+  const boundaryPlan = normalizeBeginnerPlan(boundary);
+  const boundaryAssessment = esp32IdentityAssessment(boundaryPlan);
+  const boundaryIssues = validateBeginnerPlan(boundaryPlan);
+  assert.equal(boundaryAssessment.percent, 55);
+  assert.equal(boundaryAssessment.accepted, true);
+  assert.equal(boundaryIssues.some(({ code }) => code === "low-esp32-confidence"), false);
+  assert.equal(boundaryIssues.some(({ code }) => code === "missing-esp32"), false);
+});
+
+test("ESP32 confidence cannot replace explicit board evidence or exact pin evidence", () => {
+  const missingCandidate = basePlan();
+  missingCandidate.parts[0] = {
+    ...missingCandidate.parts[0],
+    name: "Possible development board",
+    type: "controller",
+  };
+  assert.ok(
+    validateBeginnerPlan(normalizeBeginnerPlan(missingCandidate)).some(({ code }) => code === "missing-esp32"),
+  );
+
+  const missingScore = basePlan();
+  delete missingScore.boardProfile.identityConfidence;
+  assert.ok(
+    validateBeginnerPlan(normalizeBeginnerPlan(missingScore)).some(
+      ({ code }) => code === "missing-esp32-confidence",
+    ),
+  );
+
+  const unsafePins = basePlan();
+  unsafePins.boardProfile.identityConfidence = 0.55;
+  unsafePins.wiringSteps[0] = {
+    ...unsafePins.wiringSteps[0],
+    pinLocationsConfirmed: false,
+    toPinBbox: null,
+  };
+  const unsafeIssues = validateBeginnerPlan(normalizeBeginnerPlan(unsafePins));
+  assert.equal(unsafeIssues.some(({ code }) => code === "low-esp32-confidence"), false);
+  assert.ok(unsafeIssues.some(({ code }) => code === "unconfirmed-pin-location"));
+});
+
+test("a 55 percent ESP32 match does not bypass an unverified board layout", () => {
+  const raw = basePlan();
+  raw.boardProfile.identityConfidence = 0.55;
+  raw.boardProfile.supportStatus = "unverified";
+  const issue = validateBeginnerPlan(normalizeBeginnerPlan(raw)).find(({ code }) => code === "unverified-board");
+  assert.equal(issue?.severity, "block");
+  assert.match(issue?.message || "", /identity check passed at 55%/i);
+});
+
+test("a board match cannot hide missing external wiring while a board-only plan may continue", () => {
+  const externalBuild = basePlan();
+  externalBuild.boardProfile.identityConfidence = 0.55;
+  externalBuild.wiringSteps = [];
+  externalBuild.diagnosticTests = [];
+  const externalIssues = validateBeginnerPlan(normalizeBeginnerPlan(externalBuild));
+  assert.ok(externalIssues.some(({ code, severity }) => code === "missing-wiring-steps" && severity === "block"));
+
+  const boardOnly = basePlan();
+  boardOnly.boardProfile.identityConfidence = 0.55;
+  boardOnly.parts = [
+    boardOnly.parts[0],
+    {
+      id: "onboard-led",
+      name: "Built-in LED",
+      type: "onboard output",
+      role: "Internal status light",
+      confidence: 0.95,
+      bbox: { x: 31, y: 58, width: 3, height: 3 },
+    },
+  ];
+  boardOnly.wiringSteps = [];
+  boardOnly.diagnosticTests = [];
+  boardOnly.firmwareSpec = {
+    board: "ESP32",
+    behavior: "Print a message over USB serial.",
+    libraries: [],
+    pinAssignments: [{ label: "LED_BUILTIN", gpio: 2, mode: "OUTPUT", purpose: "Onboard status LED" }],
+    serialProtocol: ["READY"],
+  };
+  const boardOnlyIssues = validateBeginnerPlan(normalizeBeginnerPlan(boardOnly));
+  assert.equal(boardOnlyIssues.some(({ code }) => code === "missing-wiring-steps"), false);
+
+  const esp32Accessory = basePlan();
+  esp32Accessory.boardProfile.identityConfidence = 0.55;
+  esp32Accessory.parts = [
+    esp32Accessory.parts[0],
+    {
+      id: "relay",
+      name: "ESP32 relay module",
+      type: "relay accessory",
+      role: "Switches an external load",
+      confidence: 1,
+      bbox: { x: 50, y: 35, width: 20, height: 30 },
+    },
+  ];
+  esp32Accessory.wiringSteps = [];
+  esp32Accessory.diagnosticTests = [];
+  esp32Accessory.firmwareSpec = {
+    board: "ESP32",
+    behavior: "Switch the photographed relay.",
+    libraries: [],
+    pinAssignments: [],
+    serialProtocol: [],
+  };
+  const accessoryPlan = normalizeBeginnerPlan(esp32Accessory);
+  assert.equal(esp32IdentityAssessment(accessoryPlan).candidate?.id, "board");
+  assert.ok(
+    validateBeginnerPlan(accessoryPlan).some(
+      ({ code, severity }) => code === "missing-wiring-steps" && severity === "block",
+    ),
+  );
 });
 
 test("imprecise instructions and unconfirmed ultrasonic voltage protection block wiring", () => {

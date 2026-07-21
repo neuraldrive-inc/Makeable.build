@@ -1,5 +1,7 @@
 import { boardHumanGuide, selectBoardProfile, USB_SERIAL_FILTERS } from "./lib/board-profiles.mjs";
 import {
+  ESP32_IDENTITY_CONFIDENCE_THRESHOLD,
+  esp32IdentityAssessment,
   expectedDiagnosticHits,
   findDiagnosticFailure,
   normalizeBeginnerPlan,
@@ -146,6 +148,9 @@ const els = {
   stageControlHint: $("#stageControlHint"),
   partsList: $("#partsList"),
   partsCountLabel: $("#partsCountLabel"),
+  boardConfidence: $("#boardConfidence"),
+  boardConfidenceValue: $("#boardConfidenceValue"),
+  boardConfidenceDetail: $("#boardConfidenceDetail"),
   wiringList: $("#wiringList"),
   diagnosticsList: $("#diagnosticsList"),
   visualStepList: $("#visualStepList"),
@@ -164,6 +169,7 @@ const els = {
   cableInventoryList: $("#cableInventoryList"),
   planIssues: $("#planIssues"),
   preparationConfirmed: $("#preparationConfirmed"),
+  preparationConfirmationText: $("#preparationConfirmationText"),
   beginAssemblyButton: $("#beginAssemblyButton"),
   wireLegend: $("#wireLegend"),
   baudRateInput: $("#baudRateInput"),
@@ -232,6 +238,7 @@ const hardwarePlanSchema = {
         manufacturer: { type: "string" },
         model: { type: "string" },
         revision: { type: "string" },
+        identityConfidence: { type: "number", minimum: 0, maximum: 1 },
         supportStatus: {
           type: "string",
           enum: ["exactly_supported", "compatible_with_differences", "unverified"],
@@ -246,6 +253,7 @@ const hardwarePlanSchema = {
         "manufacturer",
         "model",
         "revision",
+        "identityConfidence",
         "supportStatus",
         "usbConnector",
         "resetLabel",
@@ -924,7 +932,7 @@ function setActiveWorkflowStage(index, options = {}) {
   els.stageNextButton.disabled = activeIndex === WORKFLOW_STAGES.length - 1;
   els.stageNextButton.textContent = ["Check my parts", "Build it", "Test my hardware", "Celebrate", "All set"][activeIndex];
 
-  if (activeIndex === 2 && els.codeWorkspace?.hidden !== false) {
+  if (activeIndex === 2 && (!state.preparationConfirmed || els.codeWorkspace?.hidden !== false)) {
     setBuildMode(state.preparationConfirmed ? "wiring" : "prepare");
   }
   if (activeIndex === 3) renderOperatingGuide();
@@ -1347,6 +1355,7 @@ function resetBuildEvidence() {
     els.compileFlashButton.textContent = "Choose my ESP32";
     els.compileFlashButton.disabled = !state.compilerReady;
   }
+  setBuildMode("prepare");
   setFlashProgress(0, "Waiting to connect");
   if (els.esp32Status) {
     setStatus(
@@ -1923,7 +1932,7 @@ async function analyzeHardware() {
         {
           role: "system",
           content:
-            "You are Makeable, an expert hardware build agent for beginners. Identify only the actual visible parts needed for the user's stated project, produce tight normalized bounding boxes for those required parts, make conservative ESP32 wiring choices, flag uncertainty, avoid unsafe pins, and output only schema-valid JSON. Ignore visible parts that are unrelated to the requested build. Never use canned/demo component names or boxes. Do not generate source code in this step.",
+            "You are Makeable, an expert hardware build agent for beginners. Identify only the actual visible parts needed for the user's stated project, produce tight normalized bounding boxes for those required parts, make conservative ESP32 wiring choices, flag uncertainty, avoid unsafe pins, and output only schema-valid JSON. Always return the most plausible visible controller as a part, including a Possible ESP32 name when there is ESP32-family evidence, even when confidence is low. Ignore visible parts that are unrelated to the requested build. Never use canned/demo component names or boxes. Do not generate source code in this step.",
         },
         {
           role: "user",
@@ -2159,8 +2168,10 @@ function buildAnalysisPrompt(idea) {
     "For a PIR sensor, look for a white Fresnel dome. Do not label a black circular speaker/display/module as PIR unless it visually matches.",
     "For LEDs/resistors, distinguish loose LEDs, resistor bags/strips, jumper wires, servo motors, displays, relay/audio modules, and breadboards if visible.",
     "If a part is ambiguous, name it as 'possible ...' and reduce confidence rather than guessing.",
-    "Return schemaVersion 2 and identify the exact board profile, revision confidence, USB connector, and printed RESET/EN and BOOT button labels.",
-    "Use supportStatus exactly_supported only when the manufacturer/model/revision and pin-label layout are genuinely confirmed from the photo. Otherwise use compatible_with_differences or unverified.",
+    "Return schemaVersion 2 and identify the exact board profile, USB connector, and printed RESET/EN and BOOT button labels.",
+    "Set boardProfile.identityConfidence to your probability from 0 to 1 that the visible controller is in the ESP32 family. This is family identity confidence, not confidence in the exact manufacturer, revision, layout, or pin positions.",
+    "Never omit a visible controller because its identity is uncertain. If ESP32-family identityConfidence is at least 0.55, include it as a part whose name or type contains 'Possible ESP32' and use compatible_with_differences unless the exact layout is genuinely confirmed. Below 0.55, still include the best candidate and its honest score so the user can see why a clearer photo is needed.",
+    "Use supportStatus exactly_supported only when the manufacturer/model/revision and pin-label layout are genuinely confirmed from the photo. Use compatible_with_differences for an ESP32-family match of at least 0.55 whose exact revision differs or remains uncertain. Use unverified when ESP32-family confidence is below 0.55 or the visible evidence is insufficient.",
     "Prefer ESP32 pins that are usually safe for beginner projects; place any boot-risk caveat in the separate warning field.",
     "For every wiring step, create one atomic connection with a stable connectionId, fromPartId, toPartId, exact fromPrintedPin, exact toPrintedPin, electrical aliases, wireColor, jumper connector gender/type, quickCheck, why, warning, requiredPartIds, and accessibilityRank.",
     "Also return pinLocationsConfirmed plus tight fromPinBbox and toPinBbox rectangles around the actual visible metal pin or receptacle in this exact photo. Use 0-100 coordinates. Set pinLocationsConfirmed true only when both physical connection points are genuinely visible; wiring will be blocked otherwise.",
@@ -2643,18 +2654,26 @@ function filterProjectParts(parts, wiringSteps, firmwareSpec, summary) {
 }
 
 function renderEmptyPlan() {
-  const controls = getBuildStepControls();
   els.partsList.innerHTML = "";
   if (els.partsCountLabel) els.partsCountLabel.textContent = "Waiting for a photo";
+  if (els.boardConfidence) {
+    els.boardConfidence.hidden = true;
+    delete els.boardConfidence.dataset.result;
+  }
   els.wiringList.innerHTML = "";
   els.diagnosticsList.innerHTML = "";
+  renderEmptyVisualSteps();
+  updatePublishControls();
+}
+
+function renderEmptyVisualSteps() {
+  const controls = getBuildStepControls();
   els.visualStepList.innerHTML = `<div class="visual-step-empty"><strong>Your guide will appear here</strong><span>Once I read the photo, I’ll show one clear move at a time.</span></div>`;
   restoreBuildStepControls(controls);
   if (els.buildStepCounter) els.buildStepCounter.textContent = "Move 0 of 0";
   if (els.buildStepDots) els.buildStepDots.innerHTML = "";
   if (els.prevBuildStepButton) els.prevBuildStepButton.disabled = true;
   if (els.nextBuildStepButton) els.nextBuildStepButton.disabled = true;
-  updatePublishControls();
 }
 
 function renderPlan() {
@@ -2662,6 +2681,7 @@ function renderPlan() {
   if (!plan) return renderEmptyPlan();
 
   drawPartsCanvas();
+  renderBoardConfidence(plan);
   els.partsList.innerHTML = "";
   if (els.partsCountLabel) {
     els.partsCountLabel.textContent = `${plan.parts.length} ${plan.parts.length === 1 ? "part" : "parts"} found`;
@@ -2710,6 +2730,28 @@ function renderPlan() {
   updatePublishControls();
 }
 
+function renderBoardConfidence(plan) {
+  if (!els.boardConfidence || !els.boardConfidenceValue || !els.boardConfidenceDetail) return;
+  const assessment = esp32IdentityAssessment(plan);
+  const hasScore = assessment.percent !== null;
+  els.boardConfidence.hidden = false;
+  els.boardConfidence.dataset.result = assessment.accepted ? "pass" : "needs-photo";
+  els.boardConfidenceValue.textContent = !hasScore
+    ? "ESP32 score unavailable"
+    : assessment.reason === "missing-candidate"
+      ? `${assessment.percent}% score · ESP32 not confirmed`
+      : `${assessment.percent}% ESP32 match`;
+  if (assessment.accepted) {
+    els.boardConfidenceDetail.textContent = `Passes the ${assessment.thresholdPercent}% identity minimum. Exact layout and pin labels are still checked separately.`;
+  } else if (assessment.reason === "below-threshold") {
+    els.boardConfidenceDetail.textContent = `Below the ${assessment.thresholdPercent}% minimum. Make the ESP32 label, metal module, USB connector, and board buttons clearer.`;
+  } else if (hasScore) {
+    els.boardConfidenceDetail.textContent = "I got a board-family score, but could not tie it to one visible ESP32. Try one closer board photo.";
+  } else {
+    els.boardConfidenceDetail.textContent = `I need both an ESP32 candidate and a confidence score of at least ${Math.round(ESP32_IDENTITY_CONFIDENCE_THRESHOLD * 100)}%.`;
+  }
+}
+
 function warningToDiagnostic(warning) {
   return {
     name: "Warning",
@@ -2725,6 +2767,7 @@ function renderPreparation() {
   const detectedProfile = selectBoardProfile(plan);
   const fallbackGuide = boardHumanGuide(detectedProfile?.id || "esp32");
   const profile = plan.boardProfile || {};
+  const boardIdentity = esp32IdentityAssessment(plan);
   const supportStatus = profile.supportStatus || fallbackGuide.supportStatus;
   const supportLabels = {
     exactly_supported: "Exact layout confirmed",
@@ -2739,7 +2782,10 @@ function renderPreparation() {
     .filter((value) => value && !/^unknown|unconfirmed$/i.test(value))
     .join(" · ");
   if (els.boardIdentity) {
-    els.boardIdentity.textContent = `${boardName || detectedProfile?.label || "ESP32 board"}. Reset is printed ${profile.resetLabel || fallbackGuide.resetLabel}; BOOT is printed ${profile.bootLabel || fallbackGuide.bootLabel}.`;
+    const confidenceLabel = boardIdentity.percent === null
+      ? "ESP32 identity score unavailable"
+      : `${boardIdentity.percent}% ESP32-family confidence (${boardIdentity.thresholdPercent}% minimum)`;
+    els.boardIdentity.textContent = `${boardName || detectedProfile?.label || "ESP32 board"}. ${confidenceLabel}. Reset is printed ${profile.resetLabel || fallbackGuide.resetLabel}; BOOT is printed ${profile.bootLabel || fallbackGuide.bootLabel}.`;
   }
   if (els.usbCableGuide) {
     els.usbCableGuide.textContent = `${plan.preparation?.usbCable || "Use a confirmed USB data cable."} Board connector: ${profile.usbConnector || fallbackGuide.usbConnector}.`;
@@ -2749,10 +2795,18 @@ function renderPreparation() {
 
   if (els.cableInventoryList) {
     els.cableInventoryList.innerHTML = "";
-    for (const wire of plan.preparation?.wires || []) {
+    const wires = plan.preparation?.wires || [];
+    for (const wire of wires) {
       const step = plan.wiringSteps.find(({ connectionId }) => connectionId === wire.connectionId);
       const item = document.createElement("li");
       item.textContent = `${wire.color || step?.wireColor || "One"} ${wire.connectorType || step?.wireType || "jumper wire"} · ${wireDescription(step || {})}`;
+      els.cableInventoryList.append(item);
+    }
+    if (!wires.length) {
+      const item = document.createElement("li");
+      item.textContent = state.planIssues.some(({ code }) => code === "missing-wiring-steps")
+        ? "No safe jumper-wire map was confirmed from this photo."
+        : "No jumper wires are needed for this board-only build.";
       els.cableInventoryList.append(item);
     }
   }
@@ -2771,13 +2825,29 @@ function renderPreparation() {
 }
 
 function updatePreparationControls() {
+  const hasPlan = Boolean(state.plan);
   const hasBlocker = state.planIssues.some(({ severity }) => severity === "block");
+  const hasWiringSteps = Boolean(state.plan?.wiringSteps?.length);
+  const isBoardOnly = hasPlan && !hasWiringSteps && !hasBlocker;
+  if (els.preparationConfirmationText) {
+    els.preparationConfirmationText.textContent = isBoardOnly
+      ? "My board and USB data cable are ready."
+      : "I have these parts and my wire ends match the guide.";
+  }
   if (els.beginAssemblyButton) {
-    els.beginAssemblyButton.disabled = !state.plan || !state.preparationConfirmed || hasBlocker;
-    els.beginAssemblyButton.textContent = hasBlocker ? "Wiring paused for safety" : "Start connection 1";
+    els.beginAssemblyButton.disabled = !hasPlan || !state.preparationConfirmed || hasBlocker;
+    els.beginAssemblyButton.textContent = hasBlocker
+      ? "Wiring paused for safety"
+      : hasWiringSteps
+        ? "Start connection 1"
+        : "No wiring needed — continue to load";
+  }
+  if (els.showWiringButton) {
+    els.showWiringButton.hidden = isBoardOnly;
+    els.showWiringButton.disabled = isBoardOnly;
   }
   if (els.showCodeButton) {
-    els.showCodeButton.disabled = state.completedConnectionIds.size < (state.plan?.wiringSteps?.length || 0);
+    els.showCodeButton.disabled = !hasPlan || hasBlocker || (hasWiringSteps && state.completedConnectionIds.size < state.plan.wiringSteps.length);
   }
 }
 
@@ -2791,6 +2861,10 @@ function beginAssembly() {
   }
   if (!state.preparationConfirmed) {
     els.preparationConfirmed?.focus();
+    return;
+  }
+  if (!state.plan?.wiringSteps?.length) {
+    setBuildMode("code");
     return;
   }
   state.activeBuildStepIndex = 0;
@@ -2816,7 +2890,7 @@ function renderVisualSteps() {
   if (!els.visualStepList) return;
   const plan = state.plan;
   if (!plan?.wiringSteps?.length) {
-    renderEmptyPlan();
+    renderEmptyVisualSteps();
     return;
   }
 

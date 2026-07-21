@@ -14,6 +14,38 @@ const DEFAULT_WIRE_COLORS = Object.freeze([
 const ESP32_BOOT_RISK_LABELS = new Set(["D0", "D2", "D12", "D15", "GPIO0", "GPIO2", "GPIO12", "GPIO15"]);
 const SHAREABLE_POWER_LABELS = new Set(["GND", "3V3", "3.3V", "VIN", "5V"]);
 
+export const ESP32_IDENTITY_CONFIDENCE_THRESHOLD = 0.55;
+
+export function esp32IdentityAssessment(plan = {}) {
+  const parts = Array.isArray(plan.parts) ? plan.parts : [];
+  const candidates = parts.filter((part) => /esp32/i.test(`${part?.name || ""} ${part?.type || ""}`));
+  const candidate = candidates
+    .slice()
+    .sort((left, right) => {
+      const controllerRank = esp32ControllerRank(right, plan.boardProfile) - esp32ControllerRank(left, plan.boardProfile);
+      return controllerRank || finite(right?.confidence, 0) - finite(left?.confidence, 0);
+    })[0] || null;
+  const confidence = normalizedConfidence(plan.boardProfile?.identityConfidence);
+  const thresholdPercent = Math.round(ESP32_IDENTITY_CONFIDENCE_THRESHOLD * 100);
+  const percent = confidence === null ? null : Math.round(confidence * 1000) / 10;
+  const reason = !candidate
+    ? "missing-candidate"
+    : confidence === null
+      ? "missing-score"
+      : confidence < ESP32_IDENTITY_CONFIDENCE_THRESHOLD
+        ? "below-threshold"
+        : "accepted";
+  return {
+    candidate,
+    confidence,
+    percent,
+    threshold: ESP32_IDENTITY_CONFIDENCE_THRESHOLD,
+    thresholdPercent,
+    accepted: reason === "accepted",
+    reason,
+  };
+}
+
 export function normalizeBeginnerPlan(plan = {}) {
   const rawSteps = Array.isArray(plan.wiringSteps) ? plan.wiringSteps : [];
   const wiringSteps = rawSteps
@@ -75,16 +107,55 @@ export function validateBeginnerPlan(plan = {}) {
     }
   });
 
-  if (!parts.some((part) => /esp32/i.test(`${part?.name || ""} ${part?.type || ""}`))) {
-    issues.push(issue("block", "missing-esp32", "I could not confidently identify an ESP32 in this photo."));
+  const boardIdentity = esp32IdentityAssessment(plan);
+  if (boardIdentity.reason === "missing-candidate") {
+    const message = boardIdentity.percent === null
+      ? "I could not identify a visible ESP32 or calculate a board-family confidence score. Show the ESP32 marking or metal radio module and try again."
+      : `ESP32-family score: ${boardIdentity.percent}%, but I could not confirm which visible part is the ESP32. Show the ESP32 marking or metal radio module and try again.`;
+    issues.push(
+      issue(
+        "block",
+        "missing-esp32",
+        message,
+      ),
+    );
+  } else if (boardIdentity.reason === "missing-score") {
+    issues.push(
+      issue(
+        "block",
+        "missing-esp32-confidence",
+        `I found a possible ESP32, but I could not calculate its identity confidence. I need a scored match of at least ${boardIdentity.thresholdPercent}% to continue.`,
+      ),
+    );
+  } else if (boardIdentity.reason === "below-threshold") {
+    issues.push(
+      issue(
+        "block",
+        "low-esp32-confidence",
+        `ESP32 match: ${boardIdentity.percent}%. I need at least ${boardIdentity.thresholdPercent}% to continue. Show the ESP32 label, metal radio module, USB connector, and both board buttons, then retry.`,
+      ),
+    );
   }
 
   if (plan.boardProfile?.supportStatus === "unverified") {
+    const identityPrefix = boardIdentity.accepted
+      ? `The ESP32 identity check passed at ${boardIdentity.percent}%, but `
+      : "";
     issues.push(
       issue(
         "block",
         "unverified-board",
-        "This exact board layout is not verified yet. Confirm the model or use a supported board before wiring.",
+        `${identityPrefix}this exact board layout is not verified yet. Confirm the model or use a supported board before wiring.`,
+      ),
+    );
+  }
+
+  if (!steps.length && planNeedsExternalWiring(plan, parts)) {
+    issues.push(
+      issue(
+        "block",
+        "missing-wiring-steps",
+        "I recognized parts that need wiring, but I could not confirm any safe connection steps. Take one closer photo with both wire ends and the printed pin labels visible; I will not invent the missing connections.",
       ),
     );
   }
@@ -387,6 +458,7 @@ function normalizeBoardProfile(profile = {}) {
     manufacturer: clean(profile?.manufacturer, "Unknown manufacturer"),
     model: clean(profile?.model, "ESP32 board"),
     revision: clean(profile?.revision, "Unconfirmed revision"),
+    identityConfidence: normalizedConfidence(profile?.identityConfidence),
     supportStatus,
     usbConnector: clean(profile?.usbConnector, "Connector not confirmed"),
     resetLabel: clean(profile?.resetLabel, "RESET / EN"),
@@ -620,6 +692,39 @@ function isEsp32Part(part) {
   return /esp32/i.test(partText(part));
 }
 
+function planNeedsExternalWiring(plan, parts) {
+  const boardCandidate = esp32IdentityAssessment(plan).candidate;
+  const boardCandidateId = clean(boardCandidate?.id);
+  const hasExternalPart = parts.some((part) => {
+    const text = partText(part);
+    if (part === boardCandidate || (boardCandidateId && clean(part?.id) === boardCandidateId)) return false;
+    if (/\b(?:built[- ]?in|onboard|internal)\b/i.test(text)) return false;
+    return !/(?:jumper|dupont|hookup)\s*wires?|usb(?:-c|\s+data)?\s+cable/i.test(text);
+  });
+  const hasExternalPin = (Array.isArray(plan.firmwareSpec?.pinAssignments)
+    ? plan.firmwareSpec.pinAssignments
+    : []
+  ).some((pin) => !/(?:built[- ]?in|onboard|internal)/i.test(`${pin?.label || ""} ${pin?.purpose || ""}`));
+  return hasExternalPart || hasExternalPin;
+}
+
+function esp32ControllerRank(part, boardProfile = {}) {
+  const name = clean(part?.name);
+  const type = clean(part?.type);
+  const role = clean(part?.role);
+  const profileId = clean(part?.profileId);
+  const boardProfileId = clean(boardProfile?.profileId);
+  const model = clean(boardProfile?.model);
+  let rank = 0;
+  if (/\b(?:microcontroller|controller|development board|dev(?:elopment)?\s*kit|main board)\b/i.test(type)) rank += 8;
+  if (/\b(?:runs|controls|controller|main board|brain)\b/i.test(role)) rank += 4;
+  if (/\b(?:dev(?:elopment)?\s*kit|development board)\b/i.test(name)) rank += 3;
+  if (boardProfileId && profileId === boardProfileId) rank += 2;
+  if (model && name.toLowerCase().includes(model.toLowerCase())) rank += 2;
+  if (/\b(?:relay|display|sensor|shield|adapter|accessory)\b/i.test(`${type} ${role}`)) rank -= 6;
+  return rank;
+}
+
 function partText(part = {}) {
   return `${part.name || ""} ${part.type || ""} ${part.role || ""}`.trim();
 }
@@ -661,6 +766,14 @@ function dedupeIssues(issues) {
 function finite(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function normalizedConfidence(value) {
+  if (value === null || value === undefined || value === "") return null;
+  let number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  if (number > 1 && number <= 100) number /= 100;
+  return Math.min(1, Math.max(0, number));
 }
 
 function clean(value, fallback = "") {

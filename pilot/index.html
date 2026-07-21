@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23ef2d83'/%3E%3Cpath d='M18 43V21l14 14 14-14v22' stroke='white' stroke-width='7' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=makeable-pilot-20260721-photo-flow" />
+    <link rel="stylesheet" href="./styles.css?v=makeable-pilot-20260721-board-confidence" />
     <script src="/config.local.js"></script>
   </head>
   <body>
@@ -153,6 +153,10 @@
 
         <div class="recognized-paper paper-sheet">
           <div class="recognized-heading"><span>Parts for this build</span><strong id="partsCountLabel">Waiting for a photo</strong></div>
+          <div class="board-confidence" id="boardConfidence" role="status" hidden>
+            <span aria-hidden="true">◎</span>
+            <div><strong id="boardConfidenceValue">ESP32 score unavailable</strong><small id="boardConfidenceDetail">I’ll show the board-family confidence here.</small></div>
+          </div>
           <div class="parts-list" id="partsList"></div>
         </div>
         <ol class="sr-only" id="wiringList"></ol>
@@ -166,8 +170,8 @@
       <section class="workflow-stage" id="flash" data-stage-index="2" hidden>
         <header class="stage-heading stage-heading--build">
           <div>
-            <h1>One wire. Two<br /><span>exact places.</span></h1>
-            <p>I’ll use the labels printed on your parts.</p>
+            <h1>Your board. One<br /><span>clear next step.</span></h1>
+            <p>I’ll use printed labels when wiring is needed—and tell you when it isn’t.</p>
           </div>
           <div class="build-mode-switch" role="tablist" aria-label="Build and load views">
             <button class="is-active" id="showWiringButton" type="button" role="tab" aria-selected="true">Wiring guide</button>
@@ -177,15 +181,15 @@
 
         <section class="build-preparation paper-sheet tape-blue" id="buildPreparation" aria-labelledby="build-preparation-title">
           <div class="build-preparation-heading">
-            <div><span class="section-number">Before the first wire</span><h2 id="build-preparation-title">Put the exact pieces beside you.</h2></div>
+            <div><span class="section-number">Before you build</span><h2 id="build-preparation-title">Put the confirmed pieces beside you.</h2></div>
             <span class="support-badge" id="boardSupportBadge">Checking board support</span>
           </div>
           <div class="preparation-grid">
             <div><h3>Board and USB cable</h3><p id="boardIdentity">Waiting for the plan.</p><p id="usbCableGuide">I’ll name the cable after I identify the board.</p></div>
-            <div><h3>Jumper wires</h3><ul class="cable-inventory" id="cableInventoryList"><li>Waiting for the wiring plan.</li></ul></div>
+            <div><h3>Wires and connections</h3><ul class="cable-inventory" id="cableInventoryList"><li>Waiting for the connection plan.</li></ul></div>
           </div>
           <div class="plan-issues" id="planIssues" role="alert" hidden></div>
-          <label class="confirmation-check"><input id="preparationConfirmed" type="checkbox" /><span>I have these parts and my wire ends match the guide.</span></label>
+          <label class="confirmation-check"><input id="preparationConfirmed" type="checkbox" /><span id="preparationConfirmationText">I have these parts and my wire ends match the guide.</span></label>
           <button class="torn-button torn-button--pink" id="beginAssemblyButton" type="button">Start connection 1</button>
         </section>
 
@@ -302,6 +306,6 @@
       <button class="torn-button torn-button--coral" id="stageNextButton" type="button">Continue</button>
     </footer>
 
-    <script type="module" src="./app.js?v=makeable-pilot-20260721-photo-flow"></script>
+    <script type="module" src="./app.js?v=makeable-pilot-20260721-board-confidence"></script>
   </body>
 </html>
