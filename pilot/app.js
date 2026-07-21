@@ -65,13 +65,14 @@ const state = {
   deepgramSocket: null,
   voiceRecorder: null,
   voiceStream: null,
-  cameraStream: null,
-  evidencePhotos: [],
   readme: "",
   compiledFirmware: null,
   activeBuildStepIndex: 0,
   activeWorkflowStageIndex: 0,
   generationId: "",
+  flashTransitionTimer: null,
+  lastBehaviorChange: "",
+  pendingBehaviorChange: "",
   auth: loadStoredAuth(),
   account: null,
 };
@@ -118,15 +119,19 @@ const els = {
   evaluateLogsButton: $("#evaluateLogsButton"),
   serialLog: $("#serialLog"),
   logEvaluation: $("#logEvaluation"),
-  cameraPreview: $("#cameraPreview"),
-  startCameraButton: $("#startCameraButton"),
-  captureEvidenceButton: $("#captureEvidenceButton"),
-  verifyBehaviorButton: $("#verifyBehaviorButton"),
-  evidenceStrip: $("#evidenceStrip"),
-  behaviorEvaluation: $("#behaviorEvaluation"),
+  behaviorSummary: $("#behaviorSummary"),
+  codeFunctionList: $("#codeFunctionList"),
+  behaviorChangeForm: $("#behaviorChangeForm"),
+  behaviorChangeInput: $("#behaviorChangeInput"),
+  applyBehaviorChangeButton: $("#applyBehaviorChangeButton"),
+  behaviorChangeStatus: $("#behaviorChangeStatus"),
   compileFlashButton: $("#compileFlashButton"),
   flashProgressBar: $("#flashProgressBar"),
   esp32Status: $("#esp32Status"),
+  flashSuccessTransition: $("#flashSuccessTransition"),
+  flashCountdownText: $("#flashCountdownText"),
+  flashCountdownNumber: $("#flashCountdownNumber"),
+  testHardwareNowButton: $("#testHardwareNowButton"),
   generateReadmeButton: $("#generateReadmeButton"),
   repoNameInput: $("#repoNameInput"),
   privateRepoInput: $("#privateRepoInput"),
@@ -265,17 +270,6 @@ const HOSTED_FIRMWARE_LIBRARIES = [
   "PubSubClient",
 ];
 
-const behaviorSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    status: { type: "string", enum: ["pass", "needs_attention", "fail", "uncertain"] },
-    observations: { type: "array", items: { type: "string" } },
-    nextStep: { type: "string" },
-  },
-  required: ["status", "observations", "nextStep"],
-};
-
 bindEvents();
 renderEmptyPlan();
 const initialStageIndex = WORKFLOW_STAGES.findIndex((stage) => stage.hash === window.location.hash);
@@ -334,7 +328,10 @@ function bindEvents() {
     button.addEventListener("click", () => setActiveWorkflowStage(Number(button.dataset.workflowStage || 0)));
   });
   els.stageBackButton.addEventListener("click", () => setActiveWorkflowStage(state.activeWorkflowStageIndex - 1));
-  els.stageNextButton.addEventListener("click", () => setActiveWorkflowStage(state.activeWorkflowStageIndex + 1));
+  els.stageNextButton.addEventListener("click", () => {
+    if (state.activeWorkflowStageIndex === 2) goToTestStage();
+    else setActiveWorkflowStage(state.activeWorkflowStageIndex + 1);
+  });
   els.prevBuildStepButton.addEventListener("click", () => setActiveBuildStep(state.activeBuildStepIndex - 1));
   els.nextBuildStepButton.addEventListener("click", advanceBuildStep);
   els.showWiringButton?.addEventListener("click", () => setBuildMode("wiring"));
@@ -343,10 +340,9 @@ function bindEvents() {
   els.disconnectSerialButton.addEventListener("click", disconnectSerial);
   els.sendSerialButton.addEventListener("click", sendSerialCommand);
   els.evaluateLogsButton.addEventListener("click", evaluateSerialLogs);
-  els.startCameraButton.addEventListener("click", startCamera);
-  els.captureEvidenceButton.addEventListener("click", captureEvidence);
-  els.verifyBehaviorButton.addEventListener("click", verifyBehavior);
+  els.behaviorChangeForm.addEventListener("submit", applyBehaviorChange);
   els.compileFlashButton.addEventListener("click", compileAndFlashFirmware);
+  els.testHardwareNowButton.addEventListener("click", goToTestStage);
   els.generateReadmeButton.addEventListener("click", () => {
     state.readme = buildReadme();
     els.readmePreview.textContent = state.readme;
@@ -402,9 +398,11 @@ function setActiveWorkflowStage(index, options = {}) {
   els.stageControlHint.textContent = stage.hint;
   els.stageBackButton.disabled = activeIndex === 0;
   els.stageNextButton.disabled = activeIndex === WORKFLOW_STAGES.length - 1;
-  els.stageNextButton.textContent = ["Scan my parts", "Build it", "Test my hardware", "Publish my build", "All set"][activeIndex];
+  els.stageNextButton.textContent = ["Scan my parts", "Build it", "Let’s test it", "Publish my build", "All set"][activeIndex];
 
   if (activeIndex === 2 && els.codeWorkspace?.hidden !== false) setBuildMode("wiring");
+  if (activeIndex === 3) renderCodeExplanation();
+  if (activeIndex !== 2) stopFlashSuccessTransition();
 
   if (options.updateHash !== false) {
     const url = `${window.location.pathname}${stage.hash}`;
@@ -415,6 +413,31 @@ function setActiveWorkflowStage(index, options = {}) {
     drawPartsCanvas();
     renderVisualSteps();
   });
+}
+
+function startFlashSuccessTransition() {
+  stopFlashSuccessTransition();
+  let secondsRemaining = 3;
+  els.flashSuccessTransition.hidden = false;
+  els.flashCountdownNumber.textContent = String(secondsRemaining);
+  els.testHardwareNowButton.focus({ preventScroll: true });
+  state.flashTransitionTimer = window.setInterval(() => {
+    secondsRemaining -= 1;
+    els.flashCountdownNumber.textContent = String(Math.max(0, secondsRemaining));
+    if (secondsRemaining <= 0) goToTestStage();
+  }, 1000);
+}
+
+function stopFlashSuccessTransition(options = {}) {
+  if (state.flashTransitionTimer) window.clearInterval(state.flashTransitionTimer);
+  state.flashTransitionTimer = null;
+  if (options.hide) els.flashSuccessTransition.hidden = true;
+}
+
+function goToTestStage() {
+  stopFlashSuccessTransition({ hide: true });
+  setActiveWorkflowStage(3);
+  window.setTimeout(() => connectSerial({ automatic: true }), 250);
 }
 
 function pickModel(localValue, serverValue, fallback) {
@@ -648,6 +671,9 @@ function handlePhotoUpload(event) {
 
   state.plan = null;
   state.compiledFirmware = null;
+  state.lastBehaviorChange = "";
+  state.pendingBehaviorChange = "";
+  stopFlashSuccessTransition({ hide: true });
   state.activeBuildStepIndex = 0;
   renderEmptyPlan();
   setStatus(els.transcriptBox, "Loading your photo...", "warn");
@@ -697,6 +723,9 @@ function clearPhoto() {
   state.imageFit = null;
   state.plan = null;
   state.compiledFirmware = null;
+  state.lastBehaviorChange = "";
+  state.pendingBehaviorChange = "";
+  stopFlashSuccessTransition({ hide: true });
   state.activeBuildStepIndex = 0;
   els.photoInput.value = "";
   document.body.classList.remove("has-parts-photo");
@@ -1153,6 +1182,8 @@ async function analyzeHardware() {
       },
     });
     state.plan = normalizePlan(parseStructuredJson(data, "hardware plan"));
+    state.lastBehaviorChange = "";
+    state.pendingBehaviorChange = "";
     state.plan.warnings = [...validatePlan(state.plan), ...state.plan.warnings];
     state.activeBuildStepIndex = 0;
     renderPlan();
@@ -1693,6 +1724,7 @@ function renderEmptyPlan() {
   if (els.buildStepDots) els.buildStepDots.innerHTML = "";
   if (els.prevBuildStepButton) els.prevBuildStepButton.disabled = true;
   if (els.nextBuildStepButton) els.nextBuildStepButton.disabled = true;
+  renderCodeExplanation();
 }
 
 function renderPlan() {
@@ -1734,6 +1766,7 @@ function renderPlan() {
   });
 
   renderVisualSteps();
+  renderCodeExplanation();
   state.readme = buildReadme();
   els.readmePreview.textContent = state.readme;
 }
@@ -2248,14 +2281,24 @@ function setVoiceStatus(text, tone) {
   els.voiceStatus.className = `status-pill ${tone || ""}`.trim();
 }
 
-async function connectSerial() {
+async function connectSerial(options = {}) {
   if (!("serial" in navigator)) {
     setStatus(els.logEvaluation, "This browser can’t listen to the board. Use Chrome or Edge on desktop.", "danger");
     return;
   }
+  if (state.serialPort) return;
 
   try {
-    state.serialPort = await findOrRequestEspPort();
+    if (options.automatic) {
+      const [grantedPort] = await navigator.serial.getPorts();
+      if (!grantedPort) {
+        setStatus(els.logEvaluation, "Click Listen to board once so the browser can reconnect to your ESP32.", "warn");
+        return;
+      }
+      state.serialPort = grantedPort;
+    } else {
+      state.serialPort = await findOrRequestEspPort();
+    }
     await state.serialPort.open({ baudRate: Number(els.baudRateInput.value) || 115200 });
     els.connectSerialButton.disabled = true;
     els.disconnectSerialButton.disabled = false;
@@ -2371,135 +2414,201 @@ function evaluateSerialLogs() {
   }
 }
 
-async function startCamera() {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    setStatus(els.behaviorEvaluation, "I can’t open the camera in this browser.", "danger");
+function renderCodeExplanation() {
+  if (!els.behaviorSummary || !els.codeFunctionList) return;
+  const plan = state.plan;
+  if (!plan) {
+    els.behaviorSummary.textContent = "Create your guide first, then I’ll explain the behavior here.";
+    els.codeFunctionList.innerHTML = "";
     return;
   }
-  try {
-    state.cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" },
-      audio: false,
-    });
-    els.cameraPreview.srcObject = state.cameraStream;
-    await els.cameraPreview.play();
-    els.captureEvidenceButton.disabled = false;
-    setStatus(els.behaviorEvaluation, "Camera ready. Point it at the project when you want me to check.", "ok");
-  } catch (error) {
-    console.error(error);
-    setStatus(els.behaviorEvaluation, `I couldn’t open the camera yet: ${error.message}`, "danger");
-  }
-}
 
-function captureEvidence() {
-  if (!state.cameraStream) return "";
-  const video = els.cameraPreview;
-  const canvas = document.createElement("canvas");
-  canvas.width = video.videoWidth || 1280;
-  canvas.height = video.videoHeight || 720;
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
-  state.evidencePhotos.unshift({ dataUrl, takenAt: new Date().toISOString() });
-  state.evidencePhotos = state.evidencePhotos.slice(0, 6);
-  renderEvidence();
-  return dataUrl;
-}
+  const spec = plan.firmwareSpec || {};
+  const behavior = compactSentence(spec.behavior || plan.summary || "Runs the project behavior you described.");
+  els.behaviorSummary.textContent = state.lastBehaviorChange
+    ? `${behavior} Latest adjustment: ${compactSentence(state.lastBehaviorChange)}`
+    : behavior;
 
-function renderEvidence() {
-  els.evidenceStrip.innerHTML = "";
-  state.evidencePhotos.forEach((photo) => {
-    const img = document.createElement("img");
-    img.src = photo.dataUrl;
-    img.alt = `Evidence captured at ${photo.takenAt}`;
-    els.evidenceStrip.append(img);
+  const assignments = (spec.pinAssignments || []).slice(0, 5).map((assignment) => {
+    const label = assignment.label || assignment.purpose || "A connected part";
+    const pin = cleanPinLabel(`pin ${assignment.gpio}`, `${label} ${assignment.purpose || ""}`);
+    return `${label} on ${pin}`;
+  });
+  const messages = (spec.serialProtocol || []).filter(Boolean).slice(0, 3);
+  const functions = [
+    {
+      name: "setup()",
+      description: assignments.length
+        ? `Runs once when the board starts and prepares ${joinReadableList(assignments)}.`
+        : "Runs once when the board starts and prepares the connected parts.",
+    },
+    {
+      name: "loop()",
+      description: `Keeps running and ${lowercaseFirst(behavior)}`,
+    },
+    {
+      name: "Board messages",
+      description: messages.length
+        ? `Reports useful checkpoints such as ${joinReadableList(messages.map((message) => `“${message}”`))}.`
+        : "Prints startup and behavior checkpoints so you can see what the board is doing.",
+    },
+  ];
+
+  els.codeFunctionList.innerHTML = "";
+  functions.forEach((item) => {
+    const row = document.createElement("li");
+    const name = document.createElement("strong");
+    const description = document.createElement("span");
+    name.textContent = item.name;
+    description.textContent = item.description;
+    row.append(name, description);
+    els.codeFunctionList.append(row);
   });
 }
 
-async function verifyBehavior() {
-  await refreshServerConfig();
-  let latest = state.evidencePhotos[0]?.dataUrl || "";
-  if (!latest && state.cameraStream) latest = captureEvidence();
-  if (!latest) {
-    setStatus(els.behaviorEvaluation, "Take one photo of the build first, then I can check it.", "warn");
+async function applyBehaviorChange(event) {
+  event.preventDefault();
+  const change = els.behaviorChangeInput.value.trim();
+  if (!change) {
+    els.behaviorChangeInput.focus();
+    setStatus(els.behaviorChangeStatus, "Describe the small change you want first.", "warn");
     return;
   }
-  if (!serverConfig.hasOpenAIKey) {
-    setStatus(els.behaviorEvaluation, "The AI key is not ready yet, so I can’t check the photo.", "warn");
+  if (!state.plan?.firmware?.sketch) {
+    setStatus(els.behaviorChangeStatus, "Create and load the first version before changing its behavior.", "warn");
     return;
   }
 
-  els.verifyBehaviorButton.disabled = true;
-  els.verifyBehaviorButton.textContent = "Checking...";
+  await refreshServerConfig();
+  if (!serverConfig.hasOpenAIKey) {
+    setStatus(els.behaviorChangeStatus, "I can’t reach the code generator yet. Try again in a moment.", "danger");
+    return;
+  }
+
+  els.applyBehaviorChangeButton.disabled = true;
+  els.behaviorChangeInput.disabled = true;
+  setStatus(els.behaviorChangeStatus, "Updating the behavior and checking the new code...", "warn");
+  stopFlashSuccessTransition({ hide: true });
+  setActiveWorkflowStage(2);
+  setBuildMode("code");
+  setStatus(els.esp32Status, "Updating the behavior you requested. I’ll reload the board next.", "warn");
   state.generationId = crypto.randomUUID();
+
   try {
-    const payload = {
-      model: settings.openaiReasoningModel,
-      reasoning: { effort: settings.openaiReasoningEffort || DEFAULT_REASONING_EFFORT },
-      input: [
-        {
-          role: "system",
-          content:
-            "You verify beginner electronics behavior from a webcam frame and serial logs. Be conservative and return schema-valid JSON.",
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: [
-                `Project: ${state.plan?.projectTitle || "Unknown"}`,
-                `Goal: ${els.ideaText.value.trim()}`,
-                `Recent serial logs:\n${state.serialLog.slice(-3000) || "No logs captured."}`,
-                "Judge whether the visible behavior matches the requested project.",
-              ].join("\n\n"),
-            },
-            { type: "input_image", image_url: latest, detail: "high" },
-          ],
-        },
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "behavior_verification",
-          strict: true,
-          schema: behaviorSchema,
-        },
-      },
-    };
-    const data = await openAiResponse(payload, {
-      label: "visual check",
-      onProgress: ({ elapsedLabel, message }) => {
-        setStatus(
-          els.behaviorEvaluation,
-          message ||
-          `I’m comparing the photo and board messages (${elapsedLabel}). Keep the project in view.`,
-          "warn",
-        );
-      },
-    });
+    await regenerateFirmwareForBehaviorChange(change);
     await refreshAccount();
-    const result = JSON.parse(extractOutputText(data));
-    const tone = result.status === "pass" ? "ok" : result.status === "fail" ? "danger" : "warn";
-    setStatus(
-      els.behaviorEvaluation,
-      `${friendlyBehaviorStatus(result.status)} ${result.observations.join(" ")} Next, ${result.nextStep}`,
-      tone,
-    );
+    state.pendingBehaviorChange = change;
+    setStatus(els.behaviorChangeStatus, "The update is ready. Reloading it onto your board now...", "warn");
+    setStatus(els.esp32Status, "The updated code passed its check. Reconnecting to your ESP32...", "ok");
+    const flashed = await compileAndFlashFirmware();
+    if (!flashed) {
+      setStatus(
+        els.behaviorChangeStatus,
+        "The updated code is ready, but it did not load. Use Connect & load automatically to retry.",
+        "warn",
+      );
+    }
   } catch (error) {
     console.error(error);
-    setStatus(els.behaviorEvaluation, `I couldn’t finish the visual check: ${error.message}`, "danger");
+    setStatus(els.esp32Status, `I couldn’t prepare that update: ${error.message}`, "danger");
+    setStatus(els.behaviorChangeStatus, `I couldn’t apply that change: ${error.message}`, "danger");
   } finally {
-    els.verifyBehaviorButton.disabled = false;
-    els.verifyBehaviorButton.textContent = "Check behavior";
+    els.applyBehaviorChangeButton.disabled = false;
+    els.behaviorChangeInput.disabled = false;
   }
 }
 
-function friendlyBehaviorStatus(status) {
-  if (status === "pass") return "Looks right.";
-  if (status === "fail") return "Something is off.";
-  if (status === "needs_attention") return "Let’s check this carefully.";
-  return "I’m not fully sure yet.";
+async function regenerateFirmwareForBehaviorChange(change) {
+  const profile = selectBoardProfile(state.plan);
+  if (!profile) throw new Error("This build does not contain a supported ESP32 board.");
+  const currentSketch = state.plan.firmware.sketch;
+  const payload = {
+    model: settings.openaiReasoningModel,
+    reasoning: { effort: settings.openaiReasoningEffort || DEFAULT_REASONING_EFFORT },
+    input: [
+      {
+        role: "system",
+        content:
+          "You update an existing ESP32 Arduino-core C++ sketch for a beginner. Make only the requested behavior change. Preserve the existing board, wiring, pin assignments, safety choices, diagnostic markers, and supported libraries. Return one complete compile-ready sketch, not a patch. Output only schema-valid JSON without markdown fences.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              `Original project goal: ${els.ideaText.value.trim() || state.plan.summary}`,
+              `Requested behavior change: ${change}`,
+              `Target board: ${profile.id} (${profile.fqbn})`,
+              `Available libraries: ${HOSTED_FIRMWARE_LIBRARIES.join(", ")}`,
+              "",
+              "Hardware and behavior contract:",
+              JSON.stringify(
+                {
+                  projectTitle: state.plan.projectTitle,
+                  summary: state.plan.summary,
+                  firmwareSpec: state.plan.firmwareSpec,
+                  diagnosticTests: state.plan.diagnosticTests,
+                  warnings: state.plan.warnings,
+                },
+                null,
+                2,
+              ),
+              "",
+              "Current complete sketch:",
+              currentSketch,
+              "",
+              "Return the complete updated firmware. Keep Serial.begin(115200) and CIRCUITCODEX_DIAGNOSTIC_READY.",
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "esp32_behavior_update",
+        strict: true,
+        schema: firmwareSchema,
+      },
+    },
+  };
+
+  const data = await openAiResponse(payload, {
+    label: "behavior update",
+    onProgress: ({ elapsedLabel, message }) => {
+      setStatus(
+        els.esp32Status,
+        message || `Still updating the board behavior (${elapsedLabel}). Keep this tab open.`,
+        "warn",
+      );
+    },
+  });
+  state.plan.firmware = normalizeFirmware(parseStructuredJson(data, "behavior update"));
+  state.compiledFirmware = await compileFirmwareWithAutomaticRepair(profile, {
+    idea: `${els.ideaText.value.trim() || state.plan.summary}. Requested change: ${change}`,
+    onProgress(message) {
+      setStatus(els.esp32Status, message, "warn");
+    },
+  });
+}
+
+function compactSentence(value, maxLength = 280) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function lowercaseFirst(value) {
+  const text = String(value || "").trim();
+  if (!text) return "runs the project behavior.";
+  return `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
+}
+
+function joinReadableList(items) {
+  if (items.length < 2) return items[0] || "the connected parts";
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
 }
 
 async function refreshEsp32Status() {
@@ -2521,21 +2630,22 @@ async function refreshEsp32Status() {
 }
 
 async function compileAndFlashFirmware() {
+  stopFlashSuccessTransition({ hide: true });
   const sketch = state.plan?.firmware?.sketch || "";
   if (!sketch) {
     setStatus(els.esp32Status, "Create the guide first, then I’ll have firmware to send.", "warn");
-    return;
+    return false;
   }
 
   const profile = selectBoardProfile(state.plan);
   if (!profile) {
     setStatus(els.esp32Status, "Makeable supports ESP32-family boards only. Add an ESP32 to this build.", "danger");
-    return;
+    return false;
   }
 
   if (!("serial" in navigator)) {
     setStatus(els.esp32Status, "This browser can’t talk to the ESP32. Use Chrome or Edge on desktop.", "danger");
-    return;
+    return false;
   }
 
   els.compileFlashButton.disabled = true;
@@ -2551,9 +2661,10 @@ async function compileAndFlashFirmware() {
     els.compileFlashButton.textContent = "Connect & load automatically";
     setStatus(els.esp32Status, `No problem. Choose the ESP32 again when you’re ready. ${error.message}`, "warn");
     setFlashProgress(0, "");
-    return;
+    return false;
   }
 
+  let flashed = false;
   try {
     els.compileFlashButton.textContent = "Preparing code...";
     setStatus(els.esp32Status, "I’m preparing firmware for your ESP32.", "warn");
@@ -2575,8 +2686,19 @@ async function compileAndFlashFirmware() {
     const testAdapter = globalThis.__MAKEABLE_FLASH_TEST_ADAPTER__;
     if (typeof testAdapter === "function") await testAdapter({ port, images: compiled.images, profile });
     else await flashFirmwareImages(port, compiled.images);
-    setStatus(els.esp32Status, "Done. The firmware is on your ESP32. Continue when you’re ready to watch it work.", "ok");
+    setStatus(els.esp32Status, "Done. The firmware is on your ESP32. Opening Test now so you can watch it work.", "ok");
     setFlashProgress(100, "Done");
+    flashed = true;
+    if (state.pendingBehaviorChange) {
+      state.lastBehaviorChange = state.pendingBehaviorChange;
+      state.pendingBehaviorChange = "";
+      els.behaviorChangeInput.value = "";
+      setStatus(els.behaviorChangeStatus, `Loaded your change: ${state.lastBehaviorChange}`, "ok");
+      renderCodeExplanation();
+      state.readme = buildReadme();
+      els.readmePreview.textContent = state.readme;
+    }
+    startFlashSuccessTransition();
   } catch (error) {
     console.error(error);
     appendSerial(`\nMakeable: I couldn’t finish loading the board. ${error.message}\n`);
@@ -2586,6 +2708,7 @@ async function compileAndFlashFirmware() {
     els.compileFlashButton.disabled = false;
     els.compileFlashButton.textContent = "Connect & load automatically";
   }
+  return flashed;
 }
 
 async function findOrRequestEspPort() {
@@ -2670,8 +2793,8 @@ function buildReadme() {
   const warnings = plan.warnings.length
     ? `\n## Warnings\n\n${plan.warnings.map((warning) => `- ${warning}`).join("\n")}\n`
     : "";
-  const evidence = state.evidencePhotos.length
-    ? `\n## Evidence\n\nCaptured ${state.evidencePhotos.length} camera frame(s) during verification.\n`
+  const behaviorChange = state.lastBehaviorChange
+    ? `\n## Latest behavior change\n\n${state.lastBehaviorChange}\n`
     : "";
 
   return `# ${plan.projectTitle}
@@ -2697,7 +2820,7 @@ ${warnings}
 ## Board software
 
 Makeable securely prepares and loads the board software from the browser. No source-code download or desktop IDE is required.
-${evidence}
+${behaviorChange}
 ## Notes
 
 ${firmwareNotes}

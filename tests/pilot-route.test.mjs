@@ -73,3 +73,29 @@ test("Netlify serves the landing at root and rewrites only the pilot entrypoint"
   );
   assert.doesNotMatch(config, /from = "\/"/);
 });
+
+test("the pilot guides users from flashing into a camera-free test and behavior update loop", async () => {
+  const pilotHtml = await readFile(path.join(root, "pilot", "index.html"), "utf8");
+  const pilotScript = await readFile(path.join(root, "pilot", "app.js"), "utf8");
+  const pilotStyles = await readFile(path.join(root, "pilot", "styles.css"), "utf8");
+
+  assert.match(pilotHtml, /id="flashSuccessTransition"/);
+  assert.match(pilotHtml, /id="flashCountdownNumber">3</);
+  assert.match(pilotHtml, /id="testHardwareNowButton"[^>]*>Let’s test it</);
+  assert.match(pilotHtml, /id="behaviorSummary"/);
+  assert.match(pilotHtml, /id="codeFunctionList"/);
+  assert.match(pilotHtml, /id="behaviorChangeForm"/);
+  assert.match(pilotHtml, /Update &amp; reload board/);
+  assert.doesNotMatch(pilotHtml, /id="cameraPreview"|id="startCameraButton"|id="captureEvidenceButton"/);
+
+  assert.match(pilotScript, /function startFlashSuccessTransition\(\)/);
+  assert.match(pilotScript, /window\.setInterval[\s\S]*goToTestStage\(\)/);
+  assert.match(pilotScript, /async function applyBehaviorChange\(event\)/);
+  assert.match(pilotScript, /async function regenerateFirmwareForBehaviorChange\(change\)/);
+  assert.match(pilotScript, /connectSerial\(\{ automatic: true \}\)/);
+  assert.doesNotMatch(pilotScript, /function startCamera|function captureEvidence|function verifyBehavior|facingMode: "environment"/);
+
+  assert.match(pilotStyles, /\.terminal\s*\{[\s\S]*?height: 205px/);
+  assert.match(pilotStyles, /\.behavior-change-form/);
+  assert.doesNotMatch(pilotStyles, /\.camera-frame|#cameraPreview|\.camera-placeholder/);
+});
