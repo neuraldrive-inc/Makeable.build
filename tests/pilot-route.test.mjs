@@ -21,6 +21,10 @@ test("the production landing and pilot stay packaged as self-contained experienc
     "pilot/lib/board-profiles.mjs",
     "pilot/lib/wiring-annotations.mjs",
     "pilot/images/makeable/icon-chat.svg",
+    "pilot/images/makeable/upload-parts-clean.svg",
+    "pilot/images/makeable/photo-tip-lighting.jpg",
+    "pilot/images/makeable/photo-tip-spacing.jpg",
+    "pilot/images/makeable/photo-tip-angle.jpg",
   ]) {
     await access(path.join(root, "dist", relativePath));
   }
@@ -63,6 +67,35 @@ test("the production landing and pilot stay packaged as self-contained experienc
 
   await assert.rejects(access(path.join(root, "dist", "app.js")));
   await assert.rejects(access(path.join(root, "dist", "styles.css")));
+});
+
+test("the parts scan teaches photo setup and starts recognition automatically", async () => {
+  const pilotHtml = await readFile(path.join(root, "pilot", "index.html"), "utf8");
+  const pilotScript = await readFile(path.join(root, "pilot", "app.js"), "utf8");
+  const pilotStyles = await readFile(path.join(root, "pilot", "styles.css"), "utf8");
+
+  assert.match(pilotHtml, /id="projectBriefText"/);
+  assert.match(pilotHtml, /data-scan-step="1"/);
+  assert.match(pilotHtml, /data-scan-step="2"/);
+  assert.match(pilotHtml, /data-scan-step="3"/);
+  assert.match(pilotHtml, /id="photoPrepDialog"/);
+  assert.match(pilotHtml, /photo-tip-lighting\.jpg/);
+  assert.match(pilotHtml, /upload-parts-clean\.svg/);
+  assert.match(pilotHtml, /This starts automatically/);
+  assert.doesNotMatch(pilotHtml, /id="analyzeButton"|Name my parts/);
+
+  assert.match(pilotScript, /const PHOTO_PREP_STEPS = \[/);
+  assert.equal((pilotScript.match(/photo-tip-(?:lighting|spacing|angle)\.jpg/g) || []).length, 3);
+  assert.match(pilotScript, /photoPrepDialog\.showModal\(\)/);
+  assert.match(pilotScript, /Looks good — choose photo/);
+  assert.match(pilotScript, /if \(!state\.photoPrepComplete\)/);
+  assert.match(pilotScript, /displayImg\.onload = \(\) => \{[\s\S]*?void analyzeHardware\(\);/);
+  assert.match(pilotScript, /function setScanProcessStep\(activeStep\)/);
+
+  assert.match(pilotStyles, /\.project-brief/);
+  assert.match(pilotStyles, /\.scan-process/);
+  assert.match(pilotStyles, /\.photo-prep-dialog::backdrop/);
+  assert.match(pilotStyles, /body:not\(\.has-parts-photo\) \.scan-clear-button/);
 });
 
 test("Netlify serves the landing at root and rewrites only the pilot entrypoint", async () => {

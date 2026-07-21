@@ -43,6 +43,26 @@ const WORKFLOW_STAGES = [
     hint: "Review the guide, parts, and test results.",
   },
 ];
+const PHOTO_PREP_STEPS = [
+  {
+    image: "images/makeable/photo-tip-lighting.jpg",
+    alt: "A shadowy electronics photo compared with a clear, evenly lit photo",
+    title: "Use clear, even light.",
+    description: "Avoid deep shadows or a dark room. Bright, diffuse light lets me see labels and pins.",
+  },
+  {
+    image: "images/makeable/photo-tip-spacing.jpg",
+    alt: "Overlapping electronics compared with parts spaced neatly apart",
+    title: "Give every part some room.",
+    description: "Do not stack or overlap boards, sensors, displays, or wires. A little space makes every part easier to recognize.",
+  },
+  {
+    image: "images/makeable/photo-tip-angle.jpg",
+    alt: "An angled electronics photo compared with a straight overhead photo",
+    title: "Shoot straight down.",
+    description: "Hold the phone directly above the desk. Keep every part face-up and fully inside the frame.",
+  },
+];
 
 const settings = {
   githubOwner: serverConfig.githubOwner || "",
@@ -73,12 +93,16 @@ const state = {
   flashTransitionTimer: null,
   lastBehaviorChange: "",
   pendingBehaviorChange: "",
+  analysisInProgress: false,
+  photoPrepStep: 0,
+  photoPrepComplete: false,
   auth: loadStoredAuth(),
   account: null,
 };
 
 const els = {
   ideaNextButton: $("#ideaNextButton"),
+  addSketchButton: $("#addSketchButton"),
   ideaPrompts: document.querySelectorAll("[data-idea]"),
   voiceTranscriptBox: $("#voiceTranscriptBox"),
   homeButton: $("#homeButton"),
@@ -91,7 +115,18 @@ const els = {
   stopVoiceButton: $("#stopVoiceButton"),
   voiceStatus: $("#voiceStatus"),
   transcriptBox: $("#transcriptBox"),
-  analyzeButton: $("#analyzeButton"),
+  photoPrepButton: $("#photoPrepButton"),
+  photoPrepDialog: $("#photoPrepDialog"),
+  photoPrepImage: $("#photoPrepImage"),
+  photoPrepTitle: $("#photoPrepTitle"),
+  photoPrepDescription: $("#photoPrepDescription"),
+  photoPrepCounter: $("#photoPrepCounter"),
+  photoPrepBackButton: $("#photoPrepBackButton"),
+  photoPrepNextButton: $("#photoPrepNextButton"),
+  photoPrepCloseButton: $("#photoPrepCloseButton"),
+  photoPrepProgress: document.querySelectorAll(".photo-prep-progress i"),
+  projectBriefText: $("#projectBriefText"),
+  scanProcessSteps: document.querySelectorAll("[data-scan-step]"),
   workflowStages: document.querySelectorAll("[data-stage-index]"),
   timelineButtons: document.querySelectorAll("[data-workflow-stage]"),
   stageBackButton: $("#stageBackButton"),
@@ -272,6 +307,8 @@ const HOSTED_FIRMWARE_LIBRARIES = [
 
 bindEvents();
 renderEmptyPlan();
+renderProjectBrief();
+setScanProcessStep(1);
 const initialStageIndex = WORKFLOW_STAGES.findIndex((stage) => stage.hash === window.location.hash);
 setActiveWorkflowStage(Math.max(initialStageIndex, 0), {
   updateHash: true,
@@ -313,17 +350,26 @@ function bindEvents() {
   els.homeButton?.addEventListener("click", showIntro);
   els.homeBrandLink?.addEventListener("click", showIntro);
   els.ideaNextButton?.addEventListener("click", advanceFromIdea);
+  els.addSketchButton?.addEventListener("click", openPhotoPrepDialog);
+  els.ideaText?.addEventListener("input", renderProjectBrief);
   els.ideaPrompts.forEach((button) => {
     button.addEventListener("click", () => {
       els.ideaText.value = button.dataset.idea || "";
+      renderProjectBrief();
       els.ideaText.focus();
     });
   });
   els.photoInput.addEventListener("change", handlePhotoUpload);
   els.clearPhotoButton.addEventListener("click", clearPhoto);
+  els.photoPrepButton?.addEventListener("click", openPhotoPrepDialog);
+  els.photoPrepBackButton?.addEventListener("click", showPreviousPhotoPrepStep);
+  els.photoPrepNextButton?.addEventListener("click", advancePhotoPrepStep);
+  els.photoPrepCloseButton?.addEventListener("click", closePhotoPrepDialog);
+  els.photoPrepDialog?.addEventListener("click", (event) => {
+    if (event.target === els.photoPrepDialog) closePhotoPrepDialog();
+  });
   els.startVoiceButton.addEventListener("click", startVoiceCapture);
   els.stopVoiceButton.addEventListener("click", stopVoiceCapture);
-  els.analyzeButton.addEventListener("click", analyzeHardware);
   els.timelineButtons.forEach((button) => {
     button.addEventListener("click", () => setActiveWorkflowStage(Number(button.dataset.workflowStage || 0)));
   });
@@ -349,6 +395,72 @@ function bindEvents() {
   });
   els.publishGithubButton?.addEventListener("click", publishToGitHub);
   els.accountButton?.addEventListener("click", handleAccountButton);
+}
+
+function renderProjectBrief() {
+  if (!els.projectBriefText) return;
+  els.projectBriefText.textContent = els.ideaText.value.trim() || "Describe what you want the hardware to do.";
+}
+
+function setScanProcessStep(activeStep) {
+  els.scanProcessSteps.forEach((item) => {
+    const step = Number(item.dataset.scanStep || 1);
+    item.classList.toggle("is-active", step === activeStep);
+    item.classList.toggle("is-complete", step < activeStep);
+  });
+}
+
+function openPhotoPrepDialog() {
+  if (!els.ideaText.value.trim()) {
+    setActiveWorkflowStage(0);
+    els.ideaText.focus();
+    els.ideaText.setAttribute("aria-invalid", "true");
+    if (els.voiceTranscriptBox) els.voiceTranscriptBox.textContent = "Tell me what the build should do before adding its parts.";
+    return;
+  }
+  els.ideaText.removeAttribute("aria-invalid");
+  state.photoPrepComplete = false;
+  state.photoPrepStep = 0;
+  renderPhotoPrepStep();
+  if (!els.photoPrepDialog.open) els.photoPrepDialog.showModal();
+}
+
+function closePhotoPrepDialog() {
+  if (els.photoPrepDialog?.open) els.photoPrepDialog.close();
+}
+
+function renderPhotoPrepStep() {
+  const step = PHOTO_PREP_STEPS[state.photoPrepStep];
+  if (!step) return;
+  els.photoPrepImage.src = step.image;
+  els.photoPrepImage.alt = step.alt;
+  els.photoPrepTitle.textContent = step.title;
+  els.photoPrepDescription.textContent = step.description;
+  els.photoPrepCounter.textContent = `Photo check · ${state.photoPrepStep + 1} of ${PHOTO_PREP_STEPS.length}`;
+  els.photoPrepBackButton.hidden = state.photoPrepStep === 0;
+  els.photoPrepNextButton.textContent = state.photoPrepStep === PHOTO_PREP_STEPS.length - 1
+    ? "Looks good — choose photo"
+    : "Got it — next";
+  els.photoPrepProgress.forEach((marker, index) => {
+    marker.classList.toggle("is-active", index === state.photoPrepStep);
+    marker.classList.toggle("is-complete", index < state.photoPrepStep);
+  });
+}
+
+function showPreviousPhotoPrepStep() {
+  state.photoPrepStep = Math.max(0, state.photoPrepStep - 1);
+  renderPhotoPrepStep();
+}
+
+function advancePhotoPrepStep() {
+  if (state.photoPrepStep < PHOTO_PREP_STEPS.length - 1) {
+    state.photoPrepStep += 1;
+    renderPhotoPrepStep();
+    return;
+  }
+  state.photoPrepComplete = true;
+  closePhotoPrepDialog();
+  els.photoInput.click();
 }
 
 function showIntro(event) {
@@ -401,6 +513,7 @@ function setActiveWorkflowStage(index, options = {}) {
   els.stageNextButton.textContent = ["Scan my parts", "Build it", "Let’s test it", "Publish my build", "All set"][activeIndex];
 
   if (activeIndex === 2 && els.codeWorkspace?.hidden !== false) setBuildMode("wiring");
+  if (activeIndex === 1) renderProjectBrief();
   if (activeIndex === 3) renderCodeExplanation();
   if (activeIndex !== 2) stopFlashSuccessTransition();
 
@@ -668,7 +781,13 @@ function bytesToBase64Url(bytes) {
 function handlePhotoUpload(event) {
   const [file] = event.target.files || [];
   if (!file) return;
+  if (!state.photoPrepComplete) {
+    event.target.value = "";
+    return;
+  }
+  state.photoPrepComplete = false;
 
+  if (state.activeWorkflowStageIndex === 0) setActiveWorkflowStage(1);
   state.plan = null;
   state.compiledFirmware = null;
   state.lastBehaviorChange = "";
@@ -676,7 +795,9 @@ function handlePhotoUpload(event) {
   stopFlashSuccessTransition({ hide: true });
   state.activeBuildStepIndex = 0;
   renderEmptyPlan();
-  setStatus(els.transcriptBox, "Loading your photo...", "warn");
+  setScanProcessStep(2);
+  setPhotoControlsBusy(true);
+  setStatus(els.transcriptBox, "Loading your photo. Part recognition will start automatically...", "warn");
 
   const reader = new FileReader();
   reader.onload = () => {
@@ -688,16 +809,28 @@ function handlePhotoUpload(event) {
         state.imageElement = displayImg;
         document.body.classList.add("has-parts-photo");
         drawPartsCanvas();
-        setStatus(els.transcriptBox, "Photo ready. I can name these parts whenever you are ready.", "ok");
+        setStatus(els.transcriptBox, "Photo ready. I’m naming the parts and building your guide now...", "warn");
+        void analyzeHardware();
       };
-      displayImg.onerror = () => setStatus(els.transcriptBox, "I couldn’t prepare that image. Try another photo.", "danger");
+      displayImg.onerror = () => handlePhotoLoadError("I couldn’t prepare that image. Try another photo.");
       displayImg.src = state.imageDataUrl;
     };
-    img.onerror = () => setStatus(els.transcriptBox, "I couldn’t read that image. Try a clear JPG or PNG.", "danger");
+    img.onerror = () => handlePhotoLoadError("I couldn’t read that image. Try a clear JPG or PNG.");
     img.src = String(reader.result || "");
   };
-  reader.onerror = () => setStatus(els.transcriptBox, "I couldn’t load that photo. Try choosing it again.", "danger");
+  reader.onerror = () => handlePhotoLoadError("I couldn’t load that photo. Try choosing it again.");
   reader.readAsDataURL(file);
+}
+
+function handlePhotoLoadError(message) {
+  setPhotoControlsBusy(false);
+  setScanProcessStep(1);
+  setStatus(els.transcriptBox, message, "danger");
+}
+
+function setPhotoControlsBusy(isBusy) {
+  if (els.photoPrepButton) els.photoPrepButton.disabled = isBusy;
+  if (els.clearPhotoButton) els.clearPhotoButton.disabled = isBusy;
 }
 
 function resizePhotoForAi(img) {
@@ -725,12 +858,17 @@ function clearPhoto() {
   state.compiledFirmware = null;
   state.lastBehaviorChange = "";
   state.pendingBehaviorChange = "";
+  state.photoPrepComplete = false;
+  state.analysisInProgress = false;
   stopFlashSuccessTransition({ hide: true });
   state.activeBuildStepIndex = 0;
   els.photoInput.value = "";
   document.body.classList.remove("has-parts-photo");
+  setPhotoControlsBusy(false);
+  setScanProcessStep(1);
   renderEmptyPlan();
   drawPartsCanvas();
+  setStatus(els.transcriptBox, "Start with the three photo checks. They take about ten seconds.", "");
 }
 
 function drawPartsCanvas() {
@@ -1105,6 +1243,7 @@ function normalizeBbox(bbox, index, total) {
 }
 
 async function analyzeHardware() {
+  if (state.analysisInProgress) return;
   await refreshServerConfig();
   const idea = els.ideaText.value.trim();
   if (!state.imageDataUrl) {
@@ -1116,8 +1255,9 @@ async function analyzeHardware() {
     return;
   }
 
-  els.analyzeButton.disabled = true;
-  els.analyzeButton.textContent = "Making your guide...";
+  state.analysisInProgress = true;
+  setPhotoControlsBusy(true);
+  setScanProcessStep(2);
   state.generationId = crypto.randomUUID();
 
   try {
@@ -1187,6 +1327,7 @@ async function analyzeHardware() {
     state.plan.warnings = [...validatePlan(state.plan), ...state.plan.warnings];
     state.activeBuildStepIndex = 0;
     renderPlan();
+    setScanProcessStep(3);
     setStatus(
       els.transcriptBox,
       `I found ${state.plan.parts.length} part(s). Now I’m writing the code that matches your build.`,
@@ -1215,8 +1356,8 @@ async function analyzeHardware() {
     console.error(error);
     setStatus(els.transcriptBox, `I got stuck while making the guide: ${error.message}`, "danger");
   } finally {
-    els.analyzeButton.disabled = false;
-    els.analyzeButton.textContent = "Name my parts";
+    state.analysisInProgress = false;
+    setPhotoControlsBusy(false);
   }
 }
 
@@ -2943,7 +3084,9 @@ function stripHtml(value) {
 
 function setStatus(element, text, tone) {
   element.textContent = text;
-  element.className = `status-strip ${tone || ""}`.trim();
+  element.classList.add("status-strip");
+  element.classList.remove("ok", "warn", "danger");
+  if (tone) element.classList.add(tone);
 }
 
 function sanitizeRepoName(value) {

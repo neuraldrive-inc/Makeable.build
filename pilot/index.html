@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23ef2d83'/%3E%3Cpath d='M18 43V21l14 14 14-14v22' stroke='white' stroke-width='7' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=makeable-workbench-20260721-test-workspace" />
+    <link rel="stylesheet" href="./styles.css?v=makeable-workbench-20260721-photo-prep-2" />
     <script src="/config.local.js"></script>
   </head>
   <body>
@@ -66,7 +66,7 @@
           <img class="idea-doodle" src="images/makeable/plant-doodle.svg" alt="A hand-drawn plant and water drop" />
           <div class="idea-underline" aria-hidden="true"></div>
           <div class="idea-tools">
-            <label class="paper-button add-sketch" for="partsPhotoInput"><img src="images/makeable/icon-paperclip.svg" alt="" /> Add a sketch</label>
+            <button class="paper-button add-sketch" id="addSketchButton" type="button"><img src="images/makeable/icon-paperclip.svg" alt="" /> Add a sketch</button>
             <div class="voice-row">
               <button class="paper-button" id="startVoiceButton" type="button">Use my voice</button>
               <button class="paper-button" id="stopVoiceButton" type="button" disabled>Stop</button>
@@ -94,21 +94,32 @@
           <aside class="sticky-note sticky-note--white tape-yellow">Your photo is only used to recognize your parts.</aside>
         </header>
 
+        <section class="project-brief" aria-label="Your build idea">
+          <span>Your build idea</span>
+          <strong id="projectBriefText">Describe what you want the hardware to do.</strong>
+        </section>
+
+        <ol class="scan-process" aria-label="Photo recognition progress">
+          <li class="is-active" data-scan-step="1"><b>1</b><span><strong>Choose one photo</strong><small>Three quick checks first</small></span></li>
+          <li data-scan-step="2"><b>2</b><span><strong>Identify the parts</strong><small>This starts automatically</small></span></li>
+          <li data-scan-step="3"><b>3</b><span><strong>Build the guide</strong><small>No extra button needed</small></span></li>
+        </ol>
+
         <div class="scan-paper paper-sheet tape-blue">
           <div class="canvas-frame">
             <canvas id="partsCanvas" aria-label="Your uploaded hardware photo with Makeable annotations"></canvas>
-            <img class="scan-empty-art" id="scanEmptyArt" src="images/makeable/scan-parts.svg" alt="A phone framing electronic parts" />
+            <img class="scan-empty-art" id="scanEmptyArt" src="images/makeable/upload-parts-clean.svg" alt="Three electronic parts spaced inside a photo frame" />
           </div>
           <div class="scan-copy">
-            <strong>Drop a photo here</strong>
-            <span>or choose from your computer</span>
+            <strong>One clear photo. I’ll do the rest.</strong>
+            <span>I’ll identify the parts and start your guide automatically.</span>
           </div>
           <div class="scan-actions">
-            <label class="torn-button torn-button--coral file-button"><input id="partsPhotoInput" type="file" accept="image/*" />Upload my parts</label>
-            <button class="paper-button" id="clearPhotoButton" type="button">Clear photo</button>
-            <button class="torn-button torn-button--pink" id="analyzeButton" type="button">Name my parts</button>
+            <input id="partsPhotoInput" type="file" accept="image/*" tabindex="-1" aria-hidden="true" hidden />
+            <button class="scan-upload-button" id="photoPrepButton" type="button"><span aria-hidden="true">＋</span> Upload my parts</button>
+            <button class="scan-clear-button" id="clearPhotoButton" type="button">Remove photo</button>
           </div>
-          <div class="status-strip scan-status" id="transcriptBox" aria-live="polite">Choose one clear photo, then I’ll find the parts for your idea.</div>
+          <div class="status-strip scan-status" id="transcriptBox" aria-live="polite">Start with the three photo checks. They take about ten seconds.</div>
         </div>
 
         <div class="recognized-paper paper-sheet">
@@ -118,9 +129,6 @@
         <ol class="sr-only" id="wiringList"></ol>
         <div class="sr-only" id="diagnosticsList"></div>
 
-        <div class="scan-tips" aria-label="Photo tips">
-          <span><b>☀</b> Use good light</span><span><b>⌁</b> Spread parts out</span><span><b>▣</b> Shoot from above</span>
-        </div>
       </section>
 
       <section class="workflow-stage" id="flash" data-stage-index="2" hidden>
@@ -252,6 +260,31 @@
 
     <aside class="orientation-card" aria-label="Landscape mode recommended"><img src="images/makeable/icon-code.svg" alt="" /><h2>Turn sideways to build.</h2><p>Makeable works like a wide workbench, with your photo and next move side by side.</p></aside>
 
-    <script type="module" src="./app.js?v=makeable-workbench-20260721-test-workspace"></script>
+    <dialog class="photo-prep-dialog" id="photoPrepDialog" aria-labelledby="photoPrepTitle" aria-describedby="photoPrepDescription">
+      <div class="photo-prep-shell">
+        <header class="photo-prep-header">
+          <div>
+            <span id="photoPrepCounter">Photo check · 1 of 3</span>
+            <h2>Before you upload</h2>
+          </div>
+          <button class="photo-prep-close" id="photoPrepCloseButton" type="button" aria-label="Close photo checks">×</button>
+        </header>
+        <div class="photo-prep-progress" aria-hidden="true"><i></i><i></i><i></i></div>
+        <figure class="photo-prep-visual">
+          <img id="photoPrepImage" src="images/makeable/photo-tip-lighting.jpg" alt="Bad lighting compared with clear even lighting" />
+          <figcaption><span>Avoid this</span><span>Aim for this</span></figcaption>
+        </figure>
+        <div class="photo-prep-copy">
+          <span class="photo-prep-checkmark" aria-hidden="true">✓</span>
+          <div><h3 id="photoPrepTitle">Use clear, even light.</h3><p id="photoPrepDescription">Avoid deep shadows or a dark room. Bright, diffuse light lets me see labels and pins.</p></div>
+        </div>
+        <footer class="photo-prep-actions">
+          <button class="photo-prep-back" id="photoPrepBackButton" type="button">← Back</button>
+          <button class="photo-prep-next" id="photoPrepNextButton" type="button">Got it — next</button>
+        </footer>
+      </div>
+    </dialog>
+
+    <script type="module" src="./app.js?v=makeable-workbench-20260721-photo-prep-2"></script>
   </body>
 </html>
