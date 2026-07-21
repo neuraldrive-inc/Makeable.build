@@ -13,6 +13,10 @@ const DEFAULT_WIRE_COLORS = Object.freeze([
 
 const ESP32_BOOT_RISK_LABELS = new Set(["D0", "D2", "D12", "D15", "GPIO0", "GPIO2", "GPIO12", "GPIO15"]);
 const SHAREABLE_POWER_LABELS = new Set(["GND", "3V3", "3.3V", "VIN", "5V"]);
+const HIGH_CURRENT_LOAD_PATTERN = /\b(?:motor|servo|pump|solenoid|heater|heating element|led strip|ws2812\w*|neopixel\w*|led matrix|high[- ]power led|amplifier|powered speaker|fan|blower|electromagnet|high[- ]current relay load|mains|12\s*v|24\s*v)\b/i;
+const ORDINARY_LOW_CURRENT_PART_PATTERN = /\b(?:esp32|microcontroller|controller|dev(?:elopment)?\s*(?:board|kit)|sensor|pir|hc[- ]?sr04|ultrasonic|display|screen|indicator|led|buzzer|relay|button|switch)\b/i;
+const STANDALONE_POWER_SOURCE_PATTERN = /\b(?:batter(?:y|ies)|power bank|external power supply|dc power supply|buck converter|boost converter|step[- ]down converter|voltage regulator)\b/i;
+const UNTETHERED_PROJECT_PATTERN = /\b(?:battery[- ]powered|portable|untethered|cordless|wearable)\b/i;
 
 export const ESP32_IDENTITY_CONFIDENCE_THRESHOLD = 0.55;
 
@@ -46,7 +50,7 @@ export function esp32IdentityAssessment(plan = {}) {
   };
 }
 
-export function normalizeBeginnerPlan(plan = {}) {
+export function normalizeBeginnerPlan(plan = {}, options = {}) {
   const rawSteps = Array.isArray(plan.wiringSteps) ? plan.wiringSteps : [];
   const wiringSteps = rawSteps
     .map((step, index) => normalizeStep(step, index))
@@ -78,12 +82,19 @@ export function normalizeBeginnerPlan(plan = {}) {
     ...plan,
     schemaVersion: 2,
     boardProfile: normalizeBoardProfile(plan.boardProfile),
+    powerPlan: normalizePowerPlan(plan.powerPlan, plan, options),
     preparation: normalizePreparation(plan.preparation, wiringSteps),
     wiringSteps,
     diagnosticTests,
     operatingGuide: normalizeOperatingGuide(plan.operatingGuide),
     warnings: Array.isArray(plan.warnings) ? plan.warnings.map((value) => clean(value)).filter(Boolean) : [],
   };
+}
+
+export function isStandalonePowerSourcePart(part = {}) {
+  const identityText = `${part?.name || ""} ${part?.type || ""}`;
+  if (HIGH_CURRENT_LOAD_PATTERN.test(identityText) && !/\b(?:12\s*v|24\s*v)\b/i.test(identityText)) return false;
+  return STANDALONE_POWER_SOURCE_PATTERN.test(identityText);
 }
 
 export function validateBeginnerPlan(plan = {}) {
@@ -143,9 +154,9 @@ export function validateBeginnerPlan(plan = {}) {
       : "";
     issues.push(
       issue(
-        "block",
+        "warn",
         "unverified-board",
-        `${identityPrefix}this exact board layout is not verified yet. Confirm the model or use a supported board before wiring.`,
+        `${identityPrefix}this exact board layout is not verified yet. You can continue by matching the printed labels on your board; use a clearer photo if any label differs from the guide.`,
       ),
     );
   }
@@ -223,9 +234,9 @@ export function validateBeginnerPlan(plan = {}) {
     ) {
       issues.push(
         issue(
-          "block",
+          "warn",
           "unconfirmed-pin-location",
-          `Connection ${step.connectionNumber || step.order} needs a clear photo of both exact pin receptacles before wiring can begin.`,
+          `I could not place both photo markers confidently for connection ${step.connectionNumber || step.order}. You can continue by matching the two printed pin labels carefully.`,
           connectionId,
         ),
       );
@@ -233,9 +244,9 @@ export function validateBeginnerPlan(plan = {}) {
       if (!fromPart || !toPart) {
         issues.push(
           issue(
-            "block",
+            "warn",
             "unknown-pin-part",
-            `Connection ${step.connectionNumber || step.order} must link both pin markers to confirmed parts in the photo.`,
+            `The photo markers for connection ${step.connectionNumber || step.order} could not be tied to both parts. Match the named parts and printed labels before connecting.`,
             connectionId,
           ),
         );
@@ -245,9 +256,9 @@ export function validateBeginnerPlan(plan = {}) {
       ) {
         issues.push(
           issue(
-            "block",
+            "warn",
             "pin-outside-part",
-            `Connection ${step.connectionNumber || step.order} has a pin marker outside its referenced part. Take a clearer photo before wiring.`,
+            `A photo marker for connection ${step.connectionNumber || step.order} landed outside the part. Treat the marker as approximate and follow the printed pin label.`,
             connectionId,
           ),
         );
@@ -256,9 +267,9 @@ export function validateBeginnerPlan(plan = {}) {
       if (boxesAreEffectivelyIdentical(step.fromPinBbox, step.toPinBbox)) {
         issues.push(
           issue(
-            "block",
+            "warn",
             "identical-pin-locations",
-            `Connection ${step.connectionNumber || step.order} points both wire ends at the same photo location. Confirm each physical receptacle separately.`,
+            `The two markers for connection ${step.connectionNumber || step.order} overlap. Use the named printed label at each end rather than the marker position.`,
             connectionId,
           ),
         );
@@ -268,9 +279,9 @@ export function validateBeginnerPlan(plan = {}) {
     if (!clean(step.wireType)) {
       issues.push(
         issue(
-          "block",
+          "warn",
           "missing-wire-type",
-          `Connection ${step.connectionNumber || step.order} does not identify the jumper connector type.`,
+          `Connection ${step.connectionNumber || step.order} does not identify the jumper connector type. Check that each wire end physically fits before continuing.`,
           connectionId,
         ),
       );
@@ -321,26 +332,44 @@ export function validateBeginnerPlan(plan = {}) {
     }
   }
 
-  const planText = JSON.stringify(plan).toLowerCase();
-  const hasHcSr04 = /hc[- ]?sr04|ultrasonic.*echo|echo.*ultrasonic/.test(planText);
-  const echoSteps = steps.filter((step) => {
-    const fromPart = partsById.get(clean(step.fromPartId));
-    const printedSource = canonicalPin(step.fromPrintedPin || step.from);
-    return printedSource === "ECHO" || (isHcSr04Part(fromPart) && /echo/i.test(`${step.action || ""}`));
-  });
+  const hasHcSr04 = parts.some(isHcSr04Part);
+  const echoSteps = steps.filter((step) => Boolean(echoPartForStep(step, partsById)));
   if (hasHcSr04) {
     for (const echoStep of echoSteps) {
+      const sourcePart = echoPartForStep(echoStep, partsById);
+      if (hasConfirmedLowVoltageEcho(sourcePart)) continue;
       if (hasConfirmedEchoProtection(echoStep, parts, steps)) continue;
       issues.push(
         issue(
-          "block",
+          "warn",
           "unconfirmed-echo-voltage",
-          "The ultrasonic ECHO signal may exceed the ESP32 input voltage. Confirm two photographed connections through a rated divider module or level shifter: ECHO to its 5 V-side input, then its 3.3 V-side output to the ESP32.",
+          "A classic 5 V HC-SR04 can drive ECHO above the ESP32’s published 3.6 V GPIO limit. A direct one-off setup can work, but it remains outside the rated range and may stress that pin. A confirmed 3.3 V-compatible sensor or two ordinary resistors is the lower-risk option; no level-shifter board or battery is required.",
           echoStep.connectionId,
         ),
       );
     }
+
+    for (const sensor of parts.filter(isHcSr04Part)) {
+      const sensorId = clean(sensor?.id);
+      const connectedPins = new Set();
+      for (const step of steps) {
+        if (clean(step.fromPartId) === sensorId) connectedPins.add(canonicalUltrasonicPin(step.fromPrintedPin || step.from));
+        if (clean(step.toPartId) === sensorId) connectedPins.add(canonicalUltrasonicPin(step.toPrintedPin || step.to));
+      }
+      const missingPins = ["VCC", "GND", "TRIG", "ECHO"].filter((pin) => !connectedPins.has(pin));
+      if (missingPins.length) {
+        issues.push(
+          issue(
+            "block",
+            "incomplete-hcsr04-wiring",
+            `Before wiring the HC-SR04, this guide still needs ${missingPins.join(", ")}. A complete hookup maps VCC, GND, TRIG, and ECHO; USB powers the ESP32, but it does not replace the sensor's VCC and GND jumper wires. The project and code can continue while this wiring detail is repaired.`,
+          ),
+        );
+      }
+    }
   }
+
+  validateExternalPowerPath(plan, partsById, steps, issues);
 
   return dedupeIssues(issues);
 }
@@ -469,6 +498,258 @@ function normalizeBoardProfile(profile = {}) {
   };
 }
 
+function normalizePowerPlan(powerPlan = {}, plan = {}, options = {}) {
+  const parts = Array.isArray(plan.parts) ? plan.parts : [];
+  const partsById = new Map(parts.map((part) => [clean(part?.id), part]).filter(([partId]) => partId));
+  const suppliedLoadEvidence = (Array.isArray(powerPlan?.highCurrentLoads) ? powerPlan.highCurrentLoads : [])
+    .map((entry) => normalizeLoadEvidence(entry))
+    .filter((entry) => partsById.has(entry.partId));
+  const evidenceByPartId = new Map(
+    suppliedLoadEvidence.map((entry) => [entry.partId, entry]),
+  );
+  const highCurrentParts = parts.filter(
+    (part) => {
+      if (isStandalonePowerSourcePart(part)) return false;
+      if (HIGH_CURRENT_LOAD_PATTERN.test(partText(part))) return true;
+      const evidence = evidenceByPartId.get(clean(part?.id));
+      return Boolean(evidence && hasCredibleLoadEvidence(part, evidence));
+    },
+  );
+  const untetheredRequested = userRequestsUntethered(options?.userRequest);
+  const externalPowerRequired = highCurrentParts.length > 0;
+  const mode = externalPowerRequired ? "external_supply_required" : "usb_board_power";
+  const reason = highCurrentParts.length
+    ? "high_current_load"
+    : untetheredRequested
+      ? "untethered_requested"
+      : "ordinary_low_current";
+  const highCurrentNames = highCurrentParts.map((part) => clean(part?.name, "high-current load"));
+  const highCurrentLoads = highCurrentParts.map((part) => {
+    const partId = clean(part?.id);
+    return evidenceByPartId.get(partId) || {
+      partId,
+      reason: /\b(?:motor|servo|pump|solenoid|fan|blower|electromagnet)\b/i.test(partText(part))
+        ? "inductive_load"
+        : "known_separate_power_load",
+      requiredVoltageVolts: 0,
+      estimatedCurrentMilliamps: 0,
+      evidence: `The confirmed part is a ${clean(part?.name, "load")} that should not be powered as an ordinary GPIO load.`,
+    };
+  });
+  const suppliedExternalSupplies = (Array.isArray(powerPlan?.externalSupplies) ? powerPlan.externalSupplies : [])
+    .map((entry) => normalizeExternalSupplyEvidence(entry))
+    .filter((entry) => {
+      const part = partsById.get(entry.partId);
+      const confidence = normalizedConfidence(part?.confidence);
+      return Boolean(
+        externalPowerRequired &&
+        part &&
+        isStandalonePowerSourcePart(part) &&
+        confidence !== null &&
+        confidence >= 0.7 &&
+        entry.evidence,
+      );
+    });
+  const explanation = highCurrentParts.length
+    ? `USB powers the ESP32 itself. Confirm a separate supply for ${highCurrentNames.join(", ")}; do not combine supplies unless the guide explicitly shows the shared ground and power path.`
+    : untetheredRequested
+      ? "Build and test this project with the ESP32's USB data cable connected; no battery is needed to continue. Running it untethered later will need a compatible portable power source you confirm then."
+    : "The USB data cable powers the ESP32 and this low-current build while it stays connected. No battery is needed.";
+  return {
+    mode,
+    reason,
+    boardRail: normalizeBoardRail(powerPlan?.boardRail, externalPowerRequired),
+    highCurrentPartIds: highCurrentParts.map((part) => clean(part?.id)).filter(Boolean),
+    highCurrentLoads,
+    externalSupplyPartIds: suppliedExternalSupplies.map(({ partId }) => partId),
+    externalSupplies: suppliedExternalSupplies,
+    externalPowerRequired,
+    explanation,
+    keepUsbConnected: true,
+  };
+}
+
+function normalizeLoadEvidence(entry = {}) {
+  return {
+    partId: clean(entry?.partId),
+    reason: ["current_over_usb_budget", "requires_separate_voltage", "inductive_load", "mains_load", "known_separate_power_load"].includes(entry?.reason)
+      ? entry.reason
+      : "known_separate_power_load",
+    requiredVoltageVolts: Math.max(0, finite(entry?.requiredVoltageVolts, 0)),
+    estimatedCurrentMilliamps: Math.max(0, finite(entry?.estimatedCurrentMilliamps, 0)),
+    evidence: clean(entry?.evidence),
+  };
+}
+
+function normalizeExternalSupplyEvidence(entry = {}) {
+  return {
+    partId: clean(entry?.partId),
+    outputVoltageVolts: Math.max(0, finite(entry?.outputVoltageVolts, 0)),
+    maxCurrentMilliamps: Math.max(0, finite(entry?.maxCurrentMilliamps, 0)),
+    evidence: clean(entry?.evidence),
+  };
+}
+
+function hasCredibleLoadEvidence(part, evidence) {
+  if (ORDINARY_LOW_CURRENT_PART_PATTERN.test(partText(part))) return false;
+  return (
+    evidence.requiredVoltageVolts > 5.5 ||
+    evidence.estimatedCurrentMilliamps >= 250 ||
+    ["inductive_load", "mains_load"].includes(evidence.reason)
+  );
+}
+
+function userRequestsUntethered(userRequest) {
+  return clean(userRequest)
+    .split(/[.;,!?]+/)
+    .some((clause) => {
+      if (!UNTETHERED_PROJECT_PATTERN.test(clause)) return false;
+      return !/\b(?:not|never|without|do not|don't|dont|no need for|does not need|doesn't need)\b[^.;,!?]{0,80}\b(?:battery[- ]powered|portable|untethered|cordless|wearable)\b/i.test(clause);
+    });
+}
+
+function validateExternalPowerPath(plan, partsById, steps, issues) {
+  const powerPlan = plan?.powerPlan || {};
+  if (!powerPlan.externalPowerRequired) return;
+  if ((Array.isArray(powerPlan.highCurrentLoads) ? powerPlan.highCurrentLoads : []).some(({ reason }) => reason === "mains_load")) {
+    issues.push(
+      issue(
+        "block",
+        "unsupported-mains-wiring",
+        "This beginner guide will not map exposed mains-voltage wiring. The ESP32 code can still be prepared, but use a properly enclosed, certified interface and qualified help for the mains side.",
+      ),
+    );
+    return;
+  }
+  const loadIds = (Array.isArray(powerPlan.highCurrentPartIds) ? powerPlan.highCurrentPartIds : [])
+    .map((partId) => clean(partId))
+    .filter((partId) => partsById.has(partId));
+  const supplyIds = (Array.isArray(powerPlan.externalSupplyPartIds) ? powerPlan.externalSupplyPartIds : [])
+    .map((partId) => clean(partId))
+    .filter((partId) => isStandalonePowerSourcePart(partsById.get(partId)));
+  if (!supplyIds.length) {
+    issues.push(
+      issue(
+        "block",
+        "missing-external-load-supply",
+        "This load needs more power than the ESP32's USB rail should provide, but no separate load supply was confirmed in the photo. You can still prepare and load the code; add a suitable supply before wiring or running the load.",
+      ),
+    );
+    return;
+  }
+
+  const positiveGraph = connectionGraph(steps, isPositivePowerEndpoint);
+  const groundGraph = connectionGraph(steps, isGroundEndpoint);
+  const boardId = clean(esp32IdentityAssessment(plan).candidate?.id);
+  const loadsById = new Map(
+    (Array.isArray(powerPlan.highCurrentLoads) ? powerPlan.highCurrentLoads : [])
+      .map((entry) => [clean(entry?.partId), entry])
+      .filter(([partId]) => partId),
+  );
+  const suppliesById = new Map(
+    (Array.isArray(powerPlan.externalSupplies) ? powerPlan.externalSupplies : [])
+      .map((entry) => [clean(entry?.partId), entry])
+      .filter(([partId]) => partId),
+  );
+  const incompatibleLoad = loadIds.find((loadId) => !supplyIds.some((supplyId) => (
+    supplyCanPowerLoad(suppliesById.get(supplyId), loadsById.get(loadId))
+  )));
+  if (incompatibleLoad) {
+    issues.push(
+      issue(
+        "block",
+        "unconfirmed-external-supply-rating",
+        `The confirmed supply rating does not yet match ${clean(partsById.get(incompatibleLoad)?.name, "the high-current load")}'s required voltage/current. You can still prepare and load the ESP32 code, but do not energize the load until those ratings are compatible.`,
+      ),
+    );
+    return;
+  }
+  const blockedPositiveNodes = new Set([boardId].filter(Boolean));
+  const incompleteLoad = loadIds.find((loadId) => !supplyIds.some((supplyId) => (
+    supplyCanPowerLoad(suppliesById.get(supplyId), loadsById.get(loadId)) &&
+    graphHasPath(positiveGraph, supplyId, loadId, blockedPositiveNodes) &&
+    graphHasPath(groundGraph, supplyId, loadId) &&
+    (!boardId || graphHasPath(groundGraph, supplyId, boardId))
+  )));
+  if (incompleteLoad) {
+    issues.push(
+      issue(
+        "block",
+        "incomplete-external-power-path",
+        `Before wiring ${clean(partsById.get(incompleteLoad)?.name, "the high-current load")}, the guide must show the separate supply's power path and the shared ground back to the ESP32. The ESP32 code can still be prepared and loaded over USB.`,
+      ),
+    );
+  }
+}
+
+function connectionGraph(steps, endpointMatcher) {
+  const graph = new Map();
+  for (const step of steps) {
+    const fromPartId = clean(step?.fromPartId);
+    const toPartId = clean(step?.toPartId);
+    if (!fromPartId || !toPartId || !endpointMatcher(step, "from") || !endpointMatcher(step, "to")) continue;
+    if (!graph.has(fromPartId)) graph.set(fromPartId, new Set());
+    if (!graph.has(toPartId)) graph.set(toPartId, new Set());
+    graph.get(fromPartId).add(toPartId);
+    graph.get(toPartId).add(fromPartId);
+  }
+  return graph;
+}
+
+function endpointPowerText(step, endpoint) {
+  const printedPin = endpoint === "from" ? step?.fromPrintedPin || step?.from : step?.toPrintedPin || step?.to;
+  const electricalAlias = endpoint === "from" ? step?.fromElectricalAlias : step?.toElectricalAlias;
+  return `${printedPin || ""} ${electricalAlias || ""}`.toUpperCase();
+}
+
+function isPositivePowerEndpoint(step, endpoint) {
+  const text = endpointPowerText(step, endpoint);
+  return /(?:^|\b)(?:VCC|VIN|VBUS|VMOT|POWER|PWR|POSITIVE|OUT\+|V\+|3V3|3\.3\s*V|5\s*V|6\s*V|9\s*V|12\s*V|24\s*V)(?:\b|$)/.test(text) || /^\s*\+\s*$/.test(text);
+}
+
+function isGroundEndpoint(step, endpoint) {
+  const text = endpointPowerText(step, endpoint);
+  return /(?:^|\b)(?:GND|GROUND|NEGATIVE)(?:\b|$)/.test(text) || /(?:^|\s)(?:V-|OUT-|NEG|-)(?:\s|$)/.test(text);
+}
+
+function graphHasPath(graph, start, target, blocked = new Set()) {
+  if (!start || !target) return false;
+  if (start === target) return true;
+  if (blocked.has(start) || blocked.has(target)) return false;
+  const visited = new Set([start]);
+  const queue = [start];
+  while (queue.length) {
+    const current = queue.shift();
+    for (const neighbor of graph.get(current) || []) {
+      if (blocked.has(neighbor)) continue;
+      if (neighbor === target) return true;
+      if (visited.has(neighbor)) continue;
+      visited.add(neighbor);
+      queue.push(neighbor);
+    }
+  }
+  return false;
+}
+
+function supplyCanPowerLoad(supply = {}, load = {}) {
+  const requiredVoltage = Math.max(0, finite(load?.requiredVoltageVolts, 0));
+  const requiredCurrent = Math.max(0, finite(load?.estimatedCurrentMilliamps, 0));
+  const supplyVoltage = Math.max(0, finite(supply?.outputVoltageVolts, 0));
+  const supplyCurrent = Math.max(0, finite(supply?.maxCurrentMilliamps, 0));
+  if (!requiredVoltage || !requiredCurrent || !supplyVoltage || !supplyCurrent) return false;
+  const voltageMatches = Math.abs(supplyVoltage - requiredVoltage) <= Math.max(0.5, requiredVoltage * 0.1);
+  const currentMatches = supplyCurrent >= requiredCurrent;
+  return Boolean(supply?.partId && voltageMatches && currentMatches);
+}
+
+function normalizeBoardRail(boardRail, externalPowerRequired) {
+  if (externalPowerRequired) return "USB for the ESP32; separate confirmed rail for the high-current load";
+  const suppliedRail = clean(boardRail);
+  return /(?:\b3V3\b|3(?:\.|\s*)3\s*V|\b5\s*V\b|\bVBUS\b|\bVIN\b|USB)/i.test(suppliedRail) && !/battery/i.test(suppliedRail)
+    ? suppliedRail
+    : "Confirmed 3V3 or USB-backed 5V/VBUS rail";
+}
+
 function normalizePreparation(preparation = {}, wiringSteps = []) {
   const suppliedWires = Array.isArray(preparation?.wires) ? preparation.wires : [];
   const wireByConnection = new Map(suppliedWires.map((wire) => [clean(wire?.connectionId), wire]));
@@ -520,10 +801,10 @@ function canonicalPin(value) {
 function actionNamesExactPin(action, pin) {
   const expected = canonicalPin(pin);
   if (!expected) return false;
-  const tokens = clean(action)
-    .toUpperCase()
-    .match(/[A-Z0-9]+(?:\.[A-Z0-9]+)*(?:\s+\d+)?/g) || [];
-  return tokens.some((token) => canonicalPin(token) === expected);
+  const flexibleLabel = [...expected]
+    .map((character) => character.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("\\s*");
+  return new RegExp(`(?:^|[^A-Z0-9])${flexibleLabel}(?=$|[^A-Z0-9])`, "i").test(clean(action));
 }
 
 function isConfirmedPinBox(bbox) {
@@ -685,7 +966,33 @@ function protectionChannelId(pin, side) {
 }
 
 function isHcSr04Part(part) {
-  return /hc[- ]?sr04|ultrasonic/i.test(partText(part));
+  return /hc[- ]?sr04/i.test(`${partText(part)} ${clean(part?.profileId)}`);
+}
+
+function canonicalUltrasonicPin(pin) {
+  const value = canonicalPin(pin);
+  if (/^(?:VCC|5V|VIN)$/.test(value)) return "VCC";
+  if (/^(?:GND|GROUND)$/.test(value)) return "GND";
+  if (/^(?:TRIG|TRIGGER)$/.test(value)) return "TRIG";
+  if (value === "ECHO") return "ECHO";
+  return value;
+}
+
+function echoPartForStep(step, partsById) {
+  const fromPart = partsById.get(clean(step.fromPartId));
+  const toPart = partsById.get(clean(step.toPartId));
+  const fromPin = canonicalPin(step.fromPrintedPin || step.from);
+  const toPin = canonicalPin(step.toPrintedPin || step.to);
+  if (isHcSr04Part(fromPart) && (fromPin === "ECHO" || /echo/i.test(`${step.action || ""}`))) return fromPart;
+  if (isHcSr04Part(toPart) && (toPin === "ECHO" || /echo/i.test(`${step.action || ""}`))) return toPart;
+  return null;
+}
+
+function hasConfirmedLowVoltageEcho(part) {
+  const text = `${partText(part)} ${clean(part?.profileId)}`;
+  const confidence = normalizedConfidence(part?.confidence);
+  const explicitlyCompatible = /(?:hc[- ]?sr04(?:-33|-r|p)|3(?:\.|\s*)3\s*v[^.]{0,30}(?:compatible|logic|echo)|(?:compatible|logic|echo)[^.]{0,30}3(?:\.|\s*)3\s*v)/i.test(text);
+  return confidence !== null && confidence >= 0.8 && part?.compatibilityStatus === "exactly_supported" && explicitlyCompatible;
 }
 
 function isEsp32Part(part) {

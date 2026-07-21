@@ -4,6 +4,7 @@ import {
   esp32IdentityAssessment,
   expectedDiagnosticHits,
   findDiagnosticFailure,
+  isStandalonePowerSourcePart,
   normalizeBeginnerPlan,
   resolveWorkflowStage,
   validateBeginnerPlan,
@@ -23,6 +24,16 @@ const ANNOTATION_LABEL_PADDING = 12;
 const ANNOTATION_LABEL_GAP = 10;
 const AUTH_STORAGE_KEY = "makeable.auth.v1";
 const AUTH_FLOW_KEY = "makeable.auth.flow.v1";
+const FIRMWARE_BLOCKING_PLAN_ISSUES = new Set([
+  "missing-esp32",
+  "missing-esp32-confidence",
+  "low-esp32-confidence",
+  "missing-part-id",
+  "duplicate-part-id",
+  "missing-connection-id",
+  "duplicate-connection-id",
+  "duplicate-pin",
+]);
 let serverConfig = window.MAKEABLE_CONFIG || window.CIRCUIT_CODEX_CONFIG || {};
 const initialAuthSearch = window.location.search;
 const WORKFLOW_STAGES = [
@@ -165,6 +176,7 @@ const els = {
   buildPreparation: $("#buildPreparation"),
   boardSupportBadge: $("#boardSupportBadge"),
   boardIdentity: $("#boardIdentity"),
+  powerSourceTitle: $("#powerSourceTitle"),
   usbCableGuide: $("#usbCableGuide"),
   cableInventoryList: $("#cableInventoryList"),
   planIssues: $("#planIssues"),
@@ -200,6 +212,7 @@ const els = {
   flashStateItems: document.querySelectorAll("[data-flash-state]"),
   usbCableName: $("#usbCableName"),
   boardUsbPort: $("#boardUsbPort"),
+  usbPowerLoadNote: $("#usbPowerLoadNote"),
   esp32Status: $("#esp32Status"),
   generateReadmeButton: $("#generateReadmeButton"),
   repoNameInput: $("#repoNameInput"),
@@ -260,6 +273,51 @@ const hardwarePlanSchema = {
         "bootLabel",
         "printedLabels",
       ],
+    },
+    powerPlan: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        mode: { type: "string", enum: ["usb_board_power", "external_supply_required"] },
+        reason: { type: "string", enum: ["ordinary_low_current", "untethered_requested", "high_current_load"] },
+        boardRail: { type: "string" },
+        highCurrentLoads: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              partId: { type: "string" },
+              reason: {
+                type: "string",
+                enum: ["current_over_usb_budget", "requires_separate_voltage", "inductive_load", "mains_load", "known_separate_power_load"],
+              },
+              requiredVoltageVolts: { type: "number", minimum: 0 },
+              estimatedCurrentMilliamps: { type: "number", minimum: 0 },
+              evidence: { type: "string" },
+            },
+            required: ["partId", "reason", "requiredVoltageVolts", "estimatedCurrentMilliamps", "evidence"],
+          },
+        },
+        externalSupplies: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              partId: { type: "string" },
+              outputVoltageVolts: { type: "number", minimum: 0 },
+              maxCurrentMilliamps: { type: "number", minimum: 0 },
+              evidence: { type: "string" },
+            },
+            required: ["partId", "outputVoltageVolts", "maxCurrentMilliamps", "evidence"],
+          },
+        },
+        externalPowerRequired: { type: "boolean" },
+        explanation: { type: "string" },
+        keepUsbConnected: { type: "boolean" },
+      },
+      required: ["mode", "reason", "boardRail", "highCurrentLoads", "externalSupplies", "externalPowerRequired", "explanation", "keepUsbConnected"],
     },
     parts: {
       type: "array",
@@ -479,6 +537,7 @@ const hardwarePlanSchema = {
     "projectTitle",
     "summary",
     "boardProfile",
+    "powerPlan",
     "parts",
     "preparation",
     "warnings",
@@ -547,10 +606,10 @@ refreshServerConfig().then(initializeAuth);
 refreshEsp32Status();
 if (/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
   globalThis.__MAKEABLE_TEST_API__ = {
-    async loadPlan(plan, imageDataUrl = "") {
+    async loadPlan(plan, imageDataUrl = "", options = {}) {
       invalidatePendingGeneration();
       resetBuildEvidence();
-      state.plan = normalizePlan(plan);
+      state.plan = normalizePlan(plan, { userRequest: String(options?.userRequest || "") });
       state.planIssues = validateBeginnerPlan(state.plan);
       if (imageDataUrl) {
         const fixtureImage = new Image();
@@ -1977,7 +2036,7 @@ async function analyzeHardware() {
       },
     });
     if (!isGenerationCurrent(generationContext)) return;
-    const nextPlan = normalizePlan(parseStructuredJson(data, "hardware plan"));
+    const nextPlan = normalizePlan(parseStructuredJson(data, "hardware plan"), { userRequest: idea });
     state.plan = nextPlan;
     state.planIssues = validateBeginnerPlan(state.plan);
     state.plan.warnings = [
@@ -1987,19 +2046,24 @@ async function analyzeHardware() {
       ]),
     ];
     renderPlan();
-    const blockers = state.planIssues.filter(({ severity }) => severity === "block");
-    if (blockers.length) {
+    const projectBlockers = state.planIssues.filter(issueBlocksFirmware);
+    const assemblyBlockers = state.planIssues.filter(
+      (issue) => issue.severity === "block" && !issueBlocksFirmware(issue),
+    );
+    if (projectBlockers.length) {
       setStatus(
         els.transcriptBox,
-        `I found the parts, but I stopped before wiring: ${blockers[0].message}`,
+        `I found the parts, but I still need one reliable board or pin assignment before I can prepare its code: ${projectBlockers[0].message}`,
         "danger",
       );
       return;
     }
     setStatus(
       els.transcriptBox,
-      `I confirmed ${state.plan.parts.length} part(s). Now I’m preparing code for this exact plan.`,
-      "ok",
+      assemblyBlockers.length
+        ? `I found the project and I’m keeping it moving. I’ll prepare the code now; one wiring detail still needs attention: ${assemblyBlockers[0].message}`
+        : `I confirmed ${state.plan.parts.length} part(s). Now I’m preparing code for this exact plan.`,
+      assemblyBlockers.length ? "warn" : "ok",
     );
     try {
       const firmwareReady = await generateFirmwareForPlan(idea, generationContext);
@@ -2009,8 +2073,10 @@ async function analyzeHardware() {
       renderPlan();
       setStatus(
         els.transcriptBox,
-        "Your guide and code are ready. Let’s build it one step at a time.",
-        "ok",
+        assemblyBlockers.length
+          ? "Your project and code are ready. You can connect and load the ESP32 now; the wiring note stays visible until you resolve it."
+          : "Your guide and code are ready. Let’s build it one step at a time.",
+        assemblyBlockers.length ? "warn" : "ok",
       );
     } catch (firmwareError) {
       console.error(firmwareError);
@@ -2066,7 +2132,7 @@ async function suggestProjectIdeas(generationContext = beginGenerationContext())
           {
             role: "system",
             content:
-              "You are a patient electronics teacher suggesting projects for a complete beginner. Use only parts clearly visible in the supplied photo. Suggest two or three small, safe, genuinely buildable projects. Do not invent parts, voltage adapters, cables, or capabilities. Output only schema-valid JSON.",
+              "You are a patient electronics teacher suggesting projects for a complete beginner. Use only parts clearly visible in the supplied photo. Suggest two or three small, practical, genuinely buildable projects. For an ESP32 development board with an ordinary low-current sensor, display, or onboard output, assume the board and project can run from the board’s USB data cable; do not invent a battery, power bank, level-shifter board, or separate supply. Treat the USB cable as normal board setup, even when it is not in the parts photo. Avoid motors, pumps, heaters, large LED strips, and other high-current ideas unless suitable external power hardware is visible. Output only schema-valid JSON.",
           },
           {
             role: "user",
@@ -2169,19 +2235,23 @@ function buildAnalysisPrompt(idea) {
     "For LEDs/resistors, distinguish loose LEDs, resistor bags/strips, jumper wires, servo motors, displays, relay/audio modules, and breadboards if visible.",
     "If a part is ambiguous, name it as 'possible ...' and reduce confidence rather than guessing.",
     "Return schemaVersion 2 and identify the exact board profile, USB connector, and printed RESET/EN and BOOT button labels.",
+    "Return powerPlan. For ordinary low-current sensors, small displays, and onboard outputs, set mode usb_board_power, reason ordinary_low_current, highCurrentLoads [], externalSupplies [], externalPowerRequired false, keepUsbConnected true, and explain plainly that the USB data cable powers the ESP32 and build so no battery is needed. Name the confirmed 3V3 or USB-backed 5V/VBUS/VIN rail used by external modules. Use external_supply_required with reason high_current_load only for a genuinely high-current or separately powered load such as a motor, servo, pump, heater, LED strip, fan, electromagnet, amplifier, siren, lamp, or switched load. For each actual load, add highCurrentLoads evidence with its exact visible part id, a reason, known required voltage/current (use 0 only when unknown), and a concise source such as a printed rating or known part specification. For every actual visible battery pack or separate supply, add externalSupplies evidence with its exact part id, output voltage, maximum current (0 only when genuinely unknown), and the printed or known rating used; never invent a supply. For an explicitly portable or untethered request without a confirmed portable supply, keep mode usb_board_power, reason untethered_requested, both arrays empty, and let the user build and test over USB now; describe portable power as a later decision, not a prerequisite.",
+    "The USB data cable is board setup, not a photographed project part. Leave USB unplugged while moving jumper wires; for a separate-load-supply build, disconnect that supply too. Plug USB in at Connect + load, and keep it connected while using a USB-powered build.",
     "Set boardProfile.identityConfidence to your probability from 0 to 1 that the visible controller is in the ESP32 family. This is family identity confidence, not confidence in the exact manufacturer, revision, layout, or pin positions.",
     "Never omit a visible controller because its identity is uncertain. If ESP32-family identityConfidence is at least 0.55, include it as a part whose name or type contains 'Possible ESP32' and use compatible_with_differences unless the exact layout is genuinely confirmed. Below 0.55, still include the best candidate and its honest score so the user can see why a clearer photo is needed.",
     "Use supportStatus exactly_supported only when the manufacturer/model/revision and pin-label layout are genuinely confirmed from the photo. Use compatible_with_differences for an ESP32-family match of at least 0.55 whose exact revision differs or remains uncertain. Use unverified when ESP32-family confidence is below 0.55 or the visible evidence is insufficient.",
     "Prefer ESP32 pins that are usually safe for beginner projects; place any boot-risk caveat in the separate warning field.",
     "For every wiring step, create one atomic connection with a stable connectionId, fromPartId, toPartId, exact fromPrintedPin, exact toPrintedPin, electrical aliases, wireColor, jumper connector gender/type, quickCheck, why, warning, requiredPartIds, and accessibilityRank.",
-    "Also return pinLocationsConfirmed plus tight fromPinBbox and toPinBbox rectangles around the actual visible metal pin or receptacle in this exact photo. Use 0-100 coordinates. Set pinLocationsConfirmed true only when both physical connection points are genuinely visible; wiring will be blocked otherwise.",
+    "Map every required connection for each external module, including its power and ground jumpers. A classic HC-SR04 needs four explicit module connections: VCC, GND, TRIG, and ECHO. USB powers the ESP32 board but does not replace the VCC and GND jumpers from the board rail to the sensor.",
+    "For every low-voltage high-current load, include the confirmed external supply as a photographed part and explicitly map the load's supply-power path plus the common ground path back to the ESP32. Do not route the load's power through the ESP32 board, wire a motor, servo, pump, heater, LED strip, or other substantial load directly to a GPIO, or pretend its supply is present when it is not. Never generate exposed mains-voltage wiring; keep code planning separate and require a properly enclosed certified interface and qualified help for the mains side.",
+    "Also return pinLocationsConfirmed plus tight fromPinBbox and toPinBbox rectangles around the actual visible metal pin or receptacle in this exact photo. Use 0-100 coordinates. Set pinLocationsConfirmed true only when both physical connection points are genuinely visible. When a marker position is uncertain, keep the viable exact-label wiring step, set pinLocationsConfirmed false, and treat only the photo overlay as approximate guidance rather than blocking or omitting the connection.",
     "The action sentence must literally include both exact printed pin labels. Say D25 when the board prints D25; GPIO 25 may appear only as the secondary electrical alias.",
     "Never invent a pin position or board geometry. The photographed printed label is the source of truth.",
     "Order wiring from the most physically constrained or crowded inner connection to the easiest outer connection.",
     "Assign a distinct wire color to every connection whenever the confirmed wire inventory permits it, and keep that color attached to the same connectionId everywhere.",
     "Every requiredPartId must refer to a part actually confirmed in the photo.",
-    "Do not introduce an unseen resistor, voltage divider, level shifter, adapter, or cable. If one is electrically required but absent, return the unsafe step clearly enough for the validator to block it and explain the missing part in warnings.",
-    "For HC-SR04-class ultrasonic sensors, treat every ECHO path as potentially 5 V. A protection part named in prose is not enough. Only when its identity and 5 V-to-3.3 V rating are genuinely visible, return the protection part with confidence at least 0.9, compatibilityStatus exactly_supported, and a specific non-generic profileId. Then represent the signal as two separate atomic wiring steps through that part: HC-SR04 ECHO to the photographed 5 V/high-side input pin, then the matching, physically distinct photographed 3.3 V/low-side output pin to the ESP32. Give both edges their own connectionId, exact part ids, exact printed pin labels, distinct endpoint boxes, and requiredPartIds. Use electrical aliases such as '5 V-side input' and '3.3 V-side output' when the printed pins use names like HV1/LV1 or IN/OUT. Loose resistors, ambiguous protection hardware, and a direct ECHO-to-ESP32 step are never enough.",
+    "Do not introduce an unseen resistor, voltage-divider module, level-shifter board, adapter, battery, or power supply. Keep the project moving with the visible parts and put a concise, honest caveat in the separate warning field when a component is being used outside its published rating.",
+    "For a classic HC-SR04 ultrasonic sensor, use the direct photographed ECHO-to-ESP32 connection when that is the user’s available setup and add a short warning that its 5 V ECHO can exceed the ESP32’s published 3.6 V GPIO range. Do not require a level-shifter board, step-down converter, or battery. You may mention two ordinary resistors as the lower-risk optional protection, but never insert unseen resistors into the primary wiring. If an exact 3.3 V-compatible ultrasonic variant is genuinely confirmed, direct ECHO needs no voltage warning.",
     "Each diagnostic test must use connectionId to link a failure to one exact wire and include a concrete failureTitle and recoveryAction.",
     "Include an operatingGuide that explains what the finished build does, which face/direction to use, what to press or move, the displayed unit, what success looks like, and the difference between RESET/EN and BOOT.",
     "Do not claim certainty for ambiguous modules; put uncertainty in warnings.",
@@ -2454,6 +2524,7 @@ function buildFirmwarePrompt(idea, plan) {
         })),
         wiringSteps: plan.wiringSteps,
         diagnosticTests: plan.diagnosticTests,
+        powerPlan: plan.powerPlan,
         firmwareSpec: plan.firmwareSpec,
         warnings: plan.warnings,
       },
@@ -2581,7 +2652,7 @@ function normalizeFirmware(firmware) {
   };
 }
 
-function normalizePlan(plan) {
+function normalizePlan(plan, options = {}) {
   const wiringSteps = Array.isArray(plan.wiringSteps) ? plan.wiringSteps : [];
   const rawParts = Array.isArray(plan.parts) ? plan.parts : [];
   const firmwareSpec = plan.firmwareSpec || {
@@ -2591,9 +2662,9 @@ function normalizePlan(plan) {
     pinAssignments: [],
     serialProtocol: [],
   };
-  const projectParts = filterProjectParts(rawParts, wiringSteps, firmwareSpec, plan.summary || "");
+  const projectParts = filterProjectParts(rawParts, wiringSteps, firmwareSpec, plan.summary || "", plan.powerPlan);
 
-  return normalizeBeginnerPlan({
+  const normalizedPlan = normalizeBeginnerPlan({
     ...plan,
     projectTitle: plan.projectTitle || "Makeable Build",
     summary: plan.summary || "",
@@ -2604,10 +2675,11 @@ function normalizePlan(plan) {
     firmwareSpec,
     firmware: plan.firmware ? normalizeFirmware(plan.firmware) : null,
     readmeMarkdown: plan.readmeMarkdown || "",
-  });
+  }, options);
+  return removeUnneededUsbPowerParts(normalizedPlan, options);
 }
 
-function filterProjectParts(parts, wiringSteps, firmwareSpec, summary) {
+function filterProjectParts(parts, wiringSteps, firmwareSpec, summary, powerPlan = {}) {
   if (!parts.length || !wiringSteps.length) return parts;
 
   const explicitRefs = new Set();
@@ -2629,6 +2701,14 @@ function filterProjectParts(parts, wiringSteps, firmwareSpec, summary) {
       if (normalized) explicitRefs.add(normalized);
     });
   });
+  const powerPartIds = [
+    ...(Array.isArray(powerPlan?.highCurrentLoads) ? powerPlan.highCurrentLoads.map((entry) => entry?.partId) : []),
+    ...(Array.isArray(powerPlan?.externalSupplies) ? powerPlan.externalSupplies.map((entry) => entry?.partId) : []),
+  ];
+  for (const partId of powerPartIds) {
+    const normalized = normalizeText(partId);
+    if (normalized) explicitRefs.add(normalized);
+  }
 
   return parts.filter((part) => {
     const id = normalizeText(part.id);
@@ -2637,9 +2717,9 @@ function filterProjectParts(parts, wiringSteps, firmwareSpec, summary) {
     const role = normalizeText(part.role);
     const partText = `${id} ${name} ${type} ${role}`.trim();
 
-    if (/\b(unused|not used|not needed|unrelated|spare|ignore|optional)\b/.test(role)) return false;
     if (id && explicitRefs.has(id)) return true;
     if (name && explicitRefs.has(name)) return true;
+    if (/\b(unused|not used|not needed|unrelated|spare|ignore|optional)\b/.test(role)) return false;
     if (id && projectText.includes(id)) return true;
     if (name && projectText.includes(name)) return true;
     if (type && projectText.includes(type)) return true;
@@ -2651,6 +2731,127 @@ function filterProjectParts(parts, wiringSteps, firmwareSpec, summary) {
     if (/sensor/.test(partText) && /sensor|detect|nearby|motion|measure|input/.test(projectText)) return true;
     return false;
   });
+}
+
+function removeUnneededUsbPowerParts(plan, options = {}) {
+  if (plan?.powerPlan?.externalPowerRequired) return plan;
+  const removedPowerParts = (Array.isArray(plan.parts) ? plan.parts : [])
+    .filter(isStandalonePowerSourcePart);
+  const removedPartIds = new Set(
+    removedPowerParts.map((part) => String(part?.id || "").trim()).filter(Boolean),
+  );
+
+  const wiringSteps = (Array.isArray(plan.wiringSteps) ? plan.wiringSteps : [])
+    .filter((step) => !removedPartIds.has(step.fromPartId) && !removedPartIds.has(step.toPartId))
+    .map((step) => ({
+      ...step,
+      requiredPartIds: (Array.isArray(step.requiredPartIds) ? step.requiredPartIds : [])
+        .filter((partId) => !removedPartIds.has(partId)),
+    }));
+  const preparation = {
+    ...plan.preparation,
+    orientation: mentionsRemovedPowerSource(plan.preparation?.orientation, removedPowerParts)
+      ? "Place every component label-side up with the printed pin names visible."
+      : plan.preparation?.orientation,
+    requiredPartIds: (Array.isArray(plan.preparation?.requiredPartIds) ? plan.preparation.requiredPartIds : [])
+      .filter((partId) => !removedPartIds.has(partId)),
+  };
+  const behaviorFallback = mentionsRemovedPowerSource(plan.firmwareSpec?.behavior, removedPowerParts)
+    ? "Run the ESP32 project while its USB data cable stays connected."
+    : plan.firmwareSpec?.behavior;
+  const summary = mentionsRemovedPowerSource(plan.summary, removedPowerParts)
+    ? behaviorFallback || "An ESP32 project powered over USB while it stays connected."
+    : plan.summary;
+  const operatingSteps = (Array.isArray(plan.operatingGuide?.steps) ? plan.operatingGuide.steps : [])
+    .filter((step) => !mentionsRemovedPowerSource(step, removedPowerParts));
+  const operatingGuide = {
+    ...plan.operatingGuide,
+    summary: mentionsRemovedPowerSource(plan.operatingGuide?.summary, removedPowerParts)
+      ? summary
+      : plan.operatingGuide?.summary,
+    steps: operatingSteps.length
+      ? operatingSteps
+      : ["Keep the USB data cable connected and operate the finished project once."],
+    resetInstruction: mentionsRemovedPowerSource(plan.operatingGuide?.resetInstruction, removedPowerParts)
+      ? "If it stops responding, keep USB connected and press RESET/EN once—not BOOT—then try again."
+      : plan.operatingGuide?.resetInstruction,
+    successQuestion: mentionsRemovedPowerSource(plan.operatingGuide?.successQuestion, removedPowerParts)
+      ? "Did the finished project behave as described while USB stayed connected?"
+      : plan.operatingGuide?.successQuestion,
+    unit: mentionsRemovedPowerSource(plan.operatingGuide?.unit, removedPowerParts)
+      ? "Use the project output described above; no separate measurement unit is required."
+      : plan.operatingGuide?.unit,
+  };
+  const firmware = plan.firmware
+    ? {
+        ...plan.firmware,
+        notes: mentionsRemovedPowerSource(plan.firmware.notes, removedPowerParts)
+          ? "Keep the USB data cable connected while using this build."
+          : plan.firmware.notes,
+      }
+    : plan.firmware;
+  const keptConnectionIds = new Set(wiringSteps.map(({ connectionId }) => connectionId).filter(Boolean));
+  const diagnosticTests = (Array.isArray(plan.diagnosticTests) ? plan.diagnosticTests : [])
+    .filter((test) => !test?.connectionId || keptConnectionIds.has(test.connectionId))
+    .map((test, index) => ({
+      ...test,
+      name: mentionsRemovedPowerSource(test?.name, removedPowerParts)
+        ? `USB-powered check ${index + 1}`
+        : test?.name,
+      purpose: mentionsRemovedPowerSource(test?.purpose, removedPowerParts)
+        ? "Confirm the project responds while the ESP32 stays connected over USB."
+        : test?.purpose,
+      userAction: mentionsRemovedPowerSource(test?.userAction, removedPowerParts)
+        ? "Keep USB connected and operate the project once."
+        : test?.userAction,
+      expectedSerial: mentionsRemovedPowerSource(test?.expectedSerial, removedPowerParts)
+        ? "READY"
+        : test?.expectedSerial,
+      failureTitle: mentionsRemovedPowerSource(test?.failureTitle, removedPowerParts)
+        ? "The expected USB-powered behavior was not detected."
+        : test?.failureTitle,
+      recoveryAction: mentionsRemovedPowerSource(test?.recoveryAction, removedPowerParts)
+        ? "Keep USB connected, check the related jumper connection, then retry."
+        : test?.recoveryAction,
+    }));
+
+  return normalizeBeginnerPlan({
+    ...plan,
+    projectTitle: mentionsRemovedPowerSource(plan.projectTitle, removedPowerParts)
+      ? projectTitleWithoutRemovedPower(plan.projectTitle)
+      : plan.projectTitle,
+    summary,
+    parts: plan.parts.filter((part) => !removedPartIds.has(String(part?.id || "").trim())),
+    wiringSteps,
+    preparation,
+    warnings: (Array.isArray(plan.warnings) ? plan.warnings : [])
+      .filter((warning) => !mentionsRemovedPowerSource(warning, removedPowerParts)),
+    diagnosticTests,
+    operatingGuide,
+    firmwareSpec: { ...plan.firmwareSpec, behavior: behaviorFallback },
+    firmware,
+    readmeMarkdown: "",
+  }, options);
+}
+
+function mentionsRemovedPowerSource(value, removedParts = []) {
+  const text = String(value || "").toLowerCase();
+  if (!text) return false;
+  if (/\b(?:batter(?:y|ies)|power bank|external power supply|buck converter|boost converter|step[- ]down converter)\b/i.test(text)) {
+    return true;
+  }
+  return removedParts.some((part) => [part?.id, part?.name]
+    .map((label) => String(label || "").trim().toLowerCase())
+    .some((label) => label.length >= 4 && text.includes(label)));
+}
+
+function projectTitleWithoutRemovedPower(value) {
+  const title = String(value || "")
+    .replace(/\b(?:\d+(?:\.\d+)?\s*v\s*)?(?:battery(?:[- ]powered| pack)?|power bank|external power supply)\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[-–—: ]+|[-–—: ]+$/g, "")
+    .trim();
+  return title || "Makeable Build";
 }
 
 function renderEmptyPlan() {
@@ -2788,10 +2989,33 @@ function renderPreparation() {
     els.boardIdentity.textContent = `${boardName || detectedProfile?.label || "ESP32 board"}. ${confidenceLabel}. Reset is printed ${profile.resetLabel || fallbackGuide.resetLabel}; BOOT is printed ${profile.bootLabel || fallbackGuide.bootLabel}.`;
   }
   if (els.usbCableGuide) {
-    els.usbCableGuide.textContent = `${plan.preparation?.usbCable || "Use a confirmed USB data cable."} Board connector: ${profile.usbConnector || fallbackGuide.usbConnector}.`;
+    const cable = plan.preparation?.usbCable || "Use a confirmed USB data cable.";
+    const connector = profile.usbConnector || fallbackGuide.usbConnector;
+    const powerPlan = plan.powerPlan || {};
+    const buildsOnUsbBeforeUntetheredUse =
+      powerPlan.reason === "untethered_requested" && !powerPlan.externalPowerRequired;
+    if (els.powerSourceTitle) {
+      els.powerSourceTitle.textContent = powerPlan.externalPowerRequired
+        ? "USB powers the ESP32"
+        : buildsOnUsbBeforeUntetheredUse
+          ? "Build over USB — portable power can come later"
+          : "Powered by USB — no battery needed";
+    }
+    const disconnectInstruction = powerPlan.externalPowerRequired
+      ? "Leave both USB and the separate load supply disconnected while moving jumper wires; connect USB for loading, and energize the load only after its supply path and shared ground match the guide."
+      : "Leave USB unplugged while moving jumper wires, then connect it for loading and use.";
+    els.usbCableGuide.textContent = `${powerPlan.explanation || "The USB data cable powers the ESP32 while it stays connected."} Use ${cable}; ${disconnectInstruction} Board connector: ${connector}.`;
   }
   if (els.usbCableName) els.usbCableName.textContent = plan.preparation?.usbCable || "the confirmed USB data cable";
   if (els.boardUsbPort) els.boardUsbPort.textContent = profile.usbConnector || fallbackGuide.usbConnector;
+  if (els.usbPowerLoadNote) {
+    const powerPlan = plan.powerPlan || {};
+    els.usbPowerLoadNote.textContent = powerPlan.externalPowerRequired
+      ? "This cable powers the ESP32 and loads its instructions. The separate load supply must be confirmed and wired with the shared ground before you run the load."
+      : powerPlan.reason === "untethered_requested"
+        ? "This cable powers the ESP32 and the build while you make and test it. Choose portable power only when you are ready to run it unplugged."
+        : "This one cable powers the ESP32 and this build while it loads the instructions. Keep it connected to keep the project running.";
+  }
 
   if (els.cableInventoryList) {
     els.cableInventoryList.innerHTML = "";
@@ -2816,7 +3040,7 @@ function renderPreparation() {
     for (const planIssue of state.planIssues) {
       const item = document.createElement("p");
       item.className = `plan-issue plan-issue--${planIssue.severity}`;
-      item.textContent = `${planIssue.severity === "block" ? "Stop: " : "Check: "}${planIssue.message}`;
+      item.textContent = `${planIssue.severity === "block" ? "Fix before building: " : "Heads-up — you can continue: "}${planIssue.message}`;
       els.planIssues.append(item);
     }
     els.planIssues.hidden = state.planIssues.length === 0;
@@ -2827,17 +3051,23 @@ function renderPreparation() {
 function updatePreparationControls() {
   const hasPlan = Boolean(state.plan);
   const hasBlocker = state.planIssues.some(({ severity }) => severity === "block");
+  const hasProjectBlocker = state.planIssues.some(issueBlocksFirmware);
   const hasWiringSteps = Boolean(state.plan?.wiringSteps?.length);
   const isBoardOnly = hasPlan && !hasWiringSteps && !hasBlocker;
   if (els.preparationConfirmationText) {
+    const hasEchoAdvisory = state.planIssues.some(({ code }) => code === "unconfirmed-echo-voltage");
     els.preparationConfirmationText.textContent = isBoardOnly
       ? "My board and USB data cable are ready."
-      : "I have these parts and my wire ends match the guide.";
+      : hasEchoAdvisory
+        ? "I read the ECHO voltage note, and my board, USB cable, and wires are ready."
+        : "I have these parts and my wire ends match the guide.";
   }
   if (els.beginAssemblyButton) {
     els.beginAssemblyButton.disabled = !hasPlan || !state.preparationConfirmed || hasBlocker;
     els.beginAssemblyButton.textContent = hasBlocker
-      ? "Wiring paused for safety"
+      ? hasProjectBlocker
+        ? "Confirm the board first"
+        : "Wiring needs one more detail"
       : hasWiringSteps
         ? "Start connection 1"
         : "No wiring needed — continue to load";
@@ -2847,15 +3077,26 @@ function updatePreparationControls() {
     els.showWiringButton.disabled = isBoardOnly;
   }
   if (els.showCodeButton) {
-    els.showCodeButton.disabled = !hasPlan || hasBlocker || (hasWiringSteps && state.completedConnectionIds.size < state.plan.wiringSteps.length);
+    els.showCodeButton.disabled = !canOpenCodeWorkspace();
   }
+}
+
+function issueBlocksFirmware(issue = {}) {
+  return issue.severity === "block" && FIRMWARE_BLOCKING_PLAN_ISSUES.has(issue.code);
+}
+
+function canOpenCodeWorkspace() {
+  if (!state.plan || state.planIssues.some(issueBlocksFirmware)) return false;
+  const hasAssemblyBlocker = state.planIssues.some(({ severity }) => severity === "block");
+  const connectionCount = state.plan.wiringSteps?.length || 0;
+  return hasAssemblyBlocker || state.completedConnectionIds.size >= connectionCount;
 }
 
 function beginAssembly() {
   state.preparationConfirmed = Boolean(els.preparationConfirmed?.checked);
   const blocker = state.planIssues.find(({ severity }) => severity === "block");
   if (blocker) {
-    setStatus(els.esp32Status, `Wiring is paused: ${blocker.message}`, "danger");
+    setStatus(els.esp32Status, `The project can continue to code, but this wiring detail needs attention: ${blocker.message}`, "warn");
     els.planIssues?.scrollIntoView({ behavior: "smooth", block: "center" });
     return;
   }
@@ -2952,11 +3193,24 @@ function renderVisualSteps() {
     check.append(checkLabel, checkText);
     copy.append(check);
   }
-  if (step.warning) {
+  const connectionAdvisories = state.planIssues.filter(
+    ({ severity, connectionId }) => severity === "warn" && connectionId === step.connectionId,
+  );
+  const stepWarningRepeatsEchoAdvisory = connectionAdvisories.some(
+    ({ code }) => code === "unconfirmed-echo-voltage" && /(?:echo|3\.6\s*v|5\s*v)/i.test(step.warning || ""),
+  );
+  if (step.warning && !stepWarningRepeatsEchoAdvisory) {
     const warning = document.createElement("aside");
     warning.className = "step-copy-warning";
-    warning.innerHTML = "<strong>Stop and check</strong><p></p>";
+    warning.innerHTML = "<strong>Heads-up</strong><p></p>";
     warning.querySelector("p").textContent = step.warning;
+    copy.append(warning);
+  }
+  for (const advisory of connectionAdvisories) {
+    const warning = document.createElement("aside");
+    warning.className = "step-copy-warning";
+    warning.innerHTML = "<strong>You can continue</strong><p></p>";
+    warning.querySelector("p").textContent = advisory.message;
     copy.append(warning);
   }
   if (step.why) {
@@ -3044,7 +3298,7 @@ function setBuildMode(mode) {
   const resolvedMode = mode === "wiring" && !state.preparationConfirmed ? "prepare" : mode;
   const showPreparation = resolvedMode === "prepare";
   const showCode = resolvedMode === "code";
-  if (showCode && state.completedConnectionIds.size < (state.plan?.wiringSteps?.length || 0)) return;
+  if (showCode && !canOpenCodeWorkspace()) return;
   if (els.buildPreparation) els.buildPreparation.hidden = !showPreparation;
   if (els.wiringWorkspace) els.wiringWorkspace.hidden = showPreparation || showCode;
   if (els.codeWorkspace) els.codeWorkspace.hidden = !showCode;
@@ -3711,7 +3965,15 @@ function renderOperatingGuide() {
   const reset = document.createElement("p");
   reset.className = "operating-reset";
   reset.textContent = guide.resetInstruction;
-  els.operatingGuide.append(summary, list, unit, reset);
+  const power = document.createElement("p");
+  power.className = "operating-power";
+  const powerPlan = state.plan?.powerPlan || {};
+  power.textContent = powerPlan.externalPowerRequired
+    ? "Keep the ESP32’s USB data cable connected while using the project. Energize the separate load supply only after its power path and shared ground have been confirmed."
+    : powerPlan.reason === "untethered_requested"
+      ? "Build and test with USB connected. When you later run it untethered, switch only to a compatible portable power source you have confirmed for this board."
+      : "Keep the USB data cable connected while using the project; it is the power source, so no battery is needed.";
+  els.operatingGuide.append(summary, list, unit, power, reset);
   if (els.manualSuccessQuestion) els.manualSuccessQuestion.textContent = guide.successQuestion;
 }
 
@@ -3967,6 +4229,17 @@ function buildReadme() {
   if (!plan) return "Create your guide first, then I’ll write the project notes here.";
   const generated = new Date().toISOString();
   const firmwareNotes = plan.firmware?.notes || "Review all wiring before powering the board.";
+  const powerPlan = plan.powerPlan || {};
+  const usagePowerNote = powerPlan.externalPowerRequired
+    ? "Keep the ESP32 USB data cable connected. Do not energize the load until the separate supply power path and shared ground match the guide."
+    : powerPlan.reason === "untethered_requested"
+      ? "Build and test with USB connected. Portable power is only needed later if you want to run the finished project unplugged."
+      : "Keep the USB data cable connected while using the finished project.";
+  const powerNotes = [
+    powerPlan.explanation || "The USB data cable powers the ESP32 while it stays connected.",
+    `Board rail: ${powerPlan.boardRail || "use only the rail confirmed in the guide"}.`,
+    usagePowerNote,
+  ].join("\n\n");
   const parts = plan.parts
     .map((part) => `- **${part.name}** — ${part.role}${part.connectorType ? ` (${part.connectorType})` : ""}`)
     .join("\n");
@@ -4018,6 +4291,10 @@ ${media ? `## Finished build\n\n${media}\n` : ""}
 ## Parts
 
 ${parts || "- Parts pending."}
+
+## Power
+
+${powerNotes}
 
 ## Wiring
 

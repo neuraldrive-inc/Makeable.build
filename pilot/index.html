@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23ef2d83'/%3E%3Cpath d='M18 43V21l14 14 14-14v22' stroke='white' stroke-width='7' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=makeable-pilot-20260721-board-confidence" />
+    <link rel="stylesheet" href="./styles.css?v=makeable-pilot-20260721-usb-power-advisory" />
     <script src="/config.local.js"></script>
   </head>
   <body>
@@ -185,7 +185,7 @@
             <span class="support-badge" id="boardSupportBadge">Checking board support</span>
           </div>
           <div class="preparation-grid">
-            <div><h3>Board and USB cable</h3><p id="boardIdentity">Waiting for the plan.</p><p id="usbCableGuide">I’ll name the cable after I identify the board.</p></div>
+            <div><h3 id="powerSourceTitle">Board and USB cable</h3><p id="boardIdentity">Waiting for the plan.</p><p id="usbCableGuide">I’ll name the cable and explain what it powers after I identify the board.</p></div>
             <div><h3>Wires and connections</h3><ul class="cable-inventory" id="cableInventoryList"><li>Waiting for the connection plan.</li></ul></div>
           </div>
           <div class="plan-issues" id="planIssues" role="alert" hidden></div>
@@ -214,9 +214,9 @@
             <div class="web-flash-panel paper-sheet tape-blue">
               <span class="section-number">Connect the board</span>
               <h2>Now give your build its instructions.</h2>
-              <div class="usb-cable-card"><span>Use</span><strong id="usbCableName">the confirmed USB data cable</strong><p>Plug it into the port marked <b id="boardUsbPort">USB</b> on the board.</p></div>
+              <div class="usb-cable-card"><span>Power + data</span><strong id="usbCableName">the confirmed USB data cable</strong><p>Plug it into the port marked <b id="boardUsbPort">USB</b> on the board.</p><p id="usbPowerLoadNote">This one cable powers the ESP32 and loads its instructions.</p></div>
               <ol class="flash-state-list" id="flashStateList">
-                <li data-flash-state="cable" class="is-current"><b>1</b><span><strong>Connect the cable</strong><small>Leave the board on the table.</small></span></li>
+                <li data-flash-state="cable" class="is-current"><b>1</b><span><strong>Connect power + data</strong><small>This powers the board and lets Makeable load it.</small></span></li>
                 <li data-flash-state="permission"><b>2</b><span><strong>Choose your ESP32</strong><small>Your browser asks once so Makeable can load this board.</small></span></li>
                 <li data-flash-state="compile"><b>3</b><span><strong>Prepare the firmware</strong><small>I’ll show the active stage while this runs.</small></span></li>
                 <li data-flash-state="load"><b>4</b><span><strong>Load the board</strong><small>Progress comes from the real loader.</small></span></li>
@@ -306,6 +306,6 @@
       <button class="torn-button torn-button--coral" id="stageNextButton" type="button">Continue</button>
     </footer>
 
-    <script type="module" src="./app.js?v=makeable-pilot-20260721-board-confidence"></script>
+    <script type="module" src="./app.js?v=makeable-pilot-20260721-usb-power-advisory"></script>
   </body>
 </html>

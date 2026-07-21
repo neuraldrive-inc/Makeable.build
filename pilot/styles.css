@@ -2224,6 +2224,7 @@ body,
 .operating-guide ol { display: grid; gap: 8px; margin: 0; padding-left: 24px; }
 .operating-summary { font-family: var(--display); font-size: 1.2rem; }
 .operating-unit { padding: 9px 11px; background: #e8f7f2; }
+.operating-power { padding: 10px 12px; border-left: 5px solid var(--mint-dark); background: #e8f7f2; font-weight: 800; }
 .operating-reset { padding-left: 12px; border-left: 5px solid var(--yellow); }
 .manual-question { font-family: var(--display); font-size: 1.2rem; }
 

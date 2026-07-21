@@ -27,6 +27,16 @@ function basePlan() {
       bootLabel: "BOOT",
       printedLabels: ["D25", "3V3", "GND"],
     },
+    powerPlan: {
+      mode: "usb_board_power",
+      reason: "ordinary_low_current",
+      boardRail: "3V3",
+      highCurrentLoads: [],
+      externalSupplies: [],
+      externalPowerRequired: false,
+      explanation: "The Micro-USB data cable powers the ESP32 and this low-current build. No battery is needed.",
+      keepUsbConnected: true,
+    },
     parts: [
       { id: "board", name: "ESP32 DevKit", type: "controller", role: "Controller", confidence: 0.98, bbox: { x: 20, y: 50, width: 20, height: 30 } },
       { id: "sensor", name: "PIR sensor", type: "sensor", role: "Motion input", bbox: { x: 50, y: 35, width: 20, height: 30 } },
@@ -217,13 +227,14 @@ test("ESP32 confidence cannot replace explicit board evidence or exact pin evide
   assert.ok(unsafeIssues.some(({ code }) => code === "unconfirmed-pin-location"));
 });
 
-test("a 55 percent ESP32 match does not bypass an unverified board layout", () => {
+test("a 55 percent ESP32 match keeps an unverified layout visible without stopping the project", () => {
   const raw = basePlan();
   raw.boardProfile.identityConfidence = 0.55;
   raw.boardProfile.supportStatus = "unverified";
   const issue = validateBeginnerPlan(normalizeBeginnerPlan(raw)).find(({ code }) => code === "unverified-board");
-  assert.equal(issue?.severity, "block");
+  assert.equal(issue?.severity, "warn");
   assert.match(issue?.message || "", /identity check passed at 55%/i);
+  assert.match(issue?.message || "", /continue by matching the printed labels/i);
 });
 
 test("a board match cannot hide missing external wiring while a board-only plan may continue", () => {
@@ -290,7 +301,7 @@ test("a board match cannot hide missing external wiring while a board-only plan 
   );
 });
 
-test("imprecise instructions and unconfirmed ultrasonic voltage protection block wiring", () => {
+test("an imprecise connection still blocks while classic HC-SR04 voltage is advisory", () => {
   const raw = basePlan();
   raw.parts[1] = { id: "sonar", name: "HC-SR04 ultrasonic sensor", type: "sensor", role: "Distance" };
   raw.wiringSteps = [
@@ -308,7 +319,378 @@ test("imprecise instructions and unconfirmed ultrasonic voltage protection block
   ];
   const issues = validateBeginnerPlan(normalizeBeginnerPlan(raw));
   assert.ok(issues.some(({ code, severity }) => code === "imprecise-labels" && severity === "block"));
-  assert.ok(issues.some(({ code, severity }) => code === "unconfirmed-echo-voltage" && severity === "block"));
+  assert.ok(issues.some(({ code, severity }) => code === "unconfirmed-echo-voltage" && severity === "warn"));
+  assert.equal(issues.some(({ code, severity }) => code === "unconfirmed-echo-voltage" && severity === "block"), false);
+});
+
+test("direct classic HC-SR04 ECHO can continue while a confirmed 3.3 V variant needs no advisory", () => {
+  const classic = basePlan();
+  classic.parts[1] = {
+    ...classic.parts[1],
+    id: "sonar",
+    name: "HC-SR04 ultrasonic sensor",
+    type: "sensor",
+    role: "Measures distance",
+  };
+  classic.wiringSteps[0] = {
+    ...classic.wiringSteps[0],
+    connectionId: "echo",
+    action: "Connect the yellow female-to-female wire from ECHO to D25.",
+    fromPrintedPin: "ECHO",
+    fromElectricalAlias: "5 V ECHO output",
+    fromPartId: "sonar",
+    requiredPartIds: ["sonar", "board"],
+  };
+  const classicIssues = validateBeginnerPlan(normalizeBeginnerPlan(classic));
+  const advisory = classicIssues.find(({ code }) => code === "unconfirmed-echo-voltage");
+  assert.equal(advisory?.severity, "warn");
+  assert.match(advisory?.message || "", /direct one-off setup can work/i);
+  assert.match(advisory?.message || "", /no level-shifter board or battery is required/i);
+  assert.ok(classicIssues.some(({ code, severity }) => code === "incomplete-hcsr04-wiring" && severity === "block"));
+
+  const reversed = structuredClone(classic);
+  reversed.wiringSteps[0] = {
+    ...reversed.wiringSteps[0],
+    action: "Connect the yellow female-to-female wire from D25 to ECHO.",
+    fromPrintedPin: "D25",
+    toPrintedPin: "ECHO",
+    fromElectricalAlias: "GPIO 25",
+    toElectricalAlias: "5 V ECHO output",
+    fromPartId: "board",
+    toPartId: "sonar",
+    fromPinBbox: classic.wiringSteps[0].toPinBbox,
+    toPinBbox: classic.wiringSteps[0].fromPinBbox,
+  };
+  assert.ok(
+    validateBeginnerPlan(normalizeBeginnerPlan(reversed)).some(
+      ({ code, severity }) => code === "unconfirmed-echo-voltage" && severity === "warn",
+    ),
+  );
+
+  const lowVoltage = structuredClone(classic);
+  lowVoltage.parts[1] = {
+    ...lowVoltage.parts[1],
+    name: "HC-SR04-R 3.3 V-compatible ultrasonic sensor",
+    confidence: 0.95,
+    profileId: "hc-sr04-r-3v3",
+    compatibilityStatus: "exactly_supported",
+  };
+  assert.equal(
+    validateBeginnerPlan(normalizeBeginnerPlan(lowVoltage)).some(({ code }) => code === "unconfirmed-echo-voltage"),
+    false,
+  );
+
+  const otherUltrasonic = structuredClone(classic);
+  otherUltrasonic.parts[1] = {
+    ...otherUltrasonic.parts[1],
+    name: "US-100 ultrasonic sensor",
+    profileId: "us-100",
+    compatibilityStatus: "exactly_supported",
+  };
+  const otherUltrasonicIssues = validateBeginnerPlan(normalizeBeginnerPlan(otherUltrasonic));
+  assert.equal(otherUltrasonicIssues.some(({ code }) => code === "unconfirmed-echo-voltage"), false);
+  assert.equal(otherUltrasonicIssues.some(({ code }) => code === "incomplete-hcsr04-wiring"), false);
+});
+
+test("USB powers ordinary builds without a battery while high-current loads remain separate", () => {
+  const ordinary = normalizeBeginnerPlan(basePlan());
+  assert.equal(ordinary.powerPlan.mode, "usb_board_power");
+  assert.equal(ordinary.powerPlan.externalPowerRequired, false);
+  assert.match(ordinary.powerPlan.explanation, /no battery is needed/i);
+
+  const contradictoryOrdinary = basePlan();
+  contradictoryOrdinary.powerPlan = {
+    mode: "external_supply_required",
+    reason: "high_current_load",
+    boardRail: "battery",
+    highCurrentLoads: [],
+    externalSupplies: [],
+    externalPowerRequired: true,
+    explanation: "Add a battery.",
+    keepUsbConnected: false,
+  };
+  const normalizedContradiction = normalizeBeginnerPlan(contradictoryOrdinary);
+  assert.equal(normalizedContradiction.powerPlan.mode, "usb_board_power");
+  assert.equal(normalizedContradiction.powerPlan.reason, "ordinary_low_current");
+  assert.doesNotMatch(normalizedContradiction.powerPlan.boardRail, /battery/i);
+  assert.match(normalizedContradiction.powerPlan.explanation, /no battery is needed/i);
+  assert.doesNotMatch(normalizedContradiction.powerPlan.explanation, /add a battery/i);
+
+  const highCurrent = basePlan();
+  highCurrent.parts.push({
+    id: "servo",
+    name: "High-current servo motor",
+    type: "servo",
+    role: "Moves the project",
+    confidence: 0.98,
+  });
+  highCurrent.powerPlan = {
+    mode: "usb_board_power",
+    reason: "ordinary_low_current",
+    boardRail: "5V",
+    highCurrentLoads: [],
+    externalSupplies: [],
+    externalPowerRequired: false,
+    explanation: "Try USB power.",
+    keepUsbConnected: true,
+  };
+  const normalizedHighCurrent = normalizeBeginnerPlan(highCurrent);
+  assert.equal(normalizedHighCurrent.powerPlan.mode, "external_supply_required");
+  assert.equal(normalizedHighCurrent.powerPlan.reason, "high_current_load");
+  assert.equal(normalizedHighCurrent.powerPlan.externalPowerRequired, true);
+  assert.doesNotMatch(normalizedHighCurrent.powerPlan.explanation, /USB powers everything|no battery/i);
+
+  for (const name of ["WS2812B LED strip", "12 V fan", "electromagnet coil"]) {
+    const loadPlan = basePlan();
+    loadPlan.parts.push({ id: "load", name, type: "output", role: "Main load", confidence: 0.95 });
+    assert.equal(normalizeBeginnerPlan(loadPlan).powerPlan.reason, "high_current_load", name);
+  }
+
+  const relayModule = basePlan();
+  relayModule.parts.push({
+    id: "relay",
+    name: "ESP32 relay module",
+    type: "relay accessory",
+    role: "Low-current control module",
+    confidence: 0.95,
+  });
+  assert.equal(normalizeBeginnerPlan(relayModule).powerPlan.mode, "usb_board_power");
+
+  const unfamiliarLoad = basePlan();
+  unfamiliarLoad.parts.push({
+    id: "sounder",
+    name: "Industrial warning sounder",
+    type: "output",
+    role: "Main alert",
+    confidence: 0.94,
+  });
+  unfamiliarLoad.powerPlan = {
+    ...unfamiliarLoad.powerPlan,
+    mode: "external_supply_required",
+    reason: "high_current_load",
+    highCurrentLoads: [
+      {
+        partId: "sounder",
+        reason: "requires_separate_voltage",
+        requiredVoltageVolts: 12,
+        estimatedCurrentMilliamps: 0,
+        evidence: "The photographed label says 12 V.",
+      },
+    ],
+    externalPowerRequired: true,
+  };
+  const normalizedUnfamiliarLoad = normalizeBeginnerPlan(unfamiliarLoad);
+  assert.equal(normalizedUnfamiliarLoad.powerPlan.reason, "high_current_load");
+  assert.deepEqual(normalizedUnfamiliarLoad.powerPlan.highCurrentPartIds, ["sounder"]);
+
+  const missingLoadReference = basePlan();
+  missingLoadReference.powerPlan.highCurrentLoads = [
+    {
+      partId: "not-in-the-photo",
+      reason: "requires_separate_voltage",
+      requiredVoltageVolts: 12,
+      estimatedCurrentMilliamps: 0,
+      evidence: "Not actually visible.",
+    },
+  ];
+  assert.equal(normalizeBeginnerPlan(missingLoadReference).powerPlan.mode, "usb_board_power");
+
+  const overcautiousSensor = basePlan();
+  overcautiousSensor.powerPlan.highCurrentLoads = [
+    {
+      partId: "sensor",
+      reason: "current_over_usb_budget",
+      requiredVoltageVolts: 12,
+      estimatedCurrentMilliamps: 1000,
+      evidence: "Incorrect model guess.",
+    },
+  ];
+  assert.equal(normalizeBeginnerPlan(overcautiousSensor).powerPlan.mode, "usb_board_power");
+
+  const spareBattery = basePlan();
+  spareBattery.parts.push({ id: "battery", name: "12 V battery pack", type: "power supply", role: "Spare" });
+  assert.equal(normalizeBeginnerPlan(spareBattery).powerPlan.mode, "usb_board_power");
+});
+
+test("only the original request can make a low-current project untethered, and USB still starts the build", () => {
+  const modelCalledItPortable = basePlan();
+  modelCalledItPortable.projectTitle = "Portable motion alarm";
+  modelCalledItPortable.summary = "A wearable alert for a backpack.";
+  const ordinary = normalizeBeginnerPlan(modelCalledItPortable);
+  assert.equal(ordinary.powerPlan.reason, "ordinary_low_current");
+  assert.equal(ordinary.powerPlan.mode, "usb_board_power");
+
+  const explicitlyUntethered = normalizeBeginnerPlan(modelCalledItPortable, {
+    userRequest: "Make a portable battery-powered motion alarm for my backpack.",
+  });
+  assert.equal(explicitlyUntethered.powerPlan.reason, "untethered_requested");
+  assert.equal(explicitlyUntethered.powerPlan.mode, "usb_board_power");
+  assert.equal(explicitlyUntethered.powerPlan.externalPowerRequired, false);
+  assert.equal(explicitlyUntethered.powerPlan.keepUsbConnected, true);
+  assert.match(explicitlyUntethered.powerPlan.explanation, /no battery is needed to continue/i);
+  assert.match(explicitlyUntethered.powerPlan.explanation, /later/i);
+
+  const explicitlyUsbOnly = normalizeBeginnerPlan(modelCalledItPortable, {
+    userRequest: "Build a USB desk sensor, not a portable or battery-powered one.",
+  });
+  assert.equal(explicitlyUsbOnly.powerPlan.reason, "ordinary_low_current");
+});
+
+test("a high-current load keeps code available but needs a real supply power path before wiring", () => {
+  const withoutSupply = basePlan();
+  withoutSupply.parts.push({
+    id: "servo",
+    name: "Servo motor",
+    type: "actuator",
+    role: "Moves the project",
+    bbox: { x: 74, y: 30, width: 18, height: 24 },
+  });
+  let normalized = normalizeBeginnerPlan(withoutSupply);
+  assert.ok(
+    validateBeginnerPlan(normalized).some(
+      ({ code, severity }) => code === "missing-external-load-supply" && severity === "block",
+    ),
+  );
+
+  const withSupply = structuredClone(withoutSupply);
+  withSupply.parts.push({
+    id: "supply",
+    name: "6 V battery pack",
+    type: "external power supply",
+    role: "Powers the servo",
+    confidence: 0.96,
+    bbox: { x: 2, y: 8, width: 18, height: 22 },
+  });
+  withSupply.powerPlan.highCurrentLoads = [
+    {
+      partId: "servo",
+      reason: "inductive_load",
+      requiredVoltageVolts: 6,
+      estimatedCurrentMilliamps: 500,
+      evidence: "The confirmed servo specification allows 6 V and can draw 500 mA.",
+    },
+  ];
+  withSupply.powerPlan.externalSupplies = [
+    {
+      partId: "supply",
+      outputVoltageVolts: 6,
+      maxCurrentMilliamps: 1000,
+      evidence: "The photographed battery holder is fitted for a 6 V output.",
+    },
+  ];
+  const lowConfidenceSupply = structuredClone(withSupply);
+  lowConfidenceSupply.parts.find(({ id }) => id === "supply").confidence = 0.55;
+  assert.ok(
+    validateBeginnerPlan(normalizeBeginnerPlan(lowConfidenceSupply)).some(
+      ({ code }) => code === "missing-external-load-supply",
+    ),
+  );
+  normalized = normalizeBeginnerPlan(withSupply);
+  assert.ok(validateBeginnerPlan(normalized).some(({ code }) => code === "incomplete-external-power-path"));
+
+  const mismatchedSupply = structuredClone(withSupply);
+  mismatchedSupply.powerPlan.externalSupplies[0].outputVoltageVolts = 12;
+  const mismatchIssues = validateBeginnerPlan(normalizeBeginnerPlan(mismatchedSupply));
+  assert.ok(mismatchIssues.some(({ code }) => code === "unconfirmed-external-supply-rating"));
+
+  const unknownRatings = structuredClone(withSupply);
+  unknownRatings.powerPlan.highCurrentLoads[0].requiredVoltageVolts = 0;
+  unknownRatings.powerPlan.highCurrentLoads[0].estimatedCurrentMilliamps = 0;
+  unknownRatings.powerPlan.externalSupplies[0].outputVoltageVolts = 0;
+  unknownRatings.powerPlan.externalSupplies[0].maxCurrentMilliamps = 0;
+  assert.ok(
+    validateBeginnerPlan(normalizeBeginnerPlan(unknownRatings)).some(
+      ({ code }) => code === "unconfirmed-external-supply-rating",
+    ),
+  );
+
+  withSupply.wiringSteps.push(
+    {
+      connectionId: "servo-power",
+      action: "Connect the red wire from + to VCC.",
+      fromPartId: "supply",
+      toPartId: "servo",
+      fromPrintedPin: "+",
+      toPrintedPin: "VCC",
+      fromElectricalAlias: "Positive 6 V output",
+      toElectricalAlias: "Servo power input",
+      wireColor: "red",
+      wireType: "female-to-female jumper",
+      requiredPartIds: ["supply", "servo"],
+      accessibilityRank: 3,
+    },
+    {
+      connectionId: "servo-supply-ground",
+      action: "Connect the brown wire from GND to GND.",
+      fromPartId: "supply",
+      toPartId: "servo",
+      fromPrintedPin: "GND",
+      toPrintedPin: "GND",
+      fromElectricalAlias: "Supply ground",
+      toElectricalAlias: "Servo ground",
+      wireColor: "brown",
+      wireType: "female-to-female jumper",
+      requiredPartIds: ["supply", "servo"],
+      accessibilityRank: 4,
+    },
+    {
+      connectionId: "shared-ground",
+      action: "Connect the white wire from GND to GND.",
+      fromPartId: "servo",
+      toPartId: "board",
+      fromPrintedPin: "GND",
+      toPrintedPin: "GND",
+      fromElectricalAlias: "Servo and supply ground",
+      toElectricalAlias: "ESP32 ground",
+      wireColor: "white",
+      wireType: "female-to-female jumper",
+      requiredPartIds: ["servo", "board"],
+      accessibilityRank: 5,
+    },
+  );
+  normalized = normalizeBeginnerPlan(withSupply);
+  const completeIssues = validateBeginnerPlan(normalized);
+  assert.equal(completeIssues.some(({ code }) => code === "missing-external-load-supply"), false);
+  assert.equal(completeIssues.some(({ code }) => code === "incomplete-external-power-path"), false);
+
+  const routedThroughBoard = structuredClone(withSupply);
+  routedThroughBoard.wiringSteps = routedThroughBoard.wiringSteps
+    .filter(({ connectionId }) => connectionId !== "servo-power");
+  routedThroughBoard.wiringSteps.push(
+    {
+      connectionId: "supply-to-board",
+      action: "Connect the red wire from + to VIN.",
+      fromPartId: "supply",
+      toPartId: "board",
+      fromPrintedPin: "+",
+      toPrintedPin: "VIN",
+      fromElectricalAlias: "Positive 6 V output",
+      toElectricalAlias: "Board power input",
+      wireColor: "orange",
+      wireType: "female-to-female jumper",
+      requiredPartIds: ["supply", "board"],
+      accessibilityRank: 6,
+    },
+    {
+      connectionId: "board-to-servo",
+      action: "Connect the red wire from 5V to VCC.",
+      fromPartId: "board",
+      toPartId: "servo",
+      fromPrintedPin: "5V",
+      toPrintedPin: "VCC",
+      fromElectricalAlias: "ESP32 5 V rail",
+      toElectricalAlias: "Servo power input",
+      wireColor: "purple",
+      wireType: "female-to-female jumper",
+      requiredPartIds: ["board", "servo"],
+      accessibilityRank: 7,
+    },
+  );
+  assert.ok(
+    validateBeginnerPlan(normalizeBeginnerPlan(routedThroughBoard)).some(
+      ({ code }) => code === "incomplete-external-power-path",
+    ),
+  );
 });
 
 test("a photographed two-edge level-shifter path can protect an ultrasonic ECHO connection", () => {
@@ -383,6 +765,8 @@ test("a single series resistor never counts as HC-SR04 ECHO voltage protection",
       connectionId: "echo",
       action: "Connect ECHO through the 1 kΩ resistor to D25.",
       fromPrintedPin: "ECHO",
+      fromPartId: "sonar",
+      toPartId: "board",
       requiredPartIds: ["sonar", "series", "board"],
     },
   ];
@@ -405,6 +789,8 @@ test("loose resistors do not count as a confirmed ECHO protection topology", () 
       action: "Connect ECHO through the confirmed voltage divider to D25.",
       why: "The 1 kΩ high-side and 1.8 kΩ low-side voltage divider reduces 5 V ECHO to about 3.2 V.",
       fromPrintedPin: "ECHO",
+      fromPartId: "sonar",
+      toPartId: "board",
       requiredPartIds: ["sonar", "top", "bottom", "board"],
     },
   ];
@@ -460,11 +846,12 @@ test("printed pin labels require exact tokens instead of substrings", () => {
   assert.ok(issues.some(({ code }) => code === "imprecise-labels"));
 });
 
-test("wiring blocks until both exact pin receptacles are confirmed in the photo", () => {
+test("uncertain photo markers stay visible as guidance instead of blocking wiring", () => {
   const raw = basePlan();
   raw.wiringSteps[0] = { ...raw.wiringSteps[0], pinLocationsConfirmed: false, toPinBbox: null };
   const issues = validateBeginnerPlan(normalizeBeginnerPlan(raw));
-  assert.ok(issues.some(({ code, severity }) => code === "unconfirmed-pin-location" && severity === "block"));
+  assert.ok(issues.some(({ code, severity }) => code === "unconfirmed-pin-location" && severity === "warn"));
+  assert.equal(issues.some(({ code, severity }) => code === "unconfirmed-pin-location" && severity === "block"), false);
 });
 
 test("pin markers must reference existing parts, sit on those parts, and identify distinct endpoints", () => {

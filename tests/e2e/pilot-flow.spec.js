@@ -17,6 +17,16 @@ function beginnerPlan() {
       bootLabel: "BOOT",
       printedLabels: ["GND", "D25", "3V3"],
     },
+    powerPlan: {
+      mode: "usb_board_power",
+      reason: "ordinary_low_current",
+      boardRail: "3V3",
+      highCurrentLoads: [],
+      externalSupplies: [],
+      externalPowerRequired: false,
+      explanation: "The Micro-USB data cable powers the ESP32 and this low-current build. No battery is needed.",
+      keepUsbConnected: true,
+    },
     parts: [
       {
         id: "board",
@@ -144,7 +154,21 @@ function beginnerPlan() {
 
 function unsafeUltrasonicPlan() {
   const plan = beginnerPlan();
+  const signalTemplate = plan.wiringSteps.find(({ connectionId }) => connectionId === "signal");
+  const groundTemplate = plan.wiringSteps.find(({ connectionId }) => connectionId === "ground");
   plan.projectTitle = "Ultrasonic ruler";
+  plan.summary = "An ESP32 ruler powered over USB with a classic HC-SR04 sensor.";
+  plan.boardProfile.printedLabels = ["5V", "GND", "D25", "D26"];
+  plan.powerPlan = {
+    mode: "usb_board_power",
+    reason: "ordinary_low_current",
+    boardRail: "USB-backed 5V/VBUS",
+    highCurrentLoads: [],
+    externalSupplies: [],
+    externalPowerRequired: false,
+    explanation: "The Micro-USB data cable powers the ESP32 and this low-current build. No battery is needed.",
+    keepUsbConnected: true,
+  };
   plan.parts[1] = {
     ...plan.parts[1],
     id: "sonar",
@@ -155,18 +179,76 @@ function unsafeUltrasonicPlan() {
   plan.preparation.requiredPartIds = ["board", "sonar"];
   plan.preparation.wires = [
     { connectionId: "echo", color: "yellow", connectorType: "female-to-female jumper", quantity: 1 },
+    { connectionId: "trigger", color: "blue", connectorType: "female-to-female jumper", quantity: 1 },
+    { connectionId: "ground", color: "black", connectorType: "female-to-female jumper", quantity: 1 },
+    { connectionId: "power", color: "red", connectorType: "female-to-female jumper", quantity: 1 },
   ];
   plan.wiringSteps = [
     {
-      ...plan.wiringSteps[1],
+      ...signalTemplate,
+      order: 1,
+      accessibilityRank: 1,
       connectionId: "echo",
       action: "Connect the yellow female-to-female wire from ECHO to D25.",
       instruction: "Connect the yellow female-to-female wire from ECHO to D25.",
       fromPartId: "sonar",
       fromPrintedPin: "ECHO",
+      fromElectricalAlias: "5 V ECHO output",
+      requiredPartIds: ["sonar", "board"],
+    },
+    {
+      ...signalTemplate,
+      order: 2,
+      accessibilityRank: 2,
+      connectionId: "trigger",
+      action: "Connect the blue female-to-female wire from TRIG to D26.",
+      instruction: "Connect the blue female-to-female wire from TRIG to D26.",
+      fromPartId: "sonar",
+      fromPrintedPin: "TRIG",
+      toPrintedPin: "D26",
+      fromElectricalAlias: "Trigger input",
+      toElectricalAlias: "GPIO 26",
+      fromPinBbox: { x: 62, y: 48, width: 4, height: 5 },
+      toPinBbox: { x: 29, y: 55, width: 3, height: 4 },
+      wireColor: "blue",
+      requiredPartIds: ["sonar", "board"],
+    },
+    {
+      ...groundTemplate,
+      order: 3,
+      accessibilityRank: 3,
+      connectionId: "ground",
+      fromPartId: "sonar",
+      requiredPartIds: ["sonar", "board"],
+    },
+    {
+      ...signalTemplate,
+      order: 4,
+      accessibilityRank: 4,
+      connectionId: "power",
+      action: "Connect the red female-to-female wire from VCC to 5V.",
+      instruction: "Connect the red female-to-female wire from VCC to 5V.",
+      fromPartId: "sonar",
+      fromPrintedPin: "VCC",
+      toPrintedPin: "5V",
+      fromElectricalAlias: "Sensor power input",
+      toElectricalAlias: "USB-backed 5 V rail",
+      fromPinBbox: { x: 66, y: 48, width: 4, height: 5 },
+      toPinBbox: { x: 39, y: 67, width: 3, height: 4 },
+      wireColor: "red",
       requiredPartIds: ["sonar", "board"],
     },
   ];
+  plan.firmwareSpec = {
+    board: "ESP32 DevKit",
+    behavior: "Measure distance and report centimeters over USB serial.",
+    libraries: [],
+    pinAssignments: [
+      { label: "D25", gpio: 25, mode: "INPUT", purpose: "Ultrasonic ECHO" },
+      { label: "D26", gpio: 26, mode: "OUTPUT", purpose: "Ultrasonic TRIG" },
+    ],
+    serialProtocol: ["DISTANCE_CM"],
+  };
   plan.diagnosticTests = [];
   return plan;
 }
@@ -235,7 +317,7 @@ test("the pilot shows the ESP32 score and explains the 55 percent boundary", asy
   await page.evaluate((nextPlan) => window.__MAKEABLE_TEST_API__.loadPlan(nextPlan), plan);
   await expect(page.locator("#planIssues")).toContainText("ESP32 match: 54%");
   await expect(page.locator("#planIssues")).toContainText("at least 55%");
-  await expect(page.locator("#beginAssemblyButton")).toHaveText("Wiring paused for safety");
+  await expect(page.locator("#beginAssemblyButton")).toHaveText("Confirm the board first");
 
   await page.locator('[data-workflow-stage="1"]').click();
   await expect(page.locator("#boardConfidence")).toBeVisible();
@@ -256,8 +338,11 @@ test("a 55 percent match distinguishes missing external wiring from a board-only
 
   await page.evaluate((plan) => window.__MAKEABLE_TEST_API__.loadPlan(plan), externalBuild);
   await expect(page.locator("#planIssues")).toContainText("parts that need wiring");
-  await expect(page.locator("#beginAssemblyButton")).toHaveText("Wiring paused for safety");
+  await expect(page.locator("#beginAssemblyButton")).toHaveText("Wiring needs one more detail");
   await expect(page.locator("#cableInventoryList")).toContainText("No safe jumper-wire map");
+  await expect(page.locator("#showCodeButton")).toBeEnabled();
+  await page.locator("#showCodeButton").click();
+  await expect(page.locator("#codeWorkspace")).toBeVisible();
 
   const boardOnly = beginnerPlan();
   boardOnly.boardProfile.identityConfidence = 0.55;
@@ -301,11 +386,257 @@ test("a fresh diagnostic failure opens one exact wire and retry clears stale err
   await expect(page.locator("#diagnosticRepairCard")).toBeHidden();
 });
 
-test("unconfirmed HC-SR04 ECHO voltage protection stops before the first wire", async ({ page }) => {
+test("direct classic HC-SR04 ECHO warns honestly but the project continues", async ({ page }) => {
   await page.evaluate((plan) => window.__MAKEABLE_TEST_API__.loadPlan(plan), unsafeUltrasonicPlan());
-  await expect(page.getByText(/ECHO signal may exceed the ESP32 input voltage/i)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Wiring paused for safety" })).toBeDisabled();
-  await expect(page.locator("#wiringWorkspace")).toBeHidden();
+  await expect(page.locator("#planIssues")).toContainText("Heads-up — you can continue");
+  await expect(page.locator("#planIssues")).toContainText("A classic 5 V HC-SR04");
+  await expect(page.locator("#planIssues")).toContainText("no level-shifter board or battery is required");
+  await expect(page.locator("#planIssues")).not.toContainText("still needs");
+  await expect(page.locator("#powerSourceTitle")).toHaveText("Powered by USB — no battery needed");
+  await expect(page.locator("#usbCableGuide")).toContainText("No battery is needed");
+  await page.getByLabel("I read the ECHO voltage note, and my board, USB cable, and wires are ready.").check();
+  await expect(page.getByRole("button", { name: "Start connection 1" })).toBeEnabled();
+  await page.getByRole("button", { name: "Start connection 1" }).click();
+  await expect(page.locator("#wiringWorkspace")).toBeVisible();
+  await expect(page.locator("#buildStepCounter")).toHaveText("Connection 1 of 4");
+  await expect(page.locator(".step-copy-warning").filter({ hasText: "You can continue" })).toBeVisible();
+  await expect(page.locator("#nextBuildStepButton")).toBeEnabled();
+});
+
+test("an incomplete HC-SR04 map pauses only wiring while code remains available", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "One browser covers the assembly-only completeness gate");
+  const plan = unsafeUltrasonicPlan();
+  plan.wiringSteps = plan.wiringSteps.filter(({ connectionId }) => connectionId === "echo");
+  plan.preparation.wires = plan.preparation.wires.filter(({ connectionId }) => connectionId === "echo");
+  await page.evaluate((nextPlan) => window.__MAKEABLE_TEST_API__.loadPlan(nextPlan), plan);
+  await expect(page.locator("#planIssues")).toContainText("Before wiring the HC-SR04");
+  await expect(page.locator("#planIssues")).toContainText("VCC, GND, TRIG");
+  await expect(page.locator("#beginAssemblyButton")).toHaveText("Wiring needs one more detail");
+  await expect(page.locator("#showCodeButton")).toBeEnabled();
+  await page.locator("#showCodeButton").click();
+  await expect(page.locator("#codeWorkspace")).toBeVisible();
+});
+
+test("an overcautious plan cannot turn a PIR sensor or spare battery into required power hardware", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "One browser covers host-side power-plan cleanup");
+  const plan = beginnerPlan();
+  plan.parts.push({
+    id: "battery",
+    name: "9 V battery pack",
+    type: "external power supply",
+    role: "Generated spare power",
+    confidence: 0.9,
+    bbox: { x: 76, y: 12, width: 18, height: 24 },
+  });
+  plan.powerPlan = {
+    ...plan.powerPlan,
+    mode: "external_supply_required",
+    reason: "high_current_load",
+    highCurrentLoads: [
+      {
+        partId: "sensor",
+        reason: "current_over_usb_budget",
+        requiredVoltageVolts: 9,
+        estimatedCurrentMilliamps: 1000,
+        evidence: "Overcautious generated guess.",
+      },
+    ],
+    externalSupplies: [
+      {
+        partId: "battery",
+        outputVoltageVolts: 9,
+        maxCurrentMilliamps: 500,
+        evidence: "Overcautious generated guess.",
+      },
+    ],
+    externalPowerRequired: true,
+  };
+  plan.preparation.requiredPartIds.push("battery");
+  plan.preparation.wires.push({
+    connectionId: "battery-power",
+    color: "red",
+    connectorType: "female-to-female jumper",
+    quantity: 1,
+  });
+  plan.wiringSteps.push({
+    ...plan.wiringSteps[0],
+    order: 3,
+    accessibilityRank: 3,
+    connectionId: "battery-power",
+    action: "Connect the red wire from + to VIN.",
+    instruction: "Connect the red wire from + to VIN.",
+    fromPartId: "battery",
+    toPartId: "board",
+    fromPrintedPin: "+",
+    toPrintedPin: "VIN",
+    fromElectricalAlias: "Battery positive",
+    toElectricalAlias: "Board input",
+    wireColor: "red",
+    requiredPartIds: ["battery", "board"],
+  });
+  plan.projectTitle = "Battery-powered motion alarm";
+  plan.summary = "Use the 9 V battery pack to run the motion alarm.";
+  plan.operatingGuide.summary = "The battery-powered alarm watches for movement.";
+  plan.operatingGuide.steps.push("Connect the battery pack before using the alarm.");
+  plan.operatingGuide.resetInstruction = "Reconnect the battery pack if it stops.";
+  plan.operatingGuide.successQuestion = "Did the battery power the alarm?";
+  plan.warnings.push("Keep a spare battery ready.");
+  plan.diagnosticTests[0] = {
+    ...plan.diagnosticTests[0],
+    name: "Battery check",
+    purpose: "Confirm the battery powers the alarm.",
+    userAction: "Connect the battery, then move your hand.",
+    expectedSerial: "BATTERY_OK",
+    failureTitle: "The battery did not power the alarm.",
+    recoveryAction: "Replace the battery, then retry.",
+  };
+  plan.diagnosticTests.push({
+    name: "Removed battery connection",
+    purpose: "Test the battery wire that should be removed.",
+    userAction: "Connect the battery.",
+    expectedSerial: "BATTERY_WIRE_OK",
+    failureTitle: "The battery wire failed.",
+    recoveryAction: "Replace the battery wire.",
+    connectionId: "battery-power",
+  });
+  plan.firmware.notes = "Power the board from the 9 V battery pack.";
+
+  await page.evaluate((nextPlan) => window.__MAKEABLE_TEST_API__.loadPlan(nextPlan), plan);
+  await expect(page.locator("#powerSourceTitle")).toHaveText("Powered by USB — no battery needed");
+  await expect(page.locator("#partsList")).not.toContainText("battery");
+  await expect(page.locator("#cableInventoryList")).not.toContainText("VIN");
+  await expect(page.locator("#diagnosticsList")).not.toContainText("spare battery");
+  await expect(page.locator("#operatingGuide")).not.toContainText("battery-powered");
+  await expect(page.locator("#operatingGuide")).not.toContainText("Connect the battery pack");
+  await expect(page.locator("#operatingGuide")).toContainText("no battery is needed");
+  await expect(page.locator("#manualSuccessQuestion")).not.toContainText("battery");
+  await expect(page.locator("#diagnosticsList")).not.toContainText("Connect the battery");
+  await expect(page.locator("#diagnosticsList")).not.toContainText("BATTERY_OK");
+  await expect(page.locator("#diagnosticsList")).not.toContainText("Removed battery connection");
+  await expect(page.locator("#beginAssemblyButton")).toHaveText("Start connection 1");
+});
+
+test("invented battery prose is removed even when no battery part was returned", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "One browser covers prose-only power cleanup");
+  const plan = beginnerPlan();
+  plan.projectTitle = "Battery motion light";
+  plan.summary = "Run this motion light from a spare battery.";
+  plan.operatingGuide.summary = "The battery powers a motion light.";
+  plan.operatingGuide.steps = ["Connect the battery, then wave your hand."];
+  plan.operatingGuide.successQuestion = "Did the battery-powered light react?";
+  plan.warnings = ["Buy a spare battery before continuing."];
+  plan.diagnosticTests[0].userAction = "Connect the battery before the motion check.";
+  plan.firmware.notes = "A battery must remain connected.";
+
+  await page.evaluate((nextPlan) => window.__MAKEABLE_TEST_API__.loadPlan(nextPlan), plan);
+  await expect(page.locator("#powerSourceTitle")).toHaveText("Powered by USB — no battery needed");
+  await expect(page.locator("#operatingGuide")).not.toContainText("Connect the battery");
+  await expect(page.locator("#manualSuccessQuestion")).not.toContainText("battery-powered");
+  await expect(page.locator("#diagnosticsList")).not.toContainText("Connect the battery");
+  await expect(page.locator("#diagnosticsList")).not.toContainText("Buy a spare battery");
+});
+
+test("power-only references preserve a real unfamiliar load and demand its actual supply path", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "One browser covers power evidence through host filtering");
+  const plan = beginnerPlan();
+  plan.parts.push(
+    {
+      id: "sounder",
+      name: "Industrial warning sounder",
+      type: "output",
+      role: "Main alert",
+      confidence: 0.95,
+      bbox: { x: 72, y: 16, width: 18, height: 22 },
+    },
+    {
+      id: "supply",
+      name: "12 V battery pack",
+      type: "external power supply",
+      role: "Powers the sounder",
+      confidence: 0.96,
+      bbox: { x: 72, y: 48, width: 18, height: 24 },
+    },
+  );
+  plan.powerPlan = {
+    mode: "external_supply_required",
+    reason: "high_current_load",
+    boardRail: "USB for ESP32; 12 V for sounder",
+    highCurrentLoads: [
+      {
+        partId: "sounder",
+        reason: "requires_separate_voltage",
+        requiredVoltageVolts: 12,
+        estimatedCurrentMilliamps: 300,
+        evidence: "The photographed sounder label says 12 V / 300 mA.",
+      },
+    ],
+    externalSupplies: [
+      {
+        partId: "supply",
+        outputVoltageVolts: 12,
+        maxCurrentMilliamps: 1000,
+        evidence: "The photographed battery-pack label says 12 V and 1 A.",
+      },
+    ],
+    externalPowerRequired: true,
+    explanation: "The sounder needs the photographed 12 V supply.",
+    keepUsbConnected: true,
+  };
+
+  await page.evaluate((nextPlan) => window.__MAKEABLE_TEST_API__.loadPlan(nextPlan), plan);
+  await expect(page.locator("#partsList")).toContainText("Industrial warning sounder");
+  await expect(page.locator("#partsList")).toContainText("12 V battery pack");
+  await expect(page.locator("#planIssues")).toContainText("power path");
+  await expect(page.locator("#beginAssemblyButton")).toHaveText("Wiring needs one more detail");
+  await expect(page.locator("#showCodeButton")).toBeEnabled();
+});
+
+test("an explicitly untethered idea still starts over USB without inventing a battery", async ({ page }) => {
+  const portablePlan = beginnerPlan();
+  portablePlan.parts.push({
+    id: "portable_supply",
+    name: "9 V battery pack",
+    type: "external power supply",
+    role: "Possible later portable power",
+    confidence: 0.91,
+    bbox: { x: 76, y: 12, width: 18, height: 24 },
+  });
+  portablePlan.powerPlan.externalSupplies = [
+    {
+      partId: "portable_supply",
+      outputVoltageVolts: 9,
+      maxCurrentMilliamps: 500,
+      evidence: "Visible 9 V battery pack.",
+    },
+  ];
+  portablePlan.wiringSteps.push({
+    ...portablePlan.wiringSteps[0],
+    order: 3,
+    accessibilityRank: 3,
+    connectionId: "portable-power",
+    action: "Connect the red wire from + to VIN.",
+    instruction: "Connect the red wire from + to VIN.",
+    fromPartId: "portable_supply",
+    toPartId: "board",
+    fromPrintedPin: "+",
+    toPrintedPin: "VIN",
+    wireColor: "red",
+    requiredPartIds: ["portable_supply", "board"],
+  });
+  await page.evaluate(
+    ({ plan, userRequest }) => window.__MAKEABLE_TEST_API__.loadPlan(plan, "", { userRequest }),
+    {
+      plan: portablePlan,
+      userRequest: "Make a portable motion alarm I can eventually use away from my desk.",
+    },
+  );
+  await expect(page.locator("#powerSourceTitle")).toHaveText("Build over USB — portable power can come later");
+  await expect(page.locator("#usbCableGuide")).toContainText("no battery is needed to continue");
+  await expect(page.locator("#usbPowerLoadNote")).toContainText("Choose portable power only when you are ready");
+  await expect(page.locator("#partsList")).not.toContainText("battery");
+  await expect(page.locator("#cableInventoryList")).not.toContainText("VIN");
+  await page.getByLabel("I have these parts and my wire ends match the guide.").check();
+  await expect(page.getByRole("button", { name: "Start connection 1" })).toBeEnabled();
 });
 
 test("an optional completion photo stays private until consent and publishes in one atomic project update", async ({ page }, testInfo) => {
