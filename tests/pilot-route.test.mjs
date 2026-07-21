@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-test("the current production app stays packaged as a self-contained pilot", async () => {
+test("the production landing and pilot stay packaged as self-contained experiences", async () => {
   await import(`../scripts/build-static.mjs?pilot-test=${Date.now()}`);
 
   const pilotHtml = await readFile(path.join(root, "dist", "pilot-app.html"), "utf8");
@@ -25,7 +25,9 @@ test("the current production app stays packaged as a self-contained pilot", asyn
   }
 
   const landingHtml = await readFile(path.join(root, "dist", "index.html"), "utf8");
-  assert.match(landingHtml, /Turn ideas into working physical products in hours\./);
+  assert.match(landingHtml, /Build the/);
+  assert.match(landingHtml, /thing in/);
+  assert.match(landingHtml, /your head\./);
   assert.match(landingHtml, /Makeable is an AI hardware prototyping studio/);
   assert.match(landingHtml, /<link rel="canonical" href="https:\/\/makeable\.build\/" \/>/);
   assert.match(landingHtml, /<script type="module" src="\/landing\.js"><\/script>/);

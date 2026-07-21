@@ -13,6 +13,9 @@ const WAITLIST_STATUS_TIMEOUT_MS = 4_000;
 setupWorkbenchComparison();
 setupBuildStory();
 setupMobileSignup();
+setupRecognition();
+setupConnect();
+setupTestPanel();
 
 document.querySelector("[data-current-year]")?.replaceChildren(
   document.createTextNode(String(new Date().getFullYear())),
@@ -158,6 +161,7 @@ async function handleGoogleCredential(response) {
     return;
   }
   googleSubmissionInFlight = true;
+  renderGoogleMessage("Adding you to the waitlist…", { disabled: true });
   setStatus("Adding you to the waitlist…", "info");
 
   try {
@@ -168,6 +172,8 @@ async function handleGoogleCredential(response) {
     }
     showWaitlistSuccess();
   } catch (error) {
+    googleButtonRendered = false;
+    renderGoogleButton();
     setStatus(
       error?.message || "Google sign-in could not be completed. Please try again.",
       "error",
@@ -222,41 +228,49 @@ function wait(milliseconds) {
 
 function showWaitlistSuccess({ returning = false } = {}) {
   const content = document.querySelector("[data-signup-content]");
-  if (!content) return;
-  content.innerHTML = `
-    <div class="signup-success">
-      <img src="/assets/icons/lucide/check.svg" alt="" />
-      <h2 id="signup-title" tabindex="-1">${
-        returning ? "You’re already on the list." : "You’re on the list."
-      }</h2>
-      <p>${
-        returning
-          ? "This browser remembers your confirmed waitlist signup."
-          : "We’ll send your Makeable early-access invitation before August 9."
-      }</p>
-      <button class="share-waitlist" type="button" data-share-waitlist>
-        Share Makeable
-      </button>
-      ${
-        returning
-          ? '<button class="forget-waitlist" type="button" data-forget-waitlist>Not you? Use another Google account</button>'
-          : ""
-      }
-    </div>
-  `;
-  setStatus(
-    returning
-      ? "Waitlist membership confirmed on this browser."
-      : "Waitlist signup complete.",
-    "success",
+  const note = content?.querySelector(".signup-note");
+  const dataUse = content?.querySelector(".signup-data-use");
+  if (!content || !googleSlot || !note || !dataUse) return;
+
+  renderGoogleMessage(
+    returning ? "You’re already on the list" : "You’re on the waitlist",
+    { confirmed: true, disabled: true },
   );
-  content
-    .querySelector("[data-share-waitlist]")
-    ?.addEventListener("click", shareWaitlist);
-  content
-    .querySelector("[data-forget-waitlist]")
-    ?.addEventListener("click", forgetWaitlistBrowser);
-  if (!returning) content.querySelector("h2")?.focus();
+  note.classList.add("is-confirmed");
+  note.replaceChildren(
+    document.createTextNode(
+      returning
+        ? "This browser remembers your confirmed waitlist signup."
+        : "Your confirmed waitlist signup is saved in this browser.",
+    ),
+  );
+  dataUse.classList.add("is-confirmed");
+  dataUse.replaceChildren(
+    document.createTextNode("Want to use a different Google account? "),
+  );
+  const forgetButton = document.createElement("button");
+  forgetButton.className = "forget-waitlist";
+  forgetButton.type = "button";
+  forgetButton.dataset.forgetWaitlist = "";
+  forgetButton.textContent = "Forget this browser";
+  dataUse.append(forgetButton, document.createTextNode("."));
+  forgetButton.addEventListener("click", forgetWaitlistBrowser);
+  setStatus("", "success");
+}
+
+function renderGoogleMessage(label, { confirmed = false, disabled = false } = {}) {
+  if (!googleSlot) return;
+  const button = document.createElement("button");
+  button.className = `google-fallback${confirmed ? " google-fallback--confirmed" : ""}`;
+  button.type = "button";
+  button.disabled = disabled;
+  button.setAttribute("aria-live", "polite");
+  if (confirmed) {
+    button.innerHTML = `<span class="google-confirmation-mark" aria-hidden="true">✓</span><span>${label}</span>`;
+  } else {
+    button.innerHTML = `<img src="/assets/icons/google-g.svg" alt="" width="34" height="34" aria-hidden="true" /><span>${label}</span>`;
+  }
+  googleSlot.replaceChildren(button);
 }
 
 function setStatus(message, tone) {
@@ -334,15 +348,159 @@ function setupBuildStory() {
 
 function setupWorkbenchComparison() {
   const comparison = document.querySelector("[data-comparison]");
-  const range = comparison?.querySelector("[data-comparison-range]");
-  if (!comparison || !range) return;
+  const toggle = comparison?.querySelector("[data-comparison-toggle]");
+  if (!comparison || !toggle) return;
 
-  const updateReveal = () => {
-    comparison.style.setProperty("--comparison-reveal", `${range.value}%`);
+  toggle.addEventListener("click", () => {
+    const visible = comparison.dataset.recognitionVisible === "true";
+    comparison.dataset.recognitionVisible = String(!visible);
+    toggle.setAttribute("aria-pressed", String(!visible));
+    toggle.setAttribute(
+      "aria-label",
+      visible ? "Show Makeable part labels" : "Hide Makeable part labels",
+    );
+  });
+}
+
+function setupRecognition() {
+  const chips = document.querySelector("[data-part-chips]");
+  const count = document.querySelector("[data-recognized-count]");
+  if (!chips || !count) return;
+
+  chips.addEventListener("click", (event) => {
+    const chip = event.target.closest("[data-part-chip]");
+    if (!chip || !chips.contains(chip)) return;
+    const allChips = [...chips.querySelectorAll("[data-part-chip]")];
+    const index = allChips.indexOf(chip);
+    const nextChip = allChips[index + 1] || allChips[index - 1];
+    chip.closest("li")?.remove();
+    const remaining = chips.querySelectorAll("[data-part-chip]").length;
+    count.textContent = remaining
+      ? `We found ${remaining} ${remaining === 1 ? "thing" : "things"}!`
+      : "No parts left to recognise.";
+    nextChip?.focus();
+  });
+}
+
+function setupConnect() {
+  const scene = document.querySelector(".story-scene--connect");
+  const scope = scene?.querySelector("[data-connection-scope]");
+  const scopeLabel = scope?.querySelector("[data-scope-label]");
+  const controls = [...(scene?.querySelectorAll("[data-wire]") || [])];
+  if (!scene || !scope || !scopeLabel || !controls.length) return;
+
+  const wireOrder = ["vcc", "gnd", "sig"];
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const details = {
+    vcc: "VCC → 5V",
+    gnd: "GND → GND",
+    sig: "SIG → A0",
+  };
+  let autoCycleTimer = null;
+
+  const selectWire = (wire) => {
+    scene.dataset.selectedWire = wire;
+    scope.dataset.wire = wire;
+    scopeLabel.textContent = details[wire];
+    controls.forEach((control) => {
+      const selected = control.dataset.wire === wire;
+      control.classList.toggle("is-selected", selected);
+      control.setAttribute("aria-pressed", String(selected));
+    });
   };
 
-  range.addEventListener("input", updateReveal);
-  updateReveal();
+  const stopAutoCycle = () => {
+    if (autoCycleTimer === null) return;
+    window.clearInterval(autoCycleTimer);
+    autoCycleTimer = null;
+  };
+
+  const startAutoCycle = () => {
+    if (reducedMotion.matches || document.hidden || autoCycleTimer !== null) return;
+    autoCycleTimer = window.setInterval(() => {
+      const currentIndex = wireOrder.indexOf(scene.dataset.selectedWire);
+      selectWire(wireOrder[(currentIndex + 1) % wireOrder.length]);
+    }, 1000);
+  };
+
+  const restartAutoCycle = () => {
+    stopAutoCycle();
+    startAutoCycle();
+  };
+
+  controls.forEach((control) => {
+    control.addEventListener("click", () => {
+      selectWire(control.dataset.wire);
+      restartAutoCycle();
+    });
+  });
+
+  scene.addEventListener("pointerenter", stopAutoCycle);
+  scene.addEventListener("pointerleave", startAutoCycle);
+  scene.addEventListener("focusin", stopAutoCycle);
+  scene.addEventListener("focusout", (event) => {
+    if (!scene.contains(event.relatedTarget)) startAutoCycle();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopAutoCycle();
+    else startAutoCycle();
+  });
+  reducedMotion.addEventListener?.("change", restartAutoCycle);
+
+  selectWire("vcc");
+  startAutoCycle();
+}
+
+function setupTestPanel() {
+  const panel = document.querySelector("[data-test-panel]");
+  const run = panel?.querySelector("[data-test-run]");
+  const progress = panel?.querySelector("#demo-progress");
+  const progressCopy = panel?.querySelector("[data-test-progress-copy]");
+  const checks = [...(panel?.querySelectorAll("[data-test-check]") || [])];
+  if (!panel || !run || !progress || !progressCopy || !checks.length) return;
+
+  let running = false;
+  const updateProgress = () => {
+    const completed = checks.filter((check) => check.classList.contains("is-complete")).length;
+    const percentage = Math.round((completed / checks.length) * 100);
+    progress.value = percentage;
+    progressCopy.textContent = `${percentage}%`;
+    run.textContent = completed === checks.length ? "Run checks again" : "Checking hardware…";
+  };
+  const setComplete = (check, complete) => {
+    check.classList.toggle("is-complete", complete);
+    check.setAttribute("aria-pressed", String(complete));
+    const result = check.querySelector("strong");
+    if (result) result.textContent = complete ? "OK" : "…";
+  };
+  checks.forEach((check) => {
+    check.addEventListener("click", () => {
+      if (running) return;
+      setComplete(check, !check.classList.contains("is-complete"));
+      updateProgress();
+    });
+  });
+  run.addEventListener("click", () => {
+    if (running) return;
+    running = true;
+    run.disabled = true;
+    checks.forEach((check) => setComplete(check, false));
+    updateProgress();
+    let index = 0;
+    const completeNext = () => {
+      if (index >= checks.length) {
+        running = false;
+        run.disabled = false;
+        updateProgress();
+        return;
+      }
+      setComplete(checks[index], true);
+      index += 1;
+      updateProgress();
+      window.setTimeout(completeNext, 420);
+    };
+    window.setTimeout(completeNext, 280);
+  });
 }
 
 function setupMobileSignup() {

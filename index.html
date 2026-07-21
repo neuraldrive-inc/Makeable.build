@@ -4,14 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f7f1e8" />
-    <title>Turn ideas into working physical products in hours. · Makeable</title>
+    <title>Build the thing in your head. · Makeable</title>
     <meta
       name="description"
       content="Makeable is an AI hardware prototyping studio that turns the parts on your desk into wiring plans, working firmware, and guided tests."
     />
     <meta
       property="og:title"
-      content="Turn ideas into working physical products in hours. · Makeable"
+      content="Build the thing in your head. · Makeable"
     />
     <meta
       property="og:description"
@@ -51,10 +51,10 @@
           <div class="hero-title-block">
             <div class="hero-heading-wrap">
               <h1 id="hero-title">
-                <span>Turn ideas into</span>
-                <span>working physical</span>
+                <span>Build the</span>
+                <span>thing in</span>
                 <span class="hero-underlined">
-                  products in hours.
+                  your head.
                   <span class="hero-underline-art" aria-hidden="true"></span>
                 </span>
               </h1>
@@ -111,7 +111,7 @@
                   One Google tap. You’re on the list.
                   <span class="hand-underline hand-underline--note" aria-hidden="true"></span>
                   <span class="signup-note-rays" aria-hidden="true">
-                    <i></i><i></i><i></i>
+                    <i></i><i></i>
                   </span>
                 </p>
                 <p class="signup-data-use">
@@ -147,70 +147,19 @@
           </p>
         </div>
 
-        <div
-          class="comparison paper-card"
-          data-comparison
-          style="--comparison-reveal: 30%"
-        >
-          <div class="comparison-label comparison-label--before">Your desk</div>
-          <div class="comparison-label comparison-label--after">Makeable sees</div>
-          <div class="comparison-media">
-            <div class="comparison-photo-frame">
-              <img
-                class="hero-photo comparison-photo"
-                data-comparison-photo="before"
-                src="/assets/landing/desk-parts-v2.png"
-                alt="An OLED display, ESP32 DevKit, PIR motion sensor, DHT22 sensor, and logic level converter on a desk"
-                width="1376"
-                height="768"
-                fetchpriority="high"
-                decoding="async"
-              />
-            </div>
-            <div
-              class="comparison-recognition-layer"
-              data-comparison-recognition-layer
-              aria-hidden="true"
-            >
-              <div class="comparison-photo-frame">
-                <img
-                  class="hero-photo comparison-photo"
-                  data-comparison-photo="after"
-                  src="/assets/landing/desk-parts-labelled-v3.png"
-                  alt=""
-                  width="1024"
-                  height="572"
-                  decoding="async"
-                />
-              </div>
-            </div>
-            <span class="comparison-divider" aria-hidden="true">
-              <span>
-                <img
-                  src="/assets/icons/lucide/arrow-left.svg"
-                  alt=""
-                  width="18"
-                  height="18"
-                />
-                <img
-                  src="/assets/icons/lucide/arrow-right.svg"
-                  alt=""
-                  width="18"
-                  height="18"
-                />
-              </span>
-            </span>
-            <input
-              class="comparison-range"
-              type="range"
-              min="0"
-              max="100"
-              value="30"
-              step="0.1"
-              aria-label="Reveal Makeable part recognition"
-              data-comparison-range
-            />
-          </div>
+        <div class="comparison paper-card" data-comparison data-recognition-visible="true">
+          <section class="desk-half desk-half--before" aria-label="Your desk: OLED display, PIR sensor, and ESP32 DevKit">
+            <img class="desk-reference-photo" src="/assets/landing/reference-your-desk.jpg" alt="" />
+          </section>
+          <section class="desk-half desk-half--after" aria-label="Makeable sees: OLED display, PIR motion sensor, and ESP32 DevKit">
+            <img class="desk-reference-photo desk-reference-photo--unlabelled" src="/assets/landing/reference-your-desk.jpg" alt="" />
+            <img class="desk-reference-photo desk-reference-photo--annotated" src="/assets/landing/reference-makeable-sees.jpg" alt="" />
+          </section>
+          <span class="comparison-divider" aria-hidden="true"></span>
+          <button class="comparison-toggle" type="button" data-comparison-toggle aria-pressed="true" aria-label="Hide Makeable part labels">
+            <img src="/assets/icons/lucide/arrow-left.svg" alt="" width="18" height="18" />
+            <img src="/assets/icons/lucide/arrow-right.svg" alt="" width="18" height="18" />
+          </button>
         </div>
         </section>
 
@@ -231,14 +180,14 @@
                 <h2>Recognize</h2>
                 <span class="story-doodle-arrow" aria-hidden="true"></span>
               </div>
-              <p class="story-caption">We found 6 things!</p>
-              <ul class="part-chips" aria-label="Recognized parts">
-                <li><span class="part-chip-number">1</span><span class="part-chip-name">Breadboard</span></li>
-                <li><span class="part-chip-number">2</span><span class="part-chip-name">Arduino Uno</span></li>
-                <li><span class="part-chip-number">3</span><span class="part-chip-name">DC Motor</span></li>
-                <li><span class="part-chip-number">4</span><span class="part-chip-name">Red LED</span></li>
-                <li><span class="part-chip-number">5</span><span class="part-chip-name">Resistor</span></li>
-                <li><span class="part-chip-number">6</span><span class="part-chip-name">Jumper Wires</span></li>
+              <p class="story-caption" data-recognized-count>We found 6 things!</p>
+              <ul class="part-chips" aria-label="Recognized parts" data-part-chips>
+                <li><button type="button" class="part-chip" data-part-chip data-part-name="Breadboard" aria-label="Remove Breadboard from recognised parts"><span class="part-chip-number">1</span><span class="part-chip-name">Breadboard</span><span class="part-chip-remove" aria-hidden="true">×</span></button></li>
+                <li><button type="button" class="part-chip" data-part-chip data-part-name="Arduino Uno" aria-label="Remove Arduino Uno from recognised parts"><span class="part-chip-number">2</span><span class="part-chip-name">Arduino Uno</span><span class="part-chip-remove" aria-hidden="true">×</span></button></li>
+                <li><button type="button" class="part-chip" data-part-chip data-part-name="DC Motor" aria-label="Remove DC Motor from recognised parts"><span class="part-chip-number">3</span><span class="part-chip-name">DC Motor</span><span class="part-chip-remove" aria-hidden="true">×</span></button></li>
+                <li><button type="button" class="part-chip" data-part-chip data-part-name="Red LED" aria-label="Remove Red LED from recognised parts"><span class="part-chip-number">4</span><span class="part-chip-name">Red LED</span><span class="part-chip-remove" aria-hidden="true">×</span></button></li>
+                <li><button type="button" class="part-chip" data-part-chip data-part-name="Resistor" aria-label="Remove Resistor from recognised parts"><span class="part-chip-number">5</span><span class="part-chip-name">Resistor</span><span class="part-chip-remove" aria-hidden="true">×</span></button></li>
+                <li><button type="button" class="part-chip" data-part-chip data-part-name="Jumper Wires" aria-label="Remove Jumper Wires from recognised parts"><span class="part-chip-number">6</span><span class="part-chip-name">Jumper Wires</span><span class="part-chip-remove" aria-hidden="true">×</span></button></li>
               </ul>
             </div>
             <figure class="story-visual" data-story-frame="recognize">
@@ -267,9 +216,9 @@
               </div>
               <p class="story-caption">We’ll wire it up.</p>
               <ul class="wire-chips" aria-label="Example wiring">
-                <li>VCC → 5V</li>
-                <li>GND → GND</li>
-                <li>SIG → A0</li>
+                <li><button type="button" class="wire-chip is-selected" data-wire="vcc" aria-pressed="true">VCC → 5V</button></li>
+                <li><button type="button" class="wire-chip" data-wire="gnd" aria-pressed="false">GND → GND</button></li>
+                <li><button type="button" class="wire-chip" data-wire="sig" aria-pressed="false">SIG → A0</button></li>
               </ul>
             </div>
             <figure class="story-visual" data-story-frame="connect">
@@ -283,6 +232,10 @@
                 decoding="async"
               />
               <span class="story-tape story-tape--green grid-tape grid-tape--green" aria-hidden="true"></span>
+              <span class="wire-trace wire-trace--vcc" data-wire-trace="vcc" aria-hidden="true"></span>
+              <span class="wire-trace wire-trace--gnd" data-wire-trace="gnd" aria-hidden="true"></span>
+              <span class="wire-trace wire-trace--sig" data-wire-trace="sig" aria-hidden="true"></span>
+              <span class="connection-scope" data-connection-scope data-wire="vcc" aria-hidden="true"><span data-scope-label>VCC → 5V</span></span>
             </figure>
           </article>
 
@@ -310,41 +263,41 @@
                   decoding="async"
                 />
               </div>
-              <div class="demo-status" aria-label="Example hardware checks">
+              <div class="demo-status" aria-label="Example hardware checks" data-test-panel>
                 <span class="status-tape grid-tape grid-tape--yellow" aria-hidden="true"></span>
-                <ul class="demo-status-list">
-                  <li class="demo-status-row">
+                <ul class="demo-status-list" data-test-list>
+                  <li><button class="demo-status-row is-complete" type="button" data-test-check="Board responds" aria-pressed="true">
                     <span class="demo-check" aria-hidden="true"></span>
                     <span>Board responds</span>
                     <strong>OK</strong>
-                  </li>
-                  <li class="demo-status-row">
+                  </button></li>
+                  <li><button class="demo-status-row is-complete" type="button" data-test-check="Sensor reads" aria-pressed="true">
                     <span class="demo-check" aria-hidden="true"></span>
                     <span>Sensor reads</span>
                     <strong>OK</strong>
-                  </li>
-                  <li class="demo-status-row">
+                  </button></li>
+                  <li><button class="demo-status-row is-complete" type="button" data-test-check="Pump spins" aria-pressed="true">
                     <span class="demo-check" aria-hidden="true"></span>
                     <span>Pump spins</span>
                     <strong>OK</strong>
-                  </li>
-                  <li class="demo-status-row">
+                  </button></li>
+                  <li><button class="demo-status-row is-complete" type="button" data-test-check="Power stays steady" aria-pressed="true">
                     <span class="demo-check" aria-hidden="true"></span>
                     <span>Power stays steady</span>
                     <strong>OK</strong>
-                  </li>
+                  </button></li>
                 </ul>
-                <label class="demo-progress-label" for="demo-progress">Checking your pump…</label>
+                <button class="demo-progress-label" type="button" data-test-run>Run checks again</button>
                 <div class="demo-progress-row">
                   <progress
                     class="demo-progress"
                     id="demo-progress"
-                    value="87"
+                    value="100"
                     max="100"
                   >
-                    87%
+                    100%
                   </progress>
-                  <strong>87%</strong>
+                  <strong data-test-progress-copy>100%</strong>
                 </div>
               </div>
             </figure>
