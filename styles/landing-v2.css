@@ -896,7 +896,7 @@ figure {
 }
 
 .desk-reveal {
-  height: min(38.48svh, calc((100vw - var(--landing-rail-width)) * 0.4246));
+  height: min(38.48svh, calc((100vw - var(--landing-rail-width)) * 0.5581));
 }
 
 .desk-reveal-heading {
@@ -2222,7 +2222,7 @@ figure {
 
   .desk-reveal {
     height: auto;
-    aspect-ratio: 4 / 3;
+    aspect-ratio: 1376 / 768;
     margin: 0 20px;
     width: calc(100% - 40px);
   }
