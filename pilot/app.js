@@ -2363,6 +2363,7 @@ async function disconnectSerial() {
   els.disconnectSerialButton.disabled = true;
   els.sendSerialButton.disabled = true;
   appendSerial("Makeable: I stopped listening to the board.\n");
+  setStatus(els.logEvaluation, "Listening paused. The board can stay connected over USB.", "warn");
 }
 
 async function sendSerialCommand() {
@@ -2429,11 +2430,17 @@ function renderCodeExplanation() {
     ? `${behavior} Latest adjustment: ${compactSentence(state.lastBehaviorChange)}`
     : behavior;
 
-  const assignments = (spec.pinAssignments || []).slice(0, 5).map((assignment) => {
-    const label = assignment.label || assignment.purpose || "A connected part";
+  const pinAssignments = spec.pinAssignments || [];
+  const assignments = pinAssignments.slice(0, 3).map((assignment) => {
+    const rawLabel = friendlyWiringText(assignment.label || assignment.purpose || "A connected part");
+    const label = rawLabel.replace(/\s*\(?(?:on\s+)?pin\s+\d{1,2}\)?\s*/gi, " ").replace(/\s+/g, " ").trim();
     const pin = cleanPinLabel(`pin ${assignment.gpio}`, `${label} ${assignment.purpose || ""}`);
-    return `${label} on ${pin}`;
+    return `${label || "Connected part"} on ${pin}`;
   });
+  if (pinAssignments.length > assignments.length) {
+    const remaining = pinAssignments.length - assignments.length;
+    assignments.push(`${remaining} ${remaining === 1 ? "other connection" : "other connections"}`);
+  }
   const messages = (spec.serialProtocol || []).filter(Boolean).slice(0, 3);
   const functions = [
     {
@@ -2444,7 +2451,7 @@ function renderCodeExplanation() {
     },
     {
       name: "loop()",
-      description: `Keeps running and ${lowercaseFirst(behavior)}`,
+      description: `Repeats the project behavior: ${lowercaseFirst(compactSentence(behavior, 155))}`,
     },
     {
       name: "Board messages",

@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23ef2d83'/%3E%3Cpath d='M18 43V21l14 14 14-14v22' stroke='white' stroke-width='7' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=makeable-workbench-20260721-guided-test-flow" />
+    <link rel="stylesheet" href="./styles.css?v=makeable-workbench-20260721-test-workspace" />
     <script src="/config.local.js"></script>
   </head>
   <body>
@@ -179,29 +179,55 @@
         <header class="stage-heading">
           <div><h1>Let’s check the<br /><span>hardware.</span></h1><p>I’ll listen to the board and explain what its code is doing.</p></div>
         </header>
-        <div class="verify-command-grid paper-sheet tape-blue">
-          <div class="serial-panel">
-            <div class="op-header"><span>1</span><div><h2>Board messages</h2><p>Keep everything plugged in while I listen.</p></div></div>
-            <div class="inline-form"><label>Listening speed<input id="baudRateInput" type="number" min="9600" step="1" value="115200" /></label><button class="torn-button torn-button--mint" id="connectSerialButton" type="button">Listen to board</button><button class="paper-button" id="disconnectSerialButton" type="button" disabled>Stop</button></div>
-            <pre class="terminal" id="serialLog">Board messages will appear here after you connect.</pre>
-            <div class="inline-form"><input id="serialCommandInput" type="text" placeholder="Optional message to the board" /><button class="paper-button" id="sendSerialButton" type="button" disabled>Send</button><button class="paper-button" id="evaluateLogsButton" type="button">Check messages</button></div>
-            <div class="status-strip" id="logEvaluation">I’ll help read these messages once they appear.</div>
+        <div class="verify-flow">
+          <div class="verify-primary-grid">
+            <section class="test-card serial-panel tape-blue">
+              <div class="op-header"><span>1</span><div><h2>Board messages</h2><p>Connect once, then watch what the ESP32 is saying.</p></div></div>
+              <div class="listener-toolbar">
+                <label class="compact-field" for="baudRateInput"><span>Serial speed</span><input id="baudRateInput" type="number" min="9600" step="1" value="115200" /></label>
+                <div class="listener-actions">
+                  <button class="test-action test-action--primary" id="connectSerialButton" type="button">Start listening</button>
+                  <button class="test-action test-action--secondary" id="disconnectSerialButton" type="button" disabled>Stop listening</button>
+                </div>
+              </div>
+              <div class="test-status"><div class="status-strip" id="logEvaluation">Ready to listen. Keep the board connected with USB.</div></div>
+              <div class="terminal-shell">
+                <div class="terminal-heading"><span>Live board output</span><span><i></i> USB serial</span></div>
+                <pre class="terminal" id="serialLog">Board messages will appear here after you connect.</pre>
+              </div>
+              <div class="command-card">
+                <label for="serialCommandInput">Send a command <small>optional</small></label>
+                <div class="command-composer">
+                  <input id="serialCommandInput" type="text" placeholder="Type a message for the board" />
+                  <button class="test-action test-action--accent" id="sendSerialButton" type="button" disabled>Send message</button>
+                  <button class="test-action test-action--secondary" id="evaluateLogsButton" type="button">Review messages</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="test-card behavior-panel">
+              <div class="op-header"><span>2</span><div><h2>Understand the code</h2><p>See the board’s behavior without digging through source files.</p></div></div>
+              <div class="behavior-overview">
+                <span>Project behavior</span>
+                <p id="behaviorSummary">Create your guide first, then I’ll explain the behavior here.</p>
+              </div>
+              <ul class="code-function-list" id="codeFunctionList"></ul>
+            </section>
           </div>
-          <div class="behavior-panel">
-            <div class="op-header"><span>2</span><div><h2>What this code does</h2><p>A plain-language map of the software running on your board.</p></div></div>
-            <div class="behavior-overview">
-              <span>Project behavior</span>
-              <p id="behaviorSummary">Create your guide first, then I’ll explain the behavior here.</p>
+
+          <form class="test-card behavior-change-form" id="behaviorChangeForm">
+            <div class="tune-intro">
+              <div class="op-header"><span>3</span><div><h2>Tune the behavior</h2><p>Ask for one small adjustment. I’ll update, verify, and reload the code.</p></div></div>
             </div>
-            <ul class="code-function-list" id="codeFunctionList"></ul>
-            <form class="behavior-change-form" id="behaviorChangeForm">
-              <label for="behaviorChangeInput">Want to change something small?</label>
-              <p>Describe the adjustment. I’ll update the code, reload the board, and bring you back here.</p>
+            <div class="tune-composer">
+              <label class="sr-only" for="behaviorChangeInput">Describe the behavior change</label>
               <textarea id="behaviorChangeInput" rows="3" placeholder="For example: keep the message on screen for 5 seconds."></textarea>
-              <button class="torn-button torn-button--pink" id="applyBehaviorChangeButton" type="submit">Update &amp; reload board</button>
-              <div class="status-strip" id="behaviorChangeStatus">Your current build stays unchanged until you submit an update.</div>
-            </form>
-          </div>
+            </div>
+            <div class="tune-actions">
+              <button class="test-action test-action--accent" id="applyBehaviorChangeButton" type="submit">Update code &amp; reload</button>
+              <div class="status-strip" id="behaviorChangeStatus">Nothing changes until you submit an update.</div>
+            </div>
+          </form>
         </div>
       </section>
 
@@ -226,6 +252,6 @@
 
     <aside class="orientation-card" aria-label="Landscape mode recommended"><img src="images/makeable/icon-code.svg" alt="" /><h2>Turn sideways to build.</h2><p>Makeable works like a wide workbench, with your photo and next move side by side.</p></aside>
 
-    <script type="module" src="./app.js?v=makeable-workbench-20260721-guided-test-flow"></script>
+    <script type="module" src="./app.js?v=makeable-workbench-20260721-test-workspace"></script>
   </body>
 </html>

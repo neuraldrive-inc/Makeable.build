@@ -85,7 +85,15 @@ test("the pilot guides users from flashing into a camera-free test and behavior 
   assert.match(pilotHtml, /id="behaviorSummary"/);
   assert.match(pilotHtml, /id="codeFunctionList"/);
   assert.match(pilotHtml, /id="behaviorChangeForm"/);
-  assert.match(pilotHtml, /Update &amp; reload board/);
+  assert.match(pilotHtml, /class="verify-primary-grid"/);
+  assert.match(pilotHtml, /class="listener-toolbar"/);
+  assert.match(pilotHtml, /class="command-card"/);
+  assert.match(pilotHtml, />Start listening</);
+  assert.match(pilotHtml, />Stop listening</);
+  assert.match(pilotHtml, />Send message</);
+  assert.match(pilotHtml, />Review messages</);
+  assert.match(pilotHtml, /Update code &amp; reload/);
+  assert.doesNotMatch(pilotHtml, /class="verify-command-grid/);
   assert.doesNotMatch(pilotHtml, /id="cameraPreview"|id="startCameraButton"|id="captureEvidenceButton"/);
 
   assert.match(pilotScript, /function startFlashSuccessTransition\(\)/);
@@ -95,7 +103,10 @@ test("the pilot guides users from flashing into a camera-free test and behavior 
   assert.match(pilotScript, /connectSerial\(\{ automatic: true \}\)/);
   assert.doesNotMatch(pilotScript, /function startCamera|function captureEvidence|function verifyBehavior|facingMode: "environment"/);
 
-  assert.match(pilotStyles, /\.terminal\s*\{[\s\S]*?height: 205px/);
+  assert.match(pilotStyles, /\.terminal\s*\{[\s\S]*?height: 218px/);
+  assert.match(pilotStyles, /\.test-action/);
+  assert.match(pilotStyles, /\.terminal-shell/);
+  assert.match(pilotStyles, /\.command-composer/);
   assert.match(pilotStyles, /\.behavior-change-form/);
   assert.doesNotMatch(pilotStyles, /\.camera-frame|#cameraPreview|\.camera-placeholder/);
 });
