@@ -927,7 +927,7 @@ figure {
   min-width: 0;
   gap: 6px;
   grid-column: 2;
-  align-content: start;
+  grid-template-rows: auto 1fr;
   background: #fffdf8;
 }
 
@@ -1401,12 +1401,15 @@ figure {
 }
 
 .build-story {
+  display: grid;
   padding: 0 0 18px;
   background: #fffefa;
 }
 
 .story-stage {
   display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: repeat(3, minmax(auto, 1fr));
   gap: 11px;
   background: #fffdf8;
 }
@@ -1415,6 +1418,7 @@ figure {
   --scene-bg: var(--bench-surface);
   position: relative;
   display: grid;
+  grid-template-columns: 40% 60%;
   min-height: 0;
   padding: 0;
   align-items: stretch;
@@ -1454,20 +1458,23 @@ figure {
 }
 
 .story-scene--recognize {
-  height: clamp(150px, calc((100vw - var(--landing-rail-width)) * 0.2026), 240px);
-  grid-template-columns: 45% 55%;
-  --scene-bg: #f0e9e3;
+  min-height: clamp(150px, calc((100vw - var(--landing-rail-width)) * 0.2026), 240px);
+  --scene-bg: #e9e2d7;
+}
+
+/* Recognize has the most copy (6 chips); let it grow to contain them
+   and keep the chips clear of the torn bottom edge. */
+.story-scene--recognize .story-copy {
+  padding-bottom: 16px;
 }
 
 .story-scene--connect {
-  height: clamp(140px, calc((100vw - var(--landing-rail-width)) * 0.1832), 216px);
-  grid-template-columns: 34.5% 65.5%;
+  min-height: clamp(140px, calc((100vw - var(--landing-rail-width)) * 0.1832), 216px);
   --scene-bg: #e6e4ee;
 }
 
 .story-scene--test {
-  height: clamp(180px, calc((100vw - var(--landing-rail-width)) * 0.2565), 300px);
-  grid-template-columns: 33.2% 66.8%;
+  min-height: clamp(180px, calc((100vw - var(--landing-rail-width)) * 0.2565), 300px);
   --scene-bg: #e6ebe7;
 }
 
@@ -1482,7 +1489,7 @@ figure {
   --banner-color: var(--bench-pink);
   position: relative;
   display: flex;
-  width: 76%;
+  width: 100%;
   height: 76px;
   padding: 8px 20px 8px 35px;
   align-items: center;
