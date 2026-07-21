@@ -1,4 +1,5 @@
 import { selectBoardProfile, USB_SERIAL_FILTERS } from "./lib/board-profiles.mjs";
+import { cleanPinLabel, curvedArrowGeometry, friendlyWiringText } from "./lib/wiring-annotations.mjs";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -1008,15 +1009,31 @@ function drawLabelLeader(ctx, label, box, color) {
   if (Math.abs(labelCenter.x - boxCenter.x) < 28 && Math.abs(labelCenter.y - boxCenter.y) < 28) return;
   const start = pointOnRectEdge(label, boxCenter);
   const end = pointOnRectEdge(box, labelCenter);
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const distance = Math.max(1, Math.hypot(dx, dy));
+  const bend = Math.min(18, distance * 0.18);
+  const bendDirection = labelCenter.x <= boxCenter.x ? -1 : 1;
+  const control = {
+    x: (start.x + end.x) / 2 + (-dy / distance) * bend * bendDirection,
+    y: (start.y + end.y) / 2 + (dx / distance) * bend * bendDirection,
+  };
+  const drawLeader = () => {
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.quadraticCurveTo(control.x, control.y, end.x, end.y);
+    ctx.stroke();
+  };
 
   ctx.save();
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.86)";
+  ctx.lineWidth = 6;
+  drawLeader();
   ctx.strokeStyle = color;
-  ctx.globalAlpha = 0.74;
+  ctx.globalAlpha = 0.82;
   ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(start.x, start.y);
-  ctx.lineTo(end.x, end.y);
-  ctx.stroke();
+  drawLeader();
   ctx.restore();
 }
 
@@ -1097,7 +1114,7 @@ async function analyzeHardware() {
         {
           role: "system",
           content:
-            "You are Makeable, an expert hardware build agent for beginners. Identify only the actual visible parts needed for the user's stated project, produce tight normalized bounding boxes for those required parts, make conservative ESP32 wiring choices, flag uncertainty, avoid unsafe pins, and output only schema-valid JSON. Ignore visible parts that are unrelated to the requested build. Never use canned/demo component names or boxes. Do not generate source code in this step.",
+            "You are Makeable, an expert hardware build agent for beginners. Identify only the actual visible parts needed for the user's stated project, produce tight normalized bounding boxes for those required parts, make conservative ESP32 wiring choices, flag uncertainty, avoid unsafe pins, and output only schema-valid JSON. Ignore visible parts that are unrelated to the requested build. Never use canned/demo component names or boxes. In user-facing wiring copy, say pin 22 or D22 / 22 instead of GPIO22, and preserve useful signal names such as SCL or SDA. Do not generate source code in this step.",
         },
         {
           role: "user",
@@ -1189,6 +1206,7 @@ function buildAnalysisPrompt(idea) {
     "If a part is ambiguous, name it as 'possible ...' and reduce confidence rather than guessing.",
     "Prefer ESP32 pins that are usually safe for beginner projects.",
     "For every wiring step, include fromPartId, toPartId, from, to, pin, and a beginner-friendly wireColor.",
+    "In titles, instructions, and checks, call ESP32 pins 'pin 22' or 'D22 / 22', not 'GPIO22'. Keep signal roles such as SCL, SDA, CLK, RX, and TX visible.",
     "Do not claim certainty for ambiguous modules; put uncertainty in warnings.",
     "Do not generate source code in this vision/planning step.",
     "Instead, return a compact firmwareSpec with chosen pins, libraries, serial protocol markers, and behavior.",
@@ -1636,15 +1654,15 @@ function filterProjectParts(parts, wiringSteps, firmwareSpec, summary) {
 function normalizeWiringStep(step, index) {
   return {
     order: Number.isFinite(step.order) ? step.order : index + 1,
-    title: step.title || `Connection ${index + 1}`,
-    instruction: step.instruction || "",
-    from: step.from || "",
-    to: step.to || "",
+    title: friendlyWiringText(step.title || `Connection ${index + 1}`),
+    instruction: friendlyWiringText(step.instruction || ""),
+    from: friendlyWiringText(step.from || ""),
+    to: friendlyWiringText(step.to || ""),
     fromPartId: step.fromPartId || "",
     toPartId: step.toPartId || "",
     pin: step.pin || "",
     wireColor: step.wireColor || "",
-    check: step.check || "",
+    check: friendlyWiringText(step.check || ""),
   };
 }
 
@@ -1654,7 +1672,7 @@ function validatePlan(plan) {
   for (const step of plan.wiringSteps || []) {
     const pin = String(step.pin || "").toUpperCase().replace(/\s+/g, "");
     if (avoidPins.has(pin)) {
-      warnings.push(`Review ${step.pin}: it can affect ESP32 boot behavior on some boards.`);
+      warnings.push(`Review ${friendlyWiringText(step.pin)}: it can affect ESP32 boot behavior on some boards.`);
     }
   }
   if (!plan.parts.some((part) => /esp32/i.test(part.name))) {
@@ -1852,6 +1870,7 @@ function drawVisualStep(canvas, step, index) {
   const toPart = findStepPart(step.toPartId || step.to, step, parts, "to");
   const color = stepColor(step.wireColor, index);
   const placedBadges = [];
+  let connector = null;
 
   ctx.save();
   ctx.fillStyle = "rgba(99, 102, 241, 0.08)";
@@ -1868,7 +1887,14 @@ function drawVisualStep(canvas, step, index) {
     const toCenter = rectCenter(toBox);
     const fromPoint = pointOnRectEdge(fromBox, toCenter);
     const toPoint = pointOnRectEdge(toBox, fromCenter);
-    drawArrow(ctx, fromPoint.x, fromPoint.y, toPoint.x, toPoint.y, color);
+    connector = drawArrow(ctx, fromPoint.x, fromPoint.y, toPoint.x, toPoint.y, color, {
+      bounds: fit,
+      fromOutward: { x: fromPoint.x - fromCenter.x, y: fromPoint.y - fromCenter.y },
+      toOutward: { x: toPoint.x - toCenter.x, y: toPoint.y - toCenter.y },
+      obstacles: parts
+        .filter((part) => part !== fromPart && part !== toPart)
+        .map((part) => partBox(part, fit)),
+    });
   }
 
   if (fromPart) drawStepPartLabel(ctx, fit, fromPart, "#4f46e5", placedBadges);
@@ -1877,10 +1903,14 @@ function drawVisualStep(canvas, step, index) {
   if (fromPart && toPart && fromPart !== toPart) {
     const fromCenter = partCenter(fromPart, fit);
     const toCenter = partCenter(toPart, fit);
+    const labelPoint = connector?.labelPoint || {
+      x: (fromCenter.x + toCenter.x) / 2,
+      y: (fromCenter.y + toCenter.y) / 2,
+    };
     drawPlacedStepBadge(
       ctx,
-      cleanPinLabel(step.pin || "wire"),
-      anchorBox((fromCenter.x + toCenter.x) / 2, (fromCenter.y + toCenter.y) / 2),
+      cleanPinLabel(step.pin || "wire", `${step.instruction || ""} ${step.from || ""} ${step.to || ""}`),
+      anchorBox(labelPoint.x, labelPoint.y),
       fit,
       color,
       placedBadges,
@@ -1982,11 +2012,16 @@ function partCenter(part, fit) {
 function drawStepPartFrame(ctx, fit, part, color) {
   const box = partBox(part, fit);
   ctx.save();
+  roundedRectPath(ctx, box, 12);
+  ctx.fillStyle = "rgba(99, 102, 241, 0.1)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.88)";
+  ctx.lineWidth = 8;
+  ctx.stroke();
+  roundedRectPath(ctx, box, 12);
   ctx.strokeStyle = color;
-  ctx.lineWidth = 4;
-  ctx.strokeRect(box.x, box.y, box.width, box.height);
-  ctx.fillStyle = "rgba(99, 102, 241, 0.12)";
-  ctx.fillRect(box.x, box.y, box.width, box.height);
+  ctx.lineWidth = 3.5;
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -1995,25 +2030,54 @@ function drawStepPartLabel(ctx, fit, part, color, placedBadges) {
   drawPlacedStepBadge(ctx, shortPartLabel(part.name), box, fit, color, placedBadges);
 }
 
-function drawArrow(ctx, fromX, fromY, toX, toY, color) {
-  const angle = Math.atan2(toY - fromY, toX - fromX);
-  const headLength = 16;
+function drawArrow(ctx, fromX, fromY, toX, toY, color, options = {}) {
+  const curve = curvedArrowGeometry({ x: fromX, y: fromY }, { x: toX, y: toY }, options);
+  const angle = Math.atan2(toY - curve.control2.y, toX - curve.control2.x);
+  const headLength = 18;
+  const drawCurve = () => {
+    ctx.beginPath();
+    ctx.moveTo(curve.start.x, curve.start.y);
+    ctx.bezierCurveTo(
+      curve.control1.x,
+      curve.control1.y,
+      curve.control2.x,
+      curve.control2.y,
+      curve.end.x,
+      curve.end.y,
+    );
+    ctx.stroke();
+  };
+
   ctx.save();
-  ctx.strokeStyle = color;
-  ctx.fillStyle = color;
-  ctx.lineWidth = 5;
   ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+  ctx.lineWidth = 12;
+  drawCurve();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 5;
+  drawCurve();
+
   ctx.beginPath();
-  ctx.moveTo(fromX, fromY);
-  ctx.lineTo(toX, toY);
+  ctx.arc(fromX, fromY, 6, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
   ctx.stroke();
+
   ctx.beginPath();
   ctx.moveTo(toX, toY);
   ctx.lineTo(toX - headLength * Math.cos(angle - Math.PI / 6), toY - headLength * Math.sin(angle - Math.PI / 6));
   ctx.lineTo(toX - headLength * Math.cos(angle + Math.PI / 6), toY - headLength * Math.sin(angle + Math.PI / 6));
   ctx.closePath();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+  ctx.lineWidth = 7;
+  ctx.stroke();
+  ctx.fillStyle = color;
   ctx.fill();
   ctx.restore();
+  return curve;
 }
 
 function anchorBox(centerX, centerY) {
@@ -2025,14 +2089,24 @@ function anchorBox(centerX, centerY) {
   };
 }
 
-function cleanPinLabel(value) {
-  const text = String(value || "wire").trim();
-  const upper = text.toUpperCase();
-  if (/\bGND\b|GROUND/.test(upper)) return "GND";
-  if (/\b3V3\b|\b3\.3V\b|\bVCC\b|\bVIN\b|\b5V\b/.test(upper)) return upper.match(/3V3|3\.3V|VCC|VIN|5V/)?.[0] || "VCC";
-  const gpio = upper.match(/GPIO\s*([0-9]+)/) || upper.match(/\bD?([0-9]{1,2})\b/);
-  if (gpio) return `GPIO ${gpio[1]}`;
-  return text.replace(/\s+/g, " ").slice(0, 14);
+function roundedRectPath(ctx, rect, radius = 10) {
+  const corner = Math.max(0, Math.min(radius, rect.width / 2, rect.height / 2));
+  ctx.beginPath();
+  ctx.moveTo(rect.x + corner, rect.y);
+  ctx.lineTo(rect.x + rect.width - corner, rect.y);
+  ctx.quadraticCurveTo(rect.x + rect.width, rect.y, rect.x + rect.width, rect.y + corner);
+  ctx.lineTo(rect.x + rect.width, rect.y + rect.height - corner);
+  ctx.quadraticCurveTo(
+    rect.x + rect.width,
+    rect.y + rect.height,
+    rect.x + rect.width - corner,
+    rect.y + rect.height,
+  );
+  ctx.lineTo(rect.x + corner, rect.y + rect.height);
+  ctx.quadraticCurveTo(rect.x, rect.y + rect.height, rect.x, rect.y + rect.height - corner);
+  ctx.lineTo(rect.x, rect.y + corner);
+  ctx.quadraticCurveTo(rect.x, rect.y, rect.x + corner, rect.y);
+  ctx.closePath();
 }
 
 function drawPlacedStepBadge(ctx, text, anchor, fit, color, placedBadges = []) {
@@ -2045,8 +2119,16 @@ function drawPlacedStepBadge(ctx, text, anchor, fit, color, placedBadges = []) {
   placedBadges.push(rect);
   drawLabelLeader(ctx, rect, anchor, color);
   const paleBadge = color === "#ffffff" || color === "#e5e7eb" || color === "#f5f5f5" || color === "#f8fafc";
+  roundedRectPath(ctx, rect, 7);
+  ctx.shadowColor = "rgba(15, 23, 42, 0.22)";
+  ctx.shadowBlur = 7;
+  ctx.shadowOffsetY = 2;
   ctx.fillStyle = paleBadge ? "rgba(255,255,255,0.92)" : color;
-  ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+  ctx.fill();
+  ctx.shadowColor = "transparent";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.86)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
   ctx.fillStyle = paleBadge ? "#0f172a" : "#fff";
   ctx.fillText(safeText, rect.x + 9, rect.y + 18, rect.width - 18);
   ctx.restore();

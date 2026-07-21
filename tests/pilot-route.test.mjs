@@ -19,6 +19,7 @@ test("the production landing and pilot stay packaged as self-contained experienc
     "pilot/app.js",
     "pilot/styles.css",
     "pilot/lib/board-profiles.mjs",
+    "pilot/lib/wiring-annotations.mjs",
     "pilot/images/makeable/icon-chat.svg",
   ]) {
     await access(path.join(root, "dist", relativePath));
