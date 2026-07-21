@@ -16,7 +16,7 @@ setupMobileSignup();
 setupRecognition();
 setupConnect();
 setupTestPanel();
-setupHeroTear();
+setupGoogleWave();
 
 document.querySelector("[data-current-year]")?.replaceChildren(
   document.createTextNode(String(new Date().getFullYear())),
@@ -544,105 +544,89 @@ function setupMobileSignup() {
 }
 
 /*
-  Draws the vertical torn-paper seam between the hero and story columns.
-  The cream paper fills the left of a ragged edge that runs top-to-bottom;
-  the edge is a blend of long/medium sine waves plus smoothed noise, drawn
-  as flowing quadratic curves. The path is rebuilt at the strip's real
-  pixel height so it never stretches, and regenerated when that height
-  changes (fonts loading, viewport resize, content reflow).
+  Draws the "Continue with Google" button's squiggly pink border: a
+  rounded rectangle whose four straight sides each carry two gentle sine
+  oscillations (zero at the corners, so they blend into the rounded
+  corners). Rendered as an SVG data-URI on the slot's ::after via a CSS
+  variable, so the Google button's replaceChildren() never removes it.
+  Regenerated at the slot's real pixel size whenever it changes.
 */
-function setupHeroTear() {
-  const strip = document.querySelector("[data-hero-tear]");
-  const svg = strip?.querySelector("svg");
-  const paper = strip?.querySelector(".hero-tear-paper");
-  const shadow = strip?.querySelector(".hero-tear-shadow");
-  const underlayer = strip?.querySelector(".hero-tear-underlayer");
-  if (!strip || !svg || !paper || !shadow || !underlayer) return;
+function setupGoogleWave() {
+  const slot = document.querySelector("[data-google-slot]");
+  if (!slot) return;
 
-  const SEED = 7;
-  const POINT_SPACING = 18;
+  const PINK = "%23e22670"; // --bench-pink
+  const STROKE = 3;
+  const AMPLITUDE = 1.4;
+  const CYCLES = 2;
+  const SEG = 26;
 
-  function seededRandom(seed) {
-    return function () {
-      let value = (seed += 0x6d2b79f5);
-      value = Math.imul(value ^ (value >>> 15), value | 1);
-      value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
-      return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
-    };
-  }
+  const round = (v) => Math.round(v * 100) / 100;
 
-  function createEdge(random, width, height, baseX, amplitude, phase) {
-    const points = [];
-    let drift = 0;
+  function buildPath(w, h, radius) {
+    const pad = STROKE / 2 + AMPLITUDE + 0.5;
+    const x0 = pad;
+    const y0 = pad;
+    const x1 = w - pad;
+    const y1 = h - pad;
+    const r = Math.max(0, Math.min(radius - pad, (x1 - x0) / 2, (y1 - y0) / 2));
 
-    for (let y = -POINT_SPACING; y <= height + POINT_SPACING; y += POINT_SPACING) {
-      const longWave = Math.sin(y * 0.016 + phase) * amplitude * 0.4;
-      const mediumWave = Math.sin(y * 0.04 + phase * 1.7) * amplitude * 0.3;
-      const randomMovement = (random() - 0.5) * amplitude * 1.7;
+    // Keep a consistent wavelength on every side: the long top/bottom
+    // sides carry the full 2 oscillations, and the short left/right sides
+    // get proportionally fewer so they don't look cramped. Integer
+    // half-cycle counts keep the wave at zero on the corners.
+    const topLen = x1 - r - (x0 + r);
+    const sideLen = y1 - r - (y0 + r);
+    const halfWave = topLen / (2 * CYCLES);
+    const hcTop = Math.max(1, Math.round(topLen / halfWave));
+    const hcSide = Math.max(1, Math.round(sideLen / halfWave));
+    const waveH = (t) => AMPLITUDE * Math.sin(hcTop * Math.PI * t);
+    const waveV = (t) => AMPLITUDE * Math.sin(hcSide * Math.PI * t);
 
-      drift = drift * 0.73 + randomMovement * 0.27;
-
-      const x = baseX + longWave + mediumWave + drift;
-      points.push({ x: Math.max(1.5, Math.min(width - 1.5, x)), y });
+    let d = `M ${round(x0 + r)} ${round(y0)}`;
+    for (let i = 1; i <= SEG; i++) {
+      const t = i / SEG;
+      const x = x0 + r + (x1 - r - (x0 + r)) * t;
+      d += ` L ${round(x)} ${round(y0 + waveH(t))}`;
     }
-
-    return points;
-  }
-
-  function buildPath(points, height) {
-    let path = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`;
-
-    for (let index = 1; index < points.length; index++) {
-      const previous = points[index - 1];
-      const current = points[index];
-      const midpointX = (previous.x + current.x) / 2;
-      const midpointY = (previous.y + current.y) / 2;
-
-      path +=
-        ` Q ${previous.x.toFixed(2)} ${previous.y.toFixed(2)},` +
-        ` ${midpointX.toFixed(2)} ${midpointY.toFixed(2)}`;
+    d += ` A ${round(r)} ${round(r)} 0 0 1 ${round(x1)} ${round(y0 + r)}`;
+    for (let i = 1; i <= SEG; i++) {
+      const t = i / SEG;
+      const y = y0 + r + (y1 - r - (y0 + r)) * t;
+      d += ` L ${round(x1 + waveV(t))} ${round(y)}`;
     }
-
-    const last = points[points.length - 1];
-
-    // Close everything to the left of the ragged edge so the paper is solid.
-    return (
-      `${path} L ${last.x.toFixed(2)} ${last.y.toFixed(2)}` +
-      ` L 0 ${(height + POINT_SPACING).toFixed(2)}` +
-      ` L 0 ${(-POINT_SPACING).toFixed(2)} Z`
-    );
+    d += ` A ${round(r)} ${round(r)} 0 0 1 ${round(x1 - r)} ${round(y1)}`;
+    for (let i = 1; i <= SEG; i++) {
+      const t = i / SEG;
+      const x = x1 - r - (x1 - r - (x0 + r)) * t;
+      d += ` L ${round(x)} ${round(y1 + waveH(t))}`;
+    }
+    d += ` A ${round(r)} ${round(r)} 0 0 1 ${round(x0)} ${round(y1 - r)}`;
+    for (let i = 1; i <= SEG; i++) {
+      const t = i / SEG;
+      const y = y1 - r - (y1 - r - (y0 + r)) * t;
+      d += ` L ${round(x0 + waveV(t))} ${round(y)}`;
+    }
+    d += ` A ${round(r)} ${round(r)} 0 0 1 ${round(x0 + r)} ${round(y0)} Z`;
+    return d;
   }
 
   function generate() {
-    const rect = strip.getBoundingClientRect();
-    const width = Math.max(20, Math.round(rect.width));
-    const height = Math.max(160, Math.round(rect.height));
-
-    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-
-    const random = seededRandom(SEED);
-    const amplitude = width * 0.13;
-    const baseX = width * 0.52;
-
-    const edge = createEdge(
-      random,
-      width,
-      height,
-      baseX,
-      amplitude,
-      random() * Math.PI * 2,
+    const rect = slot.getBoundingClientRect();
+    const w = Math.max(40, Math.round(rect.width));
+    const h = Math.max(20, Math.round(rect.height));
+    const radius =
+      parseFloat(getComputedStyle(slot).borderTopLeftRadius) || 20;
+    const d = buildPath(w, h, radius);
+    const svg =
+      `%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 ${w} ${h}' ` +
+      `fill='none' stroke='${PINK}' stroke-width='${STROKE}' ` +
+      `stroke-linejoin='round' stroke-linecap='round'%3E` +
+      `%3Cpath d='${d}'/%3E%3C/svg%3E`;
+    slot.style.setProperty(
+      "--google-wave",
+      `url("data:image/svg+xml,${svg}")`,
     );
-
-    const mainPath = buildPath(edge, height);
-    paper.setAttribute("d", mainPath);
-    shadow.setAttribute("d", mainPath);
-
-    // A slightly wider edge peeks out as the pale, fibrous rim.
-    const underEdge = edge.map((point) => ({
-      x: Math.min(width - 1, point.x + 2.5),
-      y: point.y,
-    }));
-    underlayer.setAttribute("d", buildPath(underEdge, height));
   }
 
   generate();
@@ -653,8 +637,9 @@ function setupHeroTear() {
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(generate);
     });
-    observer.observe(strip);
+    observer.observe(slot);
   } else {
     window.addEventListener("resize", generate);
   }
 }
+
