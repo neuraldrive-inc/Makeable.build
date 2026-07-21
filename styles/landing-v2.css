@@ -216,14 +216,17 @@ figure {
   position: fixed;
   z-index: 30;
   top: 0;
+  bottom: 0;
   left: 0;
   display: grid;
   width: var(--landing-rail-width);
-  height: 100svh;
-  min-height: 1000px;
+  height: fit-content;
+  max-height: 100svh;
+  margin: auto 0;
   padding: 118px 40px 30px 44px;
   grid-column: 1;
   grid-template-columns: minmax(0, 1fr);
+  align-content: center;
   border-right: 1px solid rgb(74 55 40 / 12%);
   background-color: var(--bench-bg);
   background-image: var(--paper-texture);
@@ -1556,6 +1559,36 @@ figure {
   display: none;
 }
 
+@media (min-width: 1280px) and (min-height: 1150px) {
+  .hero-message {
+    max-width: 560px;
+  }
+
+  .hero-lede {
+    margin-top: 60px;
+  }
+
+  .launch-tag {
+    margin-top: 34px;
+  }
+
+  .launch-poster {
+    min-height: 260px;
+  }
+
+  .hero-signup {
+    margin-top: 52px;
+  }
+
+  .google-slot {
+    min-height: 134px;
+  }
+
+  .google-fallback {
+    min-height: 108px;
+  }
+}
+
 @media (min-width: 1280px) and (max-height: 850px) {
   .waitlist-nav {
     height: 72px;
@@ -1865,7 +1898,9 @@ figure {
     position: relative;
     width: 100%;
     height: auto;
+    max-height: none;
     min-height: 0;
+    margin: 0;
     padding: 112px 32px 54px;
     border-right: 0;
   }
