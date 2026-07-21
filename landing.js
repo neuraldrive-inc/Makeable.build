@@ -17,6 +17,7 @@ setupRecognition();
 setupConnect();
 setupTestPanel();
 setupGoogleWave();
+setupHeroFit();
 
 document.querySelector("[data-current-year]")?.replaceChildren(
   document.createTextNode(String(new Date().getFullYear())),
@@ -640,6 +641,65 @@ function setupGoogleWave() {
     observer.observe(slot);
   } else {
     window.addEventListener("resize", generate);
+  }
+}
+
+/*
+  Scale-to-fit for the sticky left rail. On the two-column desktop layout the
+  hero is scroll-locked (overflow: hidden) and must never reflow, so instead
+  of compacting the composition on short windows we scale the whole
+  .hero-message as one unit to fit the available height. The design keeps its
+  exact layout at every window size — it only ever shrinks, never grows past
+  its natural (width-driven) size.
+*/
+function setupHeroFit() {
+  const hero = document.querySelector(".waitlist-hero");
+  const content = hero?.querySelector(".hero-message");
+  if (!hero || !content) return;
+
+  const twoColumn = window.matchMedia("(min-width: 1280px)");
+  const round = (v) => Math.round(v * 1000) / 1000;
+
+  function fit() {
+    // The stacked single-column layout flows naturally — no scaling there.
+    if (!twoColumn.matches) {
+      content.style.transform = "";
+      return;
+    }
+    const styles = getComputedStyle(hero);
+    const availW =
+      hero.clientWidth -
+      parseFloat(styles.paddingLeft) -
+      parseFloat(styles.paddingRight);
+    const availH =
+      hero.clientHeight -
+      parseFloat(styles.paddingTop) -
+      parseFloat(styles.paddingBottom);
+    // offsetWidth/Height report the un-transformed layout size, so measuring
+    // while a scale is applied stays stable (no reset needed).
+    const natW = content.offsetWidth;
+    const natH = content.offsetHeight;
+    if (!natW || !natH || availW <= 0 || availH <= 0) return;
+    const scale = Math.min(availW / natW, availH / natH, 1);
+    content.style.transform = scale < 1 ? `scale(${round(scale)})` : "none";
+  }
+
+  let frame = 0;
+  function schedule() {
+    window.cancelAnimationFrame(frame);
+    frame = window.requestAnimationFrame(fit);
+  }
+
+  fit();
+  if ("ResizeObserver" in window) {
+    const observer = new ResizeObserver(schedule);
+    observer.observe(hero);
+    observer.observe(content);
+  }
+  window.addEventListener("resize", schedule);
+  twoColumn.addEventListener("change", schedule);
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(fit);
   }
 }
 
