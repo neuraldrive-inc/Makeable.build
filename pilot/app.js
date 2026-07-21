@@ -1884,7 +1884,10 @@ function validatePlan(plan) {
 function renderEmptyPlan() {
   const controls = getBuildStepControls();
   els.partsList.innerHTML = "";
-  if (els.partsCountLabel) els.partsCountLabel.textContent = "Waiting for a photo";
+  if (els.partsCountLabel) {
+    els.partsCountLabel.textContent = "Waiting for a photo";
+    els.partsCountLabel.classList.remove("has-parts");
+  }
   els.wiringList.innerHTML = "";
   els.diagnosticsList.innerHTML = "";
   els.visualStepList.innerHTML = `<div class="visual-step-empty"><strong>Your guide will appear here</strong><span>Once I read the photo, I’ll show one clear move at a time.</span></div>`;
@@ -1904,10 +1907,12 @@ function renderPlan() {
   els.partsList.innerHTML = "";
   if (els.partsCountLabel) {
     els.partsCountLabel.textContent = `${plan.parts.length} ${plan.parts.length === 1 ? "part" : "parts"} found`;
+    els.partsCountLabel.classList.toggle("has-parts", plan.parts.length > 0);
   }
-  plan.parts.forEach((part) => {
+  plan.parts.forEach((part, index) => {
     const row = document.createElement("div");
-    row.className = "item-row";
+    row.className = `item-row item-row--tone-${index % 4}`;
+    row.dataset.partNumber = String(index + 1);
     row.innerHTML = `<strong></strong><span></span>`;
     row.querySelector("strong").textContent = part.name;
     row.querySelector("span").textContent = `${part.role} · ${Math.round((part.confidence || 0) * 100)}% confidence`;

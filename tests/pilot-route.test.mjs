@@ -75,6 +75,8 @@ test("the parts scan teaches photo setup and starts recognition automatically", 
   const pilotStyles = await readFile(path.join(root, "pilot", "styles.css"), "utf8");
 
   assert.match(pilotHtml, /id="projectBriefText"/);
+  assert.match(pilotHtml, /<div class="project-brief"[^>]*><span>Building<\/span>/);
+  assert.doesNotMatch(pilotHtml, /<section class="project-brief"/);
   assert.match(pilotHtml, /data-scan-step="1"/);
   assert.match(pilotHtml, /data-scan-step="2"/);
   assert.match(pilotHtml, /data-scan-step="3"/);
@@ -91,9 +93,17 @@ test("the parts scan teaches photo setup and starts recognition automatically", 
   assert.match(pilotScript, /if \(!state\.photoPrepComplete\)/);
   assert.match(pilotScript, /displayImg\.onload = \(\) => \{[\s\S]*?void analyzeHardware\(\);/);
   assert.match(pilotScript, /function setScanProcessStep\(activeStep\)/);
+  assert.match(pilotScript, /item-row item-row--tone-\$\{index % 4\}/);
+  assert.match(pilotScript, /row\.dataset\.partNumber = String\(index \+ 1\)/);
+  assert.match(pilotScript, /partsCountLabel\.classList\.toggle\("has-parts", plan\.parts\.length > 0\)/);
 
   assert.match(pilotStyles, /\.project-brief/);
   assert.match(pilotStyles, /\.scan-process/);
+  assert.match(pilotStyles, /\.scan-process strong[^}]*font-size: 1\.1rem/);
+  assert.match(pilotStyles, /\.scan-process small[^}]*font-size: \.9rem/);
+  assert.match(pilotStyles, /\.item-row--tone-0/);
+  assert.match(pilotStyles, /\.item-row--tone-3/);
+  assert.match(pilotStyles, /\.recognized-heading > strong\.has-parts/);
   assert.match(pilotStyles, /\.photo-prep-dialog::backdrop/);
   assert.match(pilotStyles, /body:not\(\.has-parts-photo\) \.scan-clear-button/);
 });

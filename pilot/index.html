@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23ef2d83'/%3E%3Cpath d='M18 43V21l14 14 14-14v22' stroke='white' stroke-width='7' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=makeable-workbench-20260721-test-focus" />
+    <link rel="stylesheet" href="./styles.css?v=makeable-workbench-20260721-scan-hierarchy" />
     <script src="/config.local.js"></script>
   </head>
   <body>
@@ -90,14 +90,10 @@
           <div>
             <h1>Show me what’s<br />on your <span>desk.</span></h1>
             <p>Put your parts in one photo. I’ll name them for you.</p>
+            <div class="project-brief" aria-label="Your build idea"><span>Building</span><strong id="projectBriefText">Describe what you want the hardware to do.</strong></div>
           </div>
           <aside class="sticky-note sticky-note--white tape-yellow">Your photo is only used to recognize your parts.</aside>
         </header>
-
-        <section class="project-brief" aria-label="Your build idea">
-          <span>Your build idea</span>
-          <strong id="projectBriefText">Describe what you want the hardware to do.</strong>
-        </section>
 
         <ol class="scan-process" aria-label="Photo recognition progress">
           <li class="is-active" data-scan-step="1"><b>1</b><span><strong>Choose one photo</strong><small>Three quick checks first</small></span></li>
@@ -300,6 +296,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="./app.js?v=makeable-workbench-20260721-test-focus"></script>
+    <script type="module" src="./app.js?v=makeable-workbench-20260721-scan-hierarchy"></script>
   </body>
 </html>
