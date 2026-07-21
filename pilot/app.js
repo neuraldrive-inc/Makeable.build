@@ -4,7 +4,7 @@ const $ = (selector) => document.querySelector(selector);
 
 const FRONTIER_MODEL = "gpt-5.6-terra";
 const LEGACY_MODEL_DEFAULTS = new Set(["gpt-5.4-mini"]);
-const DEFAULT_REASONING_EFFORT = "low";
+const DEFAULT_REASONING_EFFORT = "xhigh";
 const LEGACY_REASONING_EFFORT_DEFAULTS = new Set(["low"]);
 const AI_BACKGROUND_TIMEOUT_MS = 8 * 60 * 1000;
 const AI_POLL_BASE_INTERVAL_MS = 2200;

@@ -208,7 +208,7 @@ The visual rewrite does not replace the existing behavior. These contracts remai
 - Camera capture stays local until the user initiates analysis.
 - GitHub API calls create a repository and upload README/firmware when a token is configured.
 
-The selected planning and reasoning model is `gpt-5.6-sol` with `high` reasoning effort. The app keeps model selection in configuration so it can be changed without a UI rewrite.
+The selected planning and reasoning model is `gpt-5.6-terra` with `xhigh` reasoning effort. The app keeps model selection in configuration so it can be changed without a UI rewrite.
 
 ## 9. Motion and delight
 

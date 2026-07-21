@@ -75,7 +75,7 @@ Resources:
           - Name: OPENAI_REASONING_MODEL
             Value: gpt-5.6-terra
           - Name: OPENAI_REASONING_EFFORT
-            Value: low
+            Value: xhigh
           - Name: OPENAI_SERVICE_TIER
             Value: priority
           - Name: AWS_REGION

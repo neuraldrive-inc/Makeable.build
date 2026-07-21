@@ -66,7 +66,7 @@ Local storage is used for settings, but any browser-only balance can be edited o
 
 ### 5. Provider choices and costly settings are user-controlled
 
-The settings UI lets the browser select OpenAI models and stores those selections locally. The current defaults also use `gpt-5.6-sol` with high reasoning effort for both core calls. A production backend should own an allowlisted routing policy and expose no provider/model control to ordinary users.
+The settings UI lets the browser select OpenAI models and stores those selections locally. The current defaults use `gpt-5.6-terra` with `xhigh` reasoning effort for both core calls. A production backend should own an allowlisted routing policy and expose no provider/model control to ordinary users.
 
 ### 6. The Deepgram secret can be exposed to the browser
 

@@ -10,7 +10,7 @@ These are the implementation assumptions used before coding the prototype.
 - The prototype calls OpenAI through `POST /api/openai/responses`, a tiny local proxy backed by `OPENAI_API_KEY`.
 - Hosted long-running guide/code/check calls use `POST /api/openai/background` with `background: true`, then poll `GET /api/openai/responses/{id}` until the response completes. This avoids Netlify inactivity timeouts while preserving the expensive vision/reasoning model path.
 - Default model choices are set in `.env`: `OPENAI_MODEL=gpt-5.6-terra` for part planning and `OPENAI_REASONING_MODEL=gpt-5.6-terra` for behavior verification.
-- `OPENAI_REASONING_EFFORT=low` and `OPENAI_SERVICE_TIER=priority` are the speed-focused defaults. The backend falls back to the standard service tier if the project cannot use priority capacity.
+- `OPENAI_REASONING_EFFORT=xhigh` is the quality-focused reasoning default, while `OPENAI_SERVICE_TIER=priority` keeps requests on the fastest configured service tier. The backend falls back to the standard service tier if the project cannot use priority capacity.
 
 Docs:
 

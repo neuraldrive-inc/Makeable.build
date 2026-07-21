@@ -85,7 +85,7 @@ export const config = {
 };
 
 const DEFAULT_OPENAI_MODEL = "gpt-5.6-terra";
-const DEFAULT_OPENAI_REASONING_EFFORT = "low";
+const DEFAULT_OPENAI_REASONING_EFFORT = "xhigh";
 const DEFAULT_OPENAI_SERVICE_TIER = "priority";
 
 function getEnv() {
