@@ -560,6 +560,9 @@ async function requireUser(req, res, env) {
   if (env.NODE_ENV === "test" && env.MAKEABLE_TEST_AUTH_BYPASS === "1") {
     return { userId: "compiler-integration-test", username: "compiler-integration-test" };
   }
+  if (!hasAccountConfig(env) && isTrustedLocalDevelopmentRequest(req)) {
+    return { userId: "local-development", username: "Local maker", localDevelopment: true };
+  }
   const match = String(req.headers.authorization || "").match(/^Bearer\s+(.+)$/i);
   if (!match) {
     sendJson(res, { error: "Sign in to continue." }, 401);
@@ -574,6 +577,42 @@ async function requireUser(req, res, env) {
     sendJson(res, { error: "Your sign-in expired. Please sign in again." }, 401);
     return null;
   }
+}
+
+function isLoopbackRequest(req) {
+  const remoteAddress = String(req.socket?.remoteAddress || "");
+  const host = String(req.headers.host || "");
+  const loopbackAddress = remoteAddress === "127.0.0.1" || remoteAddress === "::1" || remoteAddress === "::ffff:127.0.0.1";
+  const loopbackHost = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(host);
+  return loopbackAddress && loopbackHost;
+}
+
+function isTrustedLocalDevelopmentRequest(req) {
+  if (!isLoopbackRequest(req)) return false;
+
+  const method = String(req.method || "GET").toUpperCase();
+  const origin = String(req.headers.origin || "").trim();
+  const fetchSite = String(req.headers["sec-fetch-site"] || "").trim().toLowerCase();
+  if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") return false;
+
+  if (origin) {
+    try {
+      const parsedOrigin = new URL(origin);
+      const sameHost = parsedOrigin.host.toLowerCase() === String(req.headers.host || "").toLowerCase();
+      const loopbackOrigin = /^(?:localhost|127\.0\.0\.1|\[::1\])$/i.test(parsedOrigin.hostname);
+      if (!sameHost || !loopbackOrigin || !/^https?:$/.test(parsedOrigin.protocol)) return false;
+    } catch {
+      return false;
+    }
+  } else if (method !== "GET" && method !== "HEAD") {
+    return false;
+  }
+
+  if (method !== "GET" && method !== "HEAD") {
+    const contentType = String(req.headers["content-type"] || "").split(";", 1)[0].trim().toLowerCase();
+    if (contentType !== "application/json") return false;
+  }
+  return true;
 }
 
 async function verifyWebSocketUser(req, env) {
@@ -671,6 +710,7 @@ async function authorizeGeneration(req, res, user, env) {
     sendJson(res, { error: "A valid generation id is required." }, 400);
     return false;
   }
+  if (user.localDevelopment === true) return true;
   const entryId = `generation#${generationId}`;
   const now = new Date().toISOString();
   try {
@@ -749,6 +789,7 @@ async function verifyGenerationOwnership(req, res, user, env) {
     sendJson(res, { error: "A valid generation id is required." }, 400);
     return false;
   }
+  if (user.localDevelopment === true) return true;
   const result = await dynamodb.send(
     new GetItemCommand({
       TableName: env.CREDIT_LEDGER_TABLE,

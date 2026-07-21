@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23ef2d83'/%3E%3Cpath d='M18 43V21l14 14 14-14v22' stroke='white' stroke-width='7' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=makeable-pilot-20260720-final" />
+    <link rel="stylesheet" href="./styles.css?v=makeable-pilot-20260721-photo-flow" />
     <script src="/config.local.js"></script>
   </head>
   <body>
@@ -111,7 +111,10 @@
             <li><b>2</b><span>Spread the parts and jumper-wire ends apart.</span></li>
             <li><b>3</b><span>Keep the USB connector and both board buttons visible.</span></li>
           </ol>
-          <label class="confirmation-check"><input id="orientationConfirmed" type="checkbox" /><span>My parts are label-side up and easy to see.</span></label>
+          <div class="photo-quality-note" role="note">
+            <span class="photo-quality-check" aria-hidden="true">✓</span>
+            <span><strong>No approval step.</strong> Once the photo is added, Makeable starts checking it automatically. If a label is too blurry, I’ll ask for a better photo.</span>
+          </div>
         </section>
 
         <div class="scan-paper paper-sheet tape-blue">
@@ -124,11 +127,19 @@
             <span>or choose one from your computer</span>
           </div>
           <div class="scan-actions">
-            <label class="torn-button torn-button--coral file-button"><input id="partsPhotoInput" type="file" accept="image/*" capture="environment" />Take or choose a photo</label>
+            <label class="torn-button torn-button--coral file-button"><input id="partsPhotoInput" type="file" accept="image/*" capture="environment" /><span id="photoPickerLabel">Take or choose a photo</span></label>
             <button class="paper-button" id="clearPhotoButton" type="button">Clear photo</button>
-            <button class="torn-button torn-button--pink" id="analyzeButton" type="button">Suggest what I can build</button>
+            <button class="torn-button torn-button--pink" id="analyzeButton" type="button" aria-describedby="transcriptBox" disabled>Suggest what I can build</button>
           </div>
-          <div class="status-strip scan-status" id="transcriptBox" aria-live="polite">Confirm the photo setup, then choose one clear photo.</div>
+          <div class="photo-analysis-progress" id="photoAnalysisProgress" role="status" aria-live="polite" hidden>
+            <span class="photo-analysis-spinner" aria-hidden="true"></span>
+            <span class="photo-analysis-copy">
+              <strong id="photoAnalysisTitle">Looking at your photo…</strong>
+              <span id="photoAnalysisDetail">I’m checking which parts are actually visible.</span>
+              <small id="photoAnalysisElapsed" aria-hidden="true">Started just now · keep this tab open</small>
+            </span>
+          </div>
+          <div class="status-strip scan-status" id="transcriptBox" aria-live="polite">Choose one clear photo. Build suggestions will start automatically.</div>
         </div>
 
         <section class="idea-from-photo paper-sheet" id="ideaFromPhotoPanel" hidden aria-labelledby="idea-from-photo-title">
@@ -291,6 +302,6 @@
       <button class="torn-button torn-button--coral" id="stageNextButton" type="button">Continue</button>
     </footer>
 
-    <script type="module" src="./app.js?v=makeable-pilot-20260720-final"></script>
+    <script type="module" src="./app.js?v=makeable-pilot-20260721-photo-flow"></script>
   </body>
 </html>

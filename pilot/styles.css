@@ -917,6 +917,61 @@ body.has-parts-photo .scan-copy {
   text-align: center;
 }
 
+.photo-analysis-progress {
+  display: flex;
+  max-width: 760px;
+  align-items: center;
+  gap: 16px;
+  margin: 16px auto 0;
+  padding: 16px 20px;
+  border: 3px solid var(--blue);
+  border-radius: 12px;
+  background: #eef0ff;
+  box-shadow: 5px 6px 0 rgba(81, 105, 223, 0.16);
+  text-align: left;
+}
+
+.photo-analysis-spinner {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border: 5px solid rgba(81, 105, 223, 0.2);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: photo-analysis-spin 800ms linear infinite;
+}
+
+.photo-analysis-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.photo-analysis-copy strong {
+  font-family: var(--display);
+  font-size: 1.08rem;
+}
+
+.photo-analysis-copy span,
+.photo-analysis-copy small {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.photo-analysis-copy small {
+  margin-top: 3px;
+  font-size: 0.82rem;
+}
+
+.torn-button.is-loading:disabled {
+  cursor: progress;
+  filter: none;
+  opacity: 1;
+}
+
+@keyframes photo-analysis-spin {
+  to { transform: rotate(360deg); }
+}
+
 .recognized-paper {
   margin-top: 20px;
   padding: 24px 30px;
@@ -1815,6 +1870,34 @@ body,
   border-top: 2px dashed rgba(17, 16, 15, 0.17);
 }
 
+.photo-quality-note {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 18px;
+  border-top: 2px dashed rgba(17, 16, 15, 0.17);
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.photo-quality-note strong {
+  color: var(--ink);
+  font-family: var(--display);
+}
+
+.photo-quality-check {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 2px solid #2d9c7d;
+  border-radius: 50%;
+  color: #207e66;
+  font-family: var(--display);
+}
+
 .confirmation-check input,
 .media-consent input,
 .publish-check input {
@@ -2210,11 +2293,13 @@ body,
   .idea-from-photo,
   .completion-media { grid-template-columns: 1fr; padding: 32px 24px; }
   .photo-prep ol { margin-top: 8px; }
-  .confirmation-check { grid-column: 1; }
+  .confirmation-check,
+  .photo-quality-note { grid-column: 1; }
   .scan-paper { min-height: 0; padding: 34px 18px 24px; }
   .canvas-frame { height: 54vw; min-height: 240px; }
   .scan-actions { flex-direction: column; align-items: stretch; }
   .scan-actions > * { width: 100%; }
+  .photo-analysis-progress { align-items: flex-start; }
   .scan-tips { flex-wrap: wrap; justify-content: flex-start; gap: 10px 22px; }
   .build-mode-switch { width: 100%; align-self: stretch; }
   .build-mode-switch button { flex: 1; padding-inline: 10px; }

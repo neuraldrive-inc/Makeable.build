@@ -75,7 +75,8 @@ const state = {
   voiceEpoch: 0,
   serialEpoch: 0,
   entryMode: "idea",
-  orientationConfirmed: false,
+  photoAnalysisBusy: false,
+  photoAnalysisStartedAt: 0,
   preparationConfirmed: false,
   planIssues: [],
   completedConnectionIds: new Set(),
@@ -109,6 +110,8 @@ const state = {
   account: null,
 };
 
+let photoAnalysisTimerId = null;
+
 const els = {
   ideaNextButton: $("#ideaNextButton"),
   ideaPrompts: document.querySelectorAll("[data-idea]"),
@@ -126,7 +129,11 @@ const els = {
   transcriptBox: $("#transcriptBox"),
   analyzeButton: $("#analyzeButton"),
   startPhotoFirstButton: $("#startPhotoFirstButton"),
-  orientationConfirmed: $("#orientationConfirmed"),
+  photoPickerLabel: $("#photoPickerLabel"),
+  photoAnalysisProgress: $("#photoAnalysisProgress"),
+  photoAnalysisTitle: $("#photoAnalysisTitle"),
+  photoAnalysisDetail: $("#photoAnalysisDetail"),
+  photoAnalysisElapsed: $("#photoAnalysisElapsed"),
   ideaFromPhotoPanel: $("#ideaFromPhotoPanel"),
   photoIdeaOptions: $("#photoIdeaOptions"),
   manualHelpButton: $("#manualHelpButton"),
@@ -638,14 +645,11 @@ function bindEvents() {
   });
   els.ideaText?.addEventListener("input", handleIdeaChange);
   els.photoInput?.addEventListener("change", handlePhotoUpload);
+  els.photoInput?.addEventListener("cancel", handlePhotoPickerCancel);
   els.clearPhotoButton?.addEventListener("click", clearPhoto);
   els.startVoiceButton?.addEventListener("click", startVoiceCapture);
   els.stopVoiceButton?.addEventListener("click", stopVoiceCapture);
   els.analyzeButton?.addEventListener("click", analyzeHardware);
-  els.orientationConfirmed?.addEventListener("change", () => {
-    state.orientationConfirmed = els.orientationConfirmed.checked;
-    updatePhotoReadiness();
-  });
   els.preparationConfirmed?.addEventListener("change", () => {
     state.preparationConfirmed = els.preparationConfirmed.checked;
     updatePreparationControls();
@@ -703,6 +707,8 @@ function showIntro(event) {
   if (els.ideaText) els.ideaText.value = "";
   if (els.voiceTranscriptBox) els.voiceTranscriptBox.textContent = "Type, tap an example, or use your voice.";
   if (els.photoFirstStatus) els.photoFirstStatus.textContent = "I’ll look only after you choose or take a photo.";
+  if (els.photoPickerLabel) els.photoPickerLabel.textContent = "Take or choose a photo";
+  setPhotoAnalysisBusy(false);
   updateIdeaActions();
   document.body.classList.remove("intro-active");
   setActiveWorkflowStage(0, { updateHash: true, replace: true });
@@ -716,9 +722,9 @@ function focusIdeaEntry() {
 function startPhotoFirst() {
   state.entryMode = "photo";
   els.ideaText.removeAttribute("aria-invalid");
+  if (els.photoFirstStatus) els.photoFirstStatus.textContent = "Choose one photo. I’ll start suggesting builds as soon as it is ready.";
   setActiveWorkflowStage(1);
   els.photoInput?.click();
-  if (els.photoFirstStatus) els.photoFirstStatus.textContent = "Opening your camera or photo library…";
 }
 
 function goToRepairStep() {
@@ -745,7 +751,7 @@ function updateIdeaActions() {
   if (els.ideaNextButton) {
     els.ideaNextButton.disabled = !hasIdea;
   }
-  if (els.analyzeButton) {
+  if (els.analyzeButton && !state.photoAnalysisBusy) {
     els.analyzeButton.textContent = hasIdea ? "Make my beginner guide" : "Suggest what I can build";
   }
 }
@@ -753,6 +759,7 @@ function updateIdeaActions() {
 function handleIdeaChange() {
   if (state.generationId) {
     invalidatePendingGeneration();
+    setPhotoAnalysisBusy(false);
     if (state.plan) {
       state.plan = null;
       resetBuildEvidence();
@@ -763,23 +770,67 @@ function handleIdeaChange() {
   updatePhotoReadiness();
 }
 
-function updatePhotoReadiness() {
+function updatePhotoReadiness(options = {}) {
   const hasPhoto = Boolean(state.imageDataUrl);
-  const labelsConfirmed = Boolean(state.orientationConfirmed);
-  if (els.analyzeButton) els.analyzeButton.disabled = !hasPhoto || !labelsConfirmed;
+  const announce = options.announce !== false;
+  if (els.analyzeButton) els.analyzeButton.disabled = state.photoAnalysisBusy || !hasPhoto;
+  if (!announce || state.photoAnalysisBusy) return;
   if (!hasPhoto) {
-    setStatus(els.transcriptBox, "Confirm the setup, then take one clear photo from above.", "");
-  } else if (!labelsConfirmed) {
-    setStatus(els.transcriptBox, "Photo added. Confirm that the printed labels are visible before I use it as your map.", "warn");
+    setStatus(els.transcriptBox, "Choose one clear photo. Build suggestions will start automatically.", "");
   } else {
     setStatus(
       els.transcriptBox,
       els.ideaText?.value.trim()
-        ? "Photo ready. I can now make the guide for your idea."
-        : "Photo ready. I can now suggest a few realistic starter builds.",
+        ? "Photo ready. Choose “Make my beginner guide” when you want me to start."
+        : "Photo ready. Choose “Suggest what I can build” to try again.",
       "ok",
     );
   }
+}
+
+function setPhotoAnalysisBusy(isBusy, options = {}) {
+  const wasBusy = state.photoAnalysisBusy;
+  state.photoAnalysisBusy = Boolean(isBusy);
+  if (state.photoAnalysisBusy && !wasBusy) state.photoAnalysisStartedAt = Date.now();
+  if (!state.photoAnalysisBusy) state.photoAnalysisStartedAt = 0;
+
+  if (els.analyzeButton) {
+    els.analyzeButton.disabled = state.photoAnalysisBusy || !state.imageDataUrl;
+    els.analyzeButton.classList.toggle("is-loading", state.photoAnalysisBusy);
+    if (state.photoAnalysisBusy) els.analyzeButton.setAttribute("aria-busy", "true");
+    else els.analyzeButton.removeAttribute("aria-busy");
+    if (options.buttonLabel) els.analyzeButton.textContent = options.buttonLabel;
+  }
+  if (els.photoAnalysisProgress) els.photoAnalysisProgress.hidden = !state.photoAnalysisBusy;
+  if (options.title && els.photoAnalysisTitle) els.photoAnalysisTitle.textContent = options.title;
+  if (options.detail && els.photoAnalysisDetail) els.photoAnalysisDetail.textContent = options.detail;
+
+  if (photoAnalysisTimerId) window.clearInterval(photoAnalysisTimerId);
+  photoAnalysisTimerId = null;
+  if (state.photoAnalysisBusy) {
+    renderPhotoAnalysisElapsed();
+    photoAnalysisTimerId = window.setInterval(renderPhotoAnalysisElapsed, 1000);
+    if (options.scroll === true) {
+      requestAnimationFrame(() => els.photoAnalysisProgress?.scrollIntoView({ behavior: "smooth", block: "center" }));
+    }
+  }
+}
+
+function updatePhotoAnalysisMessage(title, detail) {
+  if (title && els.photoAnalysisTitle) els.photoAnalysisTitle.textContent = title;
+  if (detail && els.photoAnalysisDetail) els.photoAnalysisDetail.textContent = detail;
+}
+
+function setPartsPendingLabel(message) {
+  if (!state.plan && els.partsCountLabel) els.partsCountLabel.textContent = message;
+}
+
+function renderPhotoAnalysisElapsed() {
+  if (!state.photoAnalysisBusy || !els.photoAnalysisElapsed) return;
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - state.photoAnalysisStartedAt) / 1000));
+  els.photoAnalysisElapsed.textContent = elapsedSeconds < 2
+    ? "Started just now · keep this tab open"
+    : `Working for ${elapsedSeconds}s · keep this tab open`;
 }
 
 function announceStageGuard(requestedIndex, activeIndex) {
@@ -916,8 +967,10 @@ function pickReasoningEffort(localValue, serverValue) {
 }
 
 async function refreshServerConfig() {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 8000);
   try {
-    const freshConfig = await apiJson("/api/config");
+    const freshConfig = await apiJson("/api/config", { signal: controller.signal });
     serverConfig = freshConfig;
     settings.githubOwner = freshConfig.githubOwner || "";
     settings.openaiModel = pickModel("", freshConfig.openaiModel, FRONTIER_MODEL);
@@ -927,6 +980,8 @@ async function refreshServerConfig() {
   } catch (error) {
     console.error(error);
     return serverConfig;
+  } finally {
+    window.clearTimeout(timeoutId);
   }
 }
 
@@ -1307,9 +1362,24 @@ function resetBuildEvidence() {
   updatePublishControls();
 }
 
-function resetPhotoConfirmation() {
-  state.orientationConfirmed = false;
-  if (els.orientationConfirmed) els.orientationConfirmed.checked = false;
+function handlePhotoPickerCancel() {
+  if (state.imageDataUrl) return;
+  setPhotoAnalysisBusy(false);
+  setStatus(els.transcriptBox, "No photo was chosen. Choose one whenever you’re ready; nothing has started yet.", "");
+  if (els.photoFirstStatus) els.photoFirstStatus.textContent = "No photo chosen yet.";
+}
+
+function showPhotoUploadError(message) {
+  state.imageDataUrl = "";
+  state.imageElement = null;
+  state.imageFit = null;
+  document.body.classList.remove("has-parts-photo");
+  setPhotoAnalysisBusy(false);
+  if (els.photoInput) els.photoInput.value = "";
+  if (els.photoPickerLabel) els.photoPickerLabel.textContent = "Try another photo";
+  drawPartsCanvas();
+  setStatus(els.transcriptBox, message, "danger");
+  if (els.photoFirstStatus) els.photoFirstStatus.textContent = "That photo did not load. Try another one.";
 }
 
 function handlePhotoUpload(event) {
@@ -1326,12 +1396,18 @@ function handlePhotoUpload(event) {
   state.imageElement = null;
   state.imageFit = null;
   state.plan = null;
-  resetPhotoConfirmation();
   resetBuildEvidence();
   document.body.classList.remove("has-parts-photo");
   if (els.ideaFromPhotoPanel) els.ideaFromPhotoPanel.hidden = true;
   if (els.photoIdeaOptions) els.photoIdeaOptions.innerHTML = "";
   renderEmptyPlan();
+  if (els.photoPickerLabel) els.photoPickerLabel.textContent = "Choose a different photo";
+  setPhotoAnalysisBusy(true, {
+    title: "Adding your photo…",
+    detail: "I’m preparing the image so I can inspect the real parts.",
+    buttonLabel: "Preparing photo…",
+    scroll: true,
+  });
   setStatus(els.transcriptBox, "Loading your photo...", "warn");
 
   const reader = new FileReader();
@@ -1340,7 +1416,13 @@ function handlePhotoUpload(event) {
     const img = new Image();
     img.onload = () => {
       if (state.sessionEpoch !== photoEpoch) return;
-      state.imageDataUrl = resizePhotoForAi(img);
+      try {
+        state.imageDataUrl = resizePhotoForAi(img);
+      } catch (error) {
+        console.error(error);
+        showPhotoUploadError("I couldn’t prepare that image. Try a JPG, PNG, or WebP; some HEIC photos need to be converted first.");
+        return;
+      }
       const displayImg = new Image();
       displayImg.onload = () => {
         if (state.sessionEpoch !== photoEpoch || displayImg.src !== state.imageDataUrl) return;
@@ -1348,26 +1430,45 @@ function handlePhotoUpload(event) {
         document.body.classList.add("has-parts-photo");
         drawPartsCanvas();
         setActiveWorkflowStage(1);
-        updatePhotoReadiness();
-        if (els.photoFirstStatus) els.photoFirstStatus.textContent = "Photo added. I’ll suggest a few build ideas next.";
+        setPartsPendingLabel("Checking visible parts…");
+        if (els.photoPickerLabel) els.photoPickerLabel.textContent = "Replace photo";
+        const shouldSuggestAutomatically = !els.ideaText?.value.trim();
+        if (shouldSuggestAutomatically) {
+          setPhotoAnalysisBusy(true, {
+            title: "Finding build ideas…",
+            detail: "I’m checking which parts are visible. I won’t invent anything that is missing.",
+            buttonLabel: "Finding build ideas…",
+            scroll: true,
+          });
+          setStatus(els.transcriptBox, "Photo added. I’ve started looking for realistic build ideas automatically.", "warn");
+          if (els.photoFirstStatus) els.photoFirstStatus.textContent = "Photo added. Suggestions are running now.";
+          requestAnimationFrame(() => void analyzeHardware());
+        } else {
+          setPhotoAnalysisBusy(false);
+          updateIdeaActions();
+          updatePhotoReadiness();
+          setPartsPendingLabel("Ready to identify project parts");
+          els.analyzeButton?.focus();
+          if (els.photoFirstStatus) els.photoFirstStatus.textContent = "Photo added. Your guide is ready to start.";
+        }
       };
       displayImg.onerror = () => {
         if (state.sessionEpoch === photoEpoch) {
-          setStatus(els.transcriptBox, "I couldn’t prepare that image. Try another photo.", "danger");
+          showPhotoUploadError("I couldn’t display that image. Try a JPG, PNG, or WebP; some HEIC photos need to be converted first.");
         }
       };
       displayImg.src = state.imageDataUrl;
     };
     img.onerror = () => {
       if (state.sessionEpoch === photoEpoch) {
-        setStatus(els.transcriptBox, "I couldn’t read that image. Try a clear JPG or PNG.", "danger");
+        showPhotoUploadError("I couldn’t read that image. Try a clear JPG, PNG, or WebP; some HEIC photos need to be converted first.");
       }
     };
     img.src = String(reader.result || "");
   };
   reader.onerror = () => {
     if (state.sessionEpoch === photoEpoch) {
-      setStatus(els.transcriptBox, "I couldn’t load that photo. Try choosing it again.", "danger");
+      showPhotoUploadError("I couldn’t load that photo. Choose it again or try a JPG, PNG, or WebP.");
     }
   };
   reader.readAsDataURL(file);
@@ -1400,9 +1501,10 @@ function clearPhoto() {
   state.imageElement = null;
   state.imageFit = null;
   state.plan = null;
-  resetPhotoConfirmation();
   resetBuildEvidence();
+  setPhotoAnalysisBusy(false);
   if (els.photoInput) els.photoInput.value = "";
+  if (els.photoPickerLabel) els.photoPickerLabel.textContent = "Take or choose a photo";
   if (els.ideaFromPhotoPanel) els.ideaFromPhotoPanel.hidden = true;
   if (els.photoIdeaOptions) els.photoIdeaOptions.innerHTML = "";
   document.body.classList.remove("has-parts-photo");
@@ -1767,28 +1869,36 @@ function normalizeBbox(bbox, index, total) {
 }
 
 async function analyzeHardware() {
-  await refreshServerConfig();
   const idea = els.ideaText.value.trim();
   if (!state.imageDataUrl) {
+    setPhotoAnalysisBusy(false);
     setStatus(els.transcriptBox, "Start with one clear photo of your parts. I’ll use that as the map.", "danger");
     return;
   }
-  if (!state.orientationConfirmed) {
-    els.orientationConfirmed?.focus();
-    setStatus(els.transcriptBox, "Confirm that the printed labels are visible before I use the photo as your map.", "danger");
-    return;
-  }
+  const generationContext = beginGenerationContext(idea);
+  setPhotoAnalysisBusy(true, {
+    title: idea ? "Starting your beginner guide…" : "Finding build ideas…",
+    detail: idea
+      ? "I’m checking your photo and the service connection before I plan any wires."
+      : "I’m checking your photo and the service connection before I suggest anything.",
+    buttonLabel: idea ? "Making your guide…" : "Finding build ideas…",
+    scroll: true,
+  });
+  await refreshServerConfig();
+  if (!isGenerationCurrent(generationContext)) return;
   if (!idea) {
-    await suggestProjectIdeas();
+    await suggestProjectIdeas(generationContext);
     return;
   }
 
-  els.analyzeButton.disabled = true;
-  els.analyzeButton.textContent = "Making your beginner guide…";
-  const generationContext = beginGenerationContext();
+  updatePhotoAnalysisMessage(
+    "Building your exact guide…",
+    "I’m matching printed labels and checking the safest connection order.",
+  );
   state.plan = null;
   resetBuildEvidence();
   renderEmptyPlan();
+  setPartsPendingLabel("Checking visible parts…");
 
   try {
     if (!serverConfig.hasOpenAIKey) {
@@ -1824,7 +1934,7 @@ async function analyzeHardware() {
             },
             {
               type: "input_image",
-              image_url: state.imageDataUrl,
+              image_url: generationContext.imageDataUrl,
               detail: "high",
             },
           ],
@@ -1845,6 +1955,10 @@ async function analyzeHardware() {
       generationId: generationContext.generationId,
       onProgress: ({ elapsedLabel, message }) => {
         if (!isGenerationCurrent(generationContext)) return;
+        updatePhotoAnalysisMessage(
+          "Building your exact guide…",
+          message || `Still studying the photo (${elapsedLabel}). I’ll bring the guide back here.`,
+        );
         setStatus(
           els.transcriptBox,
           message ||
@@ -1881,7 +1995,7 @@ async function analyzeHardware() {
     try {
       const firmwareReady = await generateFirmwareForPlan(idea, generationContext);
       if (!firmwareReady || !isGenerationCurrent(generationContext, nextPlan)) return;
-      await refreshAccount();
+      if (serverConfig.hasAccounts) await refreshAccount();
       if (!isGenerationCurrent(generationContext, nextPlan)) return;
       renderPlan();
       setStatus(
@@ -1908,20 +2022,26 @@ async function analyzeHardware() {
     }
   } finally {
     if (isGenerationCurrent(generationContext)) {
-      els.analyzeButton.disabled = false;
+      setPhotoAnalysisBusy(false);
       updateIdeaActions();
-      updatePhotoReadiness();
+      updatePhotoReadiness({ announce: false });
     }
   }
 }
 
-async function suggestProjectIdeas() {
-  els.analyzeButton.disabled = true;
-  els.analyzeButton.textContent = "Looking for good starter ideas…";
-  const generationContext = beginGenerationContext();
+async function suggestProjectIdeas(generationContext = beginGenerationContext()) {
+  setPhotoAnalysisBusy(true, {
+    title: "Finding build ideas…",
+    detail: "I’m identifying only the parts I can actually see.",
+    buttonLabel: "Finding build ideas…",
+    scroll: true,
+  });
+  setPartsPendingLabel("Checking visible parts…");
   try {
     if (!serverConfig.hasOpenAIKey) {
       setStatus(els.transcriptBox, "The AI service is not ready yet, so I can’t inspect this photo.", "danger");
+      if (els.photoFirstStatus) els.photoFirstStatus.textContent = "The suggestion service is not ready. You can retry from the photo screen.";
+      setPartsPendingLabel("Photo ready to retry");
       return;
     }
     setStatus(
@@ -1947,7 +2067,7 @@ async function suggestProjectIdeas() {
                 text:
                   "Suggest two or three beginner projects supported by the visible parts. Keep each title concrete and each description to one plain-language sentence. Name the visible parts each idea uses.",
               },
-              { type: "input_image", image_url: state.imageDataUrl, detail: "high" },
+              { type: "input_image", image_url: generationContext.imageDataUrl, detail: "high" },
             ],
           },
         ],
@@ -1965,6 +2085,10 @@ async function suggestProjectIdeas() {
         generationId: generationContext.generationId,
         onProgress: ({ elapsedLabel }) => {
           if (!isGenerationCurrent(generationContext)) return;
+          updatePhotoAnalysisMessage(
+            "Still checking your parts…",
+            `Working for ${elapsedLabel}. I won’t invent anything that is missing.`,
+          );
           setStatus(els.transcriptBox, `Still checking the parts (${elapsedLabel}). I won’t invent anything that is missing.`, "warn");
         },
       },
@@ -1972,17 +2096,21 @@ async function suggestProjectIdeas() {
     if (!isGenerationCurrent(generationContext)) return;
     const result = parseStructuredJson(data, "project ideas");
     renderIdeaSuggestions(result.suggestions || []);
+    setPartsPendingLabel("Choose an idea to identify its parts");
     setStatus(els.transcriptBox, "Choose one idea below. I’ll make the exact guide only after you pick.", "ok");
+    if (els.photoFirstStatus) els.photoFirstStatus.textContent = "Suggestions ready. Choose the one you like.";
   } catch (error) {
     console.error(error);
     if (isGenerationCurrent(generationContext)) {
       setStatus(els.transcriptBox, `I couldn’t suggest a build from this photo yet: ${error.message}`, "danger");
+      if (els.photoFirstStatus) els.photoFirstStatus.textContent = "Suggestions did not finish. Your photo is still here, so you can retry.";
+      setPartsPendingLabel("Photo ready to retry");
     }
   } finally {
     if (isGenerationCurrent(generationContext)) {
-      els.analyzeButton.disabled = false;
+      setPhotoAnalysisBusy(false);
       updateIdeaActions();
-      updatePhotoReadiness();
+      updatePhotoReadiness({ announce: false });
     }
   }
 }
@@ -2008,6 +2136,7 @@ function renderIdeaSuggestions(suggestions) {
   });
   els.ideaFromPhotoPanel.hidden = false;
   els.ideaFromPhotoPanel.scrollIntoView({ behavior: "smooth", block: "center" });
+  requestAnimationFrame(() => els.photoIdeaOptions.querySelector("button")?.focus({ preventScroll: true }));
 }
 
 function buildAnalysisPrompt(idea) {
@@ -4182,7 +4311,7 @@ async function sharePublishedBuild() {
 async function apiJson(path, options = {}) {
   const base = String(serverConfig.apiBaseUrl || "").replace(/\/$/, "");
   const requestUrl = base && path !== "/api/config" ? `${base}${path}` : path;
-  const requiresAuth = /^\/api\/(account|openai|firmware|github)(\/|$)/.test(path);
+  const requiresAuth = serverConfig.hasAccounts && /^\/api\/(account|openai|firmware|github)(\/|$)/.test(path);
   const accessToken = requiresAuth ? await getAccessToken() : await getAccessToken({ interactive: false });
   const { generationId, ...fetchOptions } = options;
   const response = await fetch(requestUrl, {

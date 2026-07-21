@@ -376,10 +376,10 @@ test("a host without atomic publishing keeps an optional photo in the browser", 
   await expect(page.locator("#publishGateNote")).toContainText(/cannot publish photos atomically/i);
 });
 
-test("start over clears hardware evidence, photo confirmation, and publishing consent", async ({ page }, testInfo) => {
+test("start over clears hardware evidence, the uploaded photo, and publishing consent", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "One browser covers the privacy reset contract");
+  await page.locator("#ideaText").fill("Build a motion light");
   await page.locator("#partsPhotoInput").setInputFiles(`${process.cwd()}/test image.jpg`);
-  await page.getByLabel("My parts are label-side up and easy to see.").check();
   await page.evaluate((plan) => window.__MAKEABLE_TEST_API__.loadPlan(plan), beginnerPlan());
   await page.evaluate(() => {
     window.__MAKEABLE_TEST_API__.setCompiledFirmware({ board: "esp32", sourceSketch: "void setup(){}" });
@@ -404,7 +404,7 @@ test("start over clears hardware evidence, photo confirmation, and publishing co
     manualStatus: null,
     publishReady: false,
   });
-  await expect(page.getByLabel("My parts are label-side up and easy to see.")).not.toBeChecked();
+  await expect(page.locator("body")).not.toHaveClass(/has-parts-photo/);
   await expect(page.getByLabel("Include in GitHub").first()).not.toBeChecked();
   await expect(page.getByLabel("Include in GitHub").first()).toBeDisabled();
   await expect(page.locator("#repoNameInput")).toHaveValue("makeable-build");
@@ -509,6 +509,51 @@ test("a new automatic board check invalidates an older manual pass", async ({ pa
   await expect(page.locator("#verifyBehaviorButton")).toBeDisabled();
 });
 
+test("an account-free local guide finishes without a cloud account refresh", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "One browser covers the account-free generation contract");
+  const generatedPlan = beginnerPlan();
+  delete generatedPlan.firmware;
+  let accountRequests = 0;
+
+  await page.route("**/api/account", (route) => {
+    accountRequests += 1;
+    return route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Cloud accounts are not configured locally." }),
+    });
+  });
+  await page.route("**/api/openai/background", (route) => {
+    const schemaName = route.request().postDataJSON()?.text?.format?.name;
+    const output = schemaName === "hardware_project_plan"
+      ? generatedPlan
+      : {
+          language: "ESP32 C++",
+          sketch: "void setup(){Serial.begin(115200);}\nvoid loop(){}",
+          notes: "Verified test firmware.",
+        };
+    return route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ status: "completed", output_text: JSON.stringify(output) }),
+    });
+  });
+  await page.route("**/api/firmware/compile", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ board: "esp32", images: [{ offset: 0, base64: "AA==" }] }),
+    }),
+  );
+
+  await page.locator("#ideaText").fill("Build a motion light");
+  await page.locator("#partsPhotoInput").setInputFiles(`${process.cwd()}/test image.jpg`);
+  await page.locator("#analyzeButton").click();
+
+  await expect(page.locator("#transcriptBox")).toContainText("Your guide and code are ready");
+  await expect(page.locator('[data-workflow-stage="2"]')).toHaveAttribute("aria-current", "step");
+  await expect.poll(() => accountRequests).toBe(0);
+  await expect(page.locator("#transcriptBox")).not.toContainText("couldn’t finish the code");
+});
+
 test("a late AI plan cannot overwrite a newly selected photo session", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "One browser covers the generation-session race");
   await page.evaluate(() => {
@@ -538,7 +583,6 @@ test("a late AI plan cannot overwrite a newly selected photo session", async ({ 
   const photoPath = `${process.cwd()}/test image.jpg`;
   await page.locator("#ideaText").fill("Build a motion light");
   await page.locator("#partsPhotoInput").setInputFiles(photoPath);
-  await page.getByLabel("My parts are label-side up and easy to see.").check();
   await page.locator("#analyzeButton").click();
   await requestStarted;
 
@@ -548,7 +592,7 @@ test("a late AI plan cannot overwrite a newly selected photo session", async ({ 
 
   await expect.poll(() => page.evaluate(() => window.__MAKEABLE_TEST_API__.getState().board)).toBe(null);
   await expect(page.getByText("Friendly motion light", { exact: true })).toHaveCount(0);
-  await expect(page.getByLabel("My parts are label-side up and easy to see.")).not.toBeChecked();
+  await expect(page.locator("#analyzeButton")).toBeEnabled();
 });
 
 test("a late AI plan cannot overwrite an edited project idea", async ({ page }, testInfo) => {
@@ -579,7 +623,6 @@ test("a late AI plan cannot overwrite an edited project idea", async ({ page }, 
 
   await page.locator("#ideaText").fill("Build a motion light");
   await page.locator("#partsPhotoInput").setInputFiles(`${process.cwd()}/test image.jpg`);
-  await page.getByLabel("My parts are label-side up and easy to see.").check();
   await page.locator("#analyzeButton").click();
   await requestStarted;
 
@@ -596,6 +639,7 @@ test("the wiring guide renders real pin crops from the uploaded photo without ru
   test.skip(testInfo.project.name !== "desktop", "One browser covers the canvas rendering contract");
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.locator("#ideaText").fill("Build a motion light");
   await page.locator("#partsPhotoInput").setInputFiles(`${process.cwd()}/test image.jpg`);
   await page.evaluate((plan) => window.__MAKEABLE_TEST_API__.loadPlan(plan), beginnerPlan());
   await page.getByLabel("I have these parts and my wire ends match the guide.").check();
