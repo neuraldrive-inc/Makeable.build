@@ -702,4 +702,3 @@ function setupHeroFit() {
     document.fonts.ready.then(fit);
   }
 }
-

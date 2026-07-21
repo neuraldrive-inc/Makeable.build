@@ -37,7 +37,7 @@ test("the production landing and pilot stay packaged as self-contained experienc
     "styles/legal.css",
     "assets/fonts/fredoka/fredoka.woff2",
     "assets/icons/google-g.svg",
-    "assets/landing/desk-parts-v2.png",
+    "assets/landing/desk-parts.jpeg",
     "robots.txt",
     "sitemap.xml",
     "privacy/index.html",
