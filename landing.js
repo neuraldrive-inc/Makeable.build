@@ -235,19 +235,15 @@ function showWaitlistSuccess({ returning = false } = {}) {
   const dataUse = content?.querySelector(".signup-data-use");
   if (!content || !googleSlot || !note || !dataUse) return;
 
-  const waitlistState = returning ? "returning" : "joined";
-  content.dataset.waitlistState = waitlistState;
-  googleSlot.dataset.waitlistState = waitlistState;
-
   renderGoogleMessage(
-    returning ? "You’re already on the waitlist!" : "You’re on the waitlist!",
+    returning ? "You’re already on the list" : "You’re on the waitlist",
     { confirmed: true, disabled: true },
   );
   note.classList.add("is-confirmed");
   note.replaceChildren(
     document.createTextNode(
       returning
-        ? "You’re all set—this browser remembers your confirmed signup."
+        ? "This browser remembers your confirmed waitlist signup."
         : "Your confirmed waitlist signup is saved in this browser.",
     ),
   );
@@ -267,18 +263,17 @@ function showWaitlistSuccess({ returning = false } = {}) {
 
 function renderGoogleMessage(label, { confirmed = false, disabled = false } = {}) {
   if (!googleSlot) return;
-  const control = document.createElement(confirmed ? "div" : "button");
-  control.className = `google-fallback${confirmed ? " google-fallback--confirmed" : ""}`;
-  control.setAttribute("aria-live", "polite");
+  const button = document.createElement("button");
+  button.className = `google-fallback${confirmed ? " google-fallback--confirmed" : ""}`;
+  button.type = "button";
+  button.disabled = disabled;
+  button.setAttribute("aria-live", "polite");
   if (confirmed) {
-    control.setAttribute("role", "status");
-    control.innerHTML = `<span class="google-confirmation-mark" aria-hidden="true">✓</span><span>${label}</span>`;
+    button.innerHTML = `<span class="google-confirmation-mark" aria-hidden="true">✓</span><span>${label}</span>`;
   } else {
-    control.type = "button";
-    control.disabled = disabled;
-    control.innerHTML = `<img src="/assets/icons/google-g.svg" alt="" width="34" height="34" aria-hidden="true" /><span>${label}</span>`;
+    button.innerHTML = `<img src="/assets/icons/google-g.svg" alt="" width="34" height="34" aria-hidden="true" /><span>${label}</span>`;
   }
-  googleSlot.replaceChildren(control);
+  googleSlot.replaceChildren(button);
 }
 
 function setStatus(message, tone) {

@@ -9,6 +9,3 @@ tmp/
 .netlify/
 dist/
 data/
-.claude/
-__pycache__/
-*.pyc
