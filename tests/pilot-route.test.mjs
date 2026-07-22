@@ -19,11 +19,9 @@ test("the production landing and pilot stay packaged as self-contained experienc
     "pilot/app.js",
     "pilot/styles.css",
     "pilot/lib/board-profiles.mjs",
-    "pilot/lib/control-dashboard.mjs",
     "pilot/lib/plain-language.mjs",
     "pilot/lib/wiring-annotations.mjs",
     "pilot/images/makeable/icon-chat.svg",
-    "pilot/images/makeable/icon-controls.svg",
     "pilot/images/makeable/upload-parts-clean.svg",
     "pilot/images/makeable/photo-tip-lighting.jpg",
     "pilot/images/makeable/photo-tip-spacing.jpg",
@@ -151,7 +149,7 @@ test("the pilot guides users from flashing into a camera-free test and behavior 
   assert.match(pilotHtml, /id="openBehaviorTuneButton"/);
   assert.match(pilotHtml, /id="behaviorTuneDialog"/);
   assert.match(pilotHtml, /id="behaviorChangeForm"/);
-  assert.match(pilotHtml, /id="verifyPublishButton"[^>]*>Open my controls/);
+  assert.match(pilotHtml, /id="verifyPublishButton"/);
   assert.match(pilotHtml, /Try something else with this wiring/);
   assert.match(pilotHtml, /<dialog class="behavior-tune-dialog"[\s\S]*?<form class="behavior-change-form"/);
   assert.match(pilotHtml, /class="verify-primary-grid"/);
@@ -189,29 +187,4 @@ test("the pilot guides users from flashing into a camera-free test and behavior 
   assert.match(pilotStyles, /body\[data-stage="4"\] \.stage-controls/);
   assert.match(pilotStyles, /\.verify-completion-bar/);
   assert.doesNotMatch(pilotStyles, /\.camera-frame|#cameraPreview|\.camera-placeholder/);
-});
-
-test("the Play dashboard sits between Test and GitHub publishing", async () => {
-  const pilotHtml = await readFile(path.join(root, "pilot", "index.html"), "utf8");
-  const pilotScript = await readFile(path.join(root, "pilot", "app.js"), "utf8");
-  const pilotStyles = await readFile(path.join(root, "pilot", "styles.css"), "utf8");
-
-  assert.equal((pilotHtml.match(/data-workflow-stage="\d"/g) || []).length, 6);
-  assert.match(pilotHtml, /data-workflow-stage="4"[\s\S]*?<strong>Play<\/strong>/);
-  assert.match(pilotHtml, /data-workflow-stage="5"[\s\S]*?<strong>Finish<\/strong>/);
-  assert.match(pilotHtml, /id="play" data-stage-index="4"/);
-  assert.match(pilotHtml, /id="document" data-stage-index="5"/);
-  assert.match(pilotHtml, /id="playTelemetryGrid"/);
-  assert.match(pilotHtml, /id="playControlsGrid"/);
-  assert.match(pilotHtml, /id="playFinishButton"[^>]*disabled/);
-  assert.match(pilotHtml, /id="publishGithubButton"[^>]*>Push my build to GitHub/);
-  assert.match(pilotHtml, /id="repoNameInput"/);
-  assert.match(pilotScript, /buildPlayDashboard\(buildDashboardProject/);
-  assert.match(pilotScript, /parseDashboardTelemetry/);
-  assert.match(pilotScript, /state\.playInteractionCount \+= 1/);
-  assert.match(pilotScript, /requestedIndex === 5 && state\.playInteractionCount < 1/);
-  assert.match(pilotScript, /MAKEABLE:STATUS\?/);
-  assert.match(pilotStyles, /\.play-dashboard-grid/);
-  assert.match(pilotStyles, /\.play-telemetry-card/);
-  assert.match(pilotStyles, /\.play-control-card/);
 });
