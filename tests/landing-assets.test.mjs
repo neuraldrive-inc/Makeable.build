@@ -47,7 +47,11 @@ test("Google signup uses the SDK-rendered button flow", async () => {
     landingScript,
     /if \(config\.googleClientId && googleSlot\) void initializeWaitlistExperience\(\)/,
   );
-  assert.match(landingScript, /You’re already on the list/);
+  assert.match(landingScript, /cache: "no-store"/);
+  assert.match(landingScript, /You’re already on the waitlist!/);
+  assert.match(landingScript, /content\.dataset\.waitlistState = waitlistState/);
+  assert.match(landingScript, /googleSlot\.dataset\.waitlistState = waitlistState/);
+  assert.match(landingScript, /document\.createElement\(confirmed \? "div" : "button"\)/);
   assert.doesNotMatch(landingScript, /localStorage|sessionStorage|document\.cookie/);
   assert.match(landingHtml, /verified email to Makeable’s early-access/);
   assert.match(landingHtml, /How we use your data/);

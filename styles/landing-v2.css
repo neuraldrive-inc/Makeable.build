@@ -1175,9 +1175,26 @@ figure {
 .google-fallback--confirmed {
   gap: 0.75rem;
   border-color: rgb(33 108 80 / 22%);
-  background: #fffefa;
+  background: linear-gradient(135deg, #f5fff9 0%, #e5f8ed 100%);
   color: var(--bench-ink);
   cursor: default;
+}
+
+.google-slot[data-waitlist-state] {
+  border-color: rgb(33 108 80 / 22%);
+  background: #effbf4;
+  box-shadow:
+    0 0.5rem 0 rgb(33 108 80 / 10%),
+    0 1.125rem 1.75rem rgb(33 108 80 / 13%);
+  opacity: 1;
+}
+
+.google-slot[data-waitlist-state]::after {
+  opacity: 0.35;
+}
+
+.google-slot[data-waitlist-state="returning"] .google-confirmation-mark {
+  box-shadow: 0 0 0 0.25rem rgb(27 166 128 / 14%);
 }
 
 .google-fallback--confirmed:hover,
@@ -1314,12 +1331,13 @@ figure {
   color: #216c50;
 }
 
-.signup-status[data-tone="success"]::before {
+.signup-status:not(:empty)[data-tone="success"]::before {
   content: "✓";
 }
 
 .signup-note.is-confirmed {
   color: var(--bench-green);
+  font-weight: 800;
 }
 
 .signup-data-use.is-confirmed {
