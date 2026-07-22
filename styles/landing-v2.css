@@ -409,10 +409,11 @@ figure {
     --scope-top: 38%;
     --scope-left: 71.5%;
     --scope-background: 46% 42%;
-    --trace-top: 49%;
+    --trace-top: 37%;
     --trace-left: 57%;
-    --trace-width: 16%;
-    --trace-rotation: -5deg;
+    --trace-width: 13%;
+    --trace-height: 11%;
+    --trace-rotation: 0deg;
     position: absolute;
     z-index: 4;
     inset: 0;
@@ -499,18 +500,24 @@ figure {
     outline-offset: 0.125rem;
   }
 
+  /* Curved highlight arc: a quarter-ellipse drawn from a rounded top-left
+     corner (top + left borders only) so the wire keeps a real bend at every
+     desktop width instead of collapsing to a flat line. */
   .waitlist-page--static-hero .workflow-wire-trace {
     position: absolute;
     z-index: 2;
     top: var(--trace-top);
     left: var(--trace-left);
     width: var(--trace-width);
-    border-top: 0.1875rem solid var(--focus-color);
-    border-radius: 100%;
+    height: var(--trace-height);
+    border: 0.1875rem solid var(--focus-color);
+    border-right: 0;
+    border-bottom: 0;
+    border-radius: 60% 0 0 0;
     box-shadow: 0 0 0.25rem color-mix(in srgb, var(--focus-color), white 25%);
     transform: rotate(var(--trace-rotation));
     transform-origin: left center;
-    transition: top 220ms ease, left 220ms ease, width 220ms ease, transform 220ms ease, border-color 220ms ease;
+    transition: top 220ms ease, left 220ms ease, width 220ms ease, height 220ms ease, transform 220ms ease, border-color 220ms ease;
   }
 
   .waitlist-page--static-hero .workflow-connection-scope {
@@ -561,10 +568,11 @@ figure {
     --scope-top: 45%;
     --scope-left: 76%;
     --scope-background: 54% 48%;
-    --trace-top: 53%;
+    --trace-top: 44%;
     --trace-left: 58%;
-    --trace-width: 17%;
-    --trace-rotation: 2deg;
+    --trace-width: 16%;
+    --trace-height: 9%;
+    --trace-rotation: 0deg;
   }
 
   .waitlist-page--static-hero .workflow-connect-demo[data-selected-wire="sig"] {
@@ -572,10 +580,11 @@ figure {
     --scope-top: 50%;
     --scope-left: 79%;
     --scope-background: 62% 56%;
-    --trace-top: 57%;
-    --trace-left: 58%;
-    --trace-width: 19%;
-    --trace-rotation: 9deg;
+    --trace-top: 49%;
+    --trace-left: 59%;
+    --trace-width: 18%;
+    --trace-height: 8%;
+    --trace-rotation: 0deg;
   }
 
   .waitlist-page--static-hero .build-story > .story-stage {
@@ -1166,9 +1175,26 @@ figure {
 .google-fallback--confirmed {
   gap: 0.75rem;
   border-color: rgb(33 108 80 / 22%);
-  background: #fffefa;
+  background: linear-gradient(135deg, #f5fff9 0%, #e5f8ed 100%);
   color: var(--bench-ink);
   cursor: default;
+}
+
+.google-slot[data-waitlist-state] {
+  border-color: rgb(33 108 80 / 22%);
+  background: #effbf4;
+  box-shadow:
+    0 0.5rem 0 rgb(33 108 80 / 10%),
+    0 1.125rem 1.75rem rgb(33 108 80 / 13%);
+  opacity: 1;
+}
+
+.google-slot[data-waitlist-state]::after {
+  opacity: 0.35;
+}
+
+.google-slot[data-waitlist-state="returning"] .google-confirmation-mark {
+  box-shadow: 0 0 0 0.25rem rgb(27 166 128 / 14%);
 }
 
 .google-fallback--confirmed:hover,
@@ -1305,12 +1331,13 @@ figure {
   color: #216c50;
 }
 
-.signup-status[data-tone="success"]::before {
+.signup-status:not(:empty)[data-tone="success"]::before {
   content: "✓";
 }
 
 .signup-note.is-confirmed {
   color: var(--bench-green);
+  font-weight: 800;
 }
 
 .signup-data-use.is-confirmed {
@@ -2586,10 +2613,20 @@ figure {
   text-align: center;
 }
 
-/* The footer meets the landing canvas through the same beige paper surface,
-   without a separate torn-paper divider. */
+/* Torn-paper grain separator straddling the top of the footer, so the footer
+   reads as its own panel. White strip roughened with the shared torn-paper
+   filter + drop-shadow, matching the vertical .hero-tear seam. */
 .waitlist-footer::before {
-  display: none;
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: -0.5rem;
+  right: -0.375rem; /* slight bleed past the edges so the fray reads */
+  left: -0.375rem;
+  height: 1rem;
+  background-color: #fffefb;
+  filter: url("#torn-paper-fine") drop-shadow(0 0.125rem 0.09375rem rgb(57 42 29 / 14%));
+  pointer-events: none;
 }
 
 .footer-links,
@@ -2860,6 +2897,18 @@ figure {
     min-height: 0;
     padding: 7rem 2rem 3.375rem;
     border-right: 0;
+  }
+
+  /* The static poster hero is an absolutely-composed layer stack (art +
+     signup overlay). Without an explicit height the reflowed hero collapses
+     to zero and the poster + Google button vanish, so give it the poster's
+     own aspect ratio and let the composition fill it full-bleed. */
+  .waitlist-page--static-hero .waitlist-hero {
+    width: min(100%, 30rem);
+    margin-inline: auto;
+    aspect-ratio: 1832 / 2844;
+    height: auto;
+    min-height: 0;
   }
 
   .hero-tear {
@@ -3329,12 +3378,13 @@ figure {
     justify-content: center;
   }
 
-  /* The wire traces + magnifier scope are pixel-calibrated to the desktop
-     photo crop; on the mobile letterbox crop they land wrong, so hide them.
-     The three wire buttons still toggle their selected state. */
+  /* The wire traces + magnifier scope are calibrated to the taller cover
+     crop. Match that crop on phones (see the story-image aspect-ratio below)
+     so the same overlay positions land correctly, and keep them visible so
+     the wire lights up as the visitor taps each connection. */
   .story-scene--connect .wire-trace,
   .story-scene--connect .connection-scope {
-    display: none;
+    display: block;
   }
 
   /* Keep the chips at their compact size on phones so they still
@@ -3376,7 +3426,9 @@ figure {
     top: auto;
     left: auto;
     width: 100%;
-    aspect-ratio: 590 / 168;
+    /* Taller cover crop (matches the tablet framing) so the wire-trace arcs
+       and magnifier scope line up with the board on phones too. */
+    aspect-ratio: 19 / 10;
   }
 
   .story-scene--test .story-visual {
