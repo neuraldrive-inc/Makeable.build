@@ -19,6 +19,7 @@ test("the production landing and pilot stay packaged as self-contained experienc
     "pilot/app.js",
     "pilot/styles.css",
     "pilot/lib/board-profiles.mjs",
+    "pilot/lib/plain-language.mjs",
     "pilot/lib/wiring-annotations.mjs",
     "pilot/images/makeable/icon-chat.svg",
     "pilot/images/makeable/upload-parts-clean.svg",
@@ -127,6 +128,10 @@ test("the pilot guides users from flashing into a camera-free test and behavior 
   assert.match(pilotHtml, /id="testHardwareNowButton"[^>]*>Let’s test it</);
   assert.match(pilotHtml, /id="behaviorSummary"/);
   assert.match(pilotHtml, /id="codeFunctionList"/);
+  assert.match(pilotHtml, />What the board is doing</);
+  assert.match(pilotHtml, />In plain English</);
+  assert.match(pilotHtml, /class="flash-load-layout"/);
+  assert.match(pilotHtml, /class="flash-action-panel"/);
   assert.match(pilotHtml, /id="openBehaviorTuneButton"/);
   assert.match(pilotHtml, /id="behaviorTuneDialog"/);
   assert.match(pilotHtml, /id="behaviorChangeForm"/);
@@ -152,6 +157,10 @@ test("the pilot guides users from flashing into a camera-free test and behavior 
   assert.match(pilotScript, /verifyPublishButton\?\.addEventListener\("click", \(\) => setActiveWorkflowStage\(4\)\)/);
   assert.match(pilotScript, /async function regenerateFirmwareForBehaviorChange\(change\)/);
   assert.match(pilotScript, /connectSerial\(\{ automatic: true \}\)/);
+  assert.match(pilotScript, /explainProjectForChild\(explanationProject\)/);
+  assert.match(pilotScript, /name: "When it turns on"/);
+  assert.match(pilotScript, /name: "While it is running"/);
+  assert.match(pilotScript, /name: "What the messages mean"/);
   assert.doesNotMatch(pilotScript, /function startCamera|function captureEvidence|function verifyBehavior|facingMode: "environment"/);
 
   assert.match(pilotStyles, /\.terminal\s*\{[\s\S]*?height: 248px/);
@@ -159,6 +168,8 @@ test("the pilot guides users from flashing into a camera-free test and behavior 
   assert.match(pilotStyles, /\.terminal-shell/);
   assert.match(pilotStyles, /\.command-composer/);
   assert.match(pilotStyles, /\.behavior-change-form/);
+  assert.match(pilotStyles, /\.flash-stage-grid--automatic[\s\S]*?width: min\(1240px, 100%\)/);
+  assert.match(pilotStyles, /\.flash-load-layout/);
   assert.match(pilotStyles, /body\[data-stage="4"\] \.stage-controls/);
   assert.match(pilotStyles, /\.verify-completion-bar/);
   assert.doesNotMatch(pilotStyles, /\.camera-frame|#cameraPreview|\.camera-placeholder/);

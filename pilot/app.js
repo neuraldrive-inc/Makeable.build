@@ -1,5 +1,11 @@
 import { selectBoardProfile, USB_SERIAL_FILTERS } from "./lib/board-profiles.mjs";
 import { cleanPinLabel, curvedArrowGeometry, friendlyWiringText } from "./lib/wiring-annotations.mjs";
+import {
+  explainMessagesForChild,
+  explainProjectForChild,
+  explainRunningForChild,
+  explainStartupForChild,
+} from "./lib/plain-language.mjs";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -1311,7 +1317,7 @@ async function analyzeHardware() {
         {
           role: "system",
           content:
-            "You are Makeable, an expert hardware build agent for beginners. Identify only the actual visible parts needed for the user's stated project, produce tight normalized bounding boxes for those required parts, make conservative ESP32 wiring choices, flag uncertainty, avoid unsafe pins, and output only schema-valid JSON. Ignore visible parts that are unrelated to the requested build. Never use canned/demo component names or boxes. In user-facing wiring copy, say pin 22 or D22 / 22 instead of GPIO22, and preserve useful signal names such as SCL or SDA. Do not generate source code in this step.",
+            "You are Makeable, an expert hardware build agent for beginners. Identify only the actual visible parts needed for the user's stated project, produce tight normalized bounding boxes for those required parts, make conservative ESP32 wiring choices, flag uncertainty, avoid unsafe pins, and output only schema-valid JSON. Ignore visible parts that are unrelated to the requested build. Never use canned/demo component names or boxes. In user-facing wiring copy, say pin 22 or D22 / 22 instead of GPIO22, and preserve useful signal names such as SCL or SDA. Write firmwareSpec.behavior in everyday English an eight-year-old can understand: say motion sensor instead of PIR, screen instead of OLED display, and avoid bus names or code terms. Do not generate source code in this step.",
         },
         {
           role: "user",
@@ -1410,6 +1416,7 @@ function buildAnalysisPrompt(idea) {
     "Do not claim certainty for ambiguous modules; put uncertainty in warnings.",
     "Do not generate source code in this vision/planning step.",
     "Instead, return a compact firmwareSpec with chosen pins, libraries, serial protocol markers, and behavior.",
+    "Write firmwareSpec.behavior in short everyday sentences for a child. Say motion sensor, screen, light, fan, or pump instead of technical module names. Do not mention PIR, I2C, OLED, setup(), loop(), HIGH, LOW, SDA, or SCL in the behavior explanation.",
     "Include diagnostic tests that can be judged from serial logs and simple camera observations.",
   ].join("\n");
 }
@@ -2599,39 +2606,30 @@ function renderCodeExplanation() {
   }
 
   const spec = plan.firmwareSpec || {};
-  const behavior = compactSentence(spec.behavior || plan.summary || "Runs the project behavior you described.");
+  const explanationProject = {
+    idea: els.ideaText.value.trim(),
+    summary: plan.summary,
+    behavior: spec.behavior,
+    pinAssignments: spec.pinAssignments || [],
+    serialProtocol: spec.serialProtocol || [],
+  };
+  const behavior = explainProjectForChild(explanationProject);
   els.behaviorSummary.textContent = state.lastBehaviorChange
-    ? `${behavior} Latest adjustment: ${compactSentence(state.lastBehaviorChange)}`
+    ? `${behavior} Your latest change: ${compactSentence(state.lastBehaviorChange)}`
     : behavior;
 
-  const pinAssignments = spec.pinAssignments || [];
-  const assignments = pinAssignments.slice(0, 3).map((assignment) => {
-    const rawLabel = friendlyWiringText(assignment.label || assignment.purpose || "A connected part");
-    const label = rawLabel.replace(/\s*\(?(?:on\s+)?pin\s+\d{1,2}\)?\s*/gi, " ").replace(/\s+/g, " ").trim();
-    const pin = cleanPinLabel(`pin ${assignment.gpio}`, `${label} ${assignment.purpose || ""}`);
-    return `${label || "Connected part"} on ${pin}`;
-  });
-  if (pinAssignments.length > assignments.length) {
-    const remaining = pinAssignments.length - assignments.length;
-    assignments.push(`${remaining} ${remaining === 1 ? "other connection" : "other connections"}`);
-  }
-  const messages = (spec.serialProtocol || []).filter(Boolean).slice(0, 3);
   const functions = [
     {
-      name: "setup()",
-      description: assignments.length
-        ? `Runs once when the board starts and prepares ${joinReadableList(assignments)}.`
-        : "Runs once when the board starts and prepares the connected parts.",
+      name: "When it turns on",
+      description: explainStartupForChild(explanationProject),
     },
     {
-      name: "loop()",
-      description: `Repeats the project behavior: ${lowercaseFirst(compactSentence(behavior, 155))}`,
+      name: "While it is running",
+      description: explainRunningForChild(explanationProject),
     },
     {
-      name: "Board messages",
-      description: messages.length
-        ? `Reports useful checkpoints such as ${joinReadableList(messages.map((message) => `“${message}”`))}.`
-        : "Prints startup and behavior checkpoints so you can see what the board is doing.",
+      name: "What the messages mean",
+      description: explainMessagesForChild(explanationProject),
     },
   ];
 
@@ -2779,18 +2777,6 @@ function compactSentence(value, maxLength = 280) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   if (text.length <= maxLength) return text;
   return `${text.slice(0, maxLength - 1).trimEnd()}…`;
-}
-
-function lowercaseFirst(value) {
-  const text = String(value || "").trim();
-  if (!text) return "runs the project behavior.";
-  return `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
-}
-
-function joinReadableList(items) {
-  if (items.length < 2) return items[0] || "the connected parts";
-  if (items.length === 2) return `${items[0]} and ${items[1]}`;
-  return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
 }
 
 async function refreshEsp32Status() {

@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23ef2d83'/%3E%3Cpath d='M18 43V21l14 14 14-14v22' stroke='white' stroke-width='7' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=makeable-workbench-20260721-scan-hierarchy" />
+    <link rel="stylesheet" href="./styles.css?v=makeable-workbench-20260721-plain-english" />
     <script src="/config.local.js"></script>
   </head>
   <body>
@@ -158,14 +158,28 @@
         <div class="code-workspace" id="codeWorkspace" hidden>
           <div class="flash-stage-grid flash-stage-grid--automatic">
             <div class="web-flash-panel paper-sheet tape-blue">
-              <h2>Your build is wired.<br />Let’s give it a brain.</h2>
-              <aside class="sticky-note sticky-note--white tape-grid-pink">Connect your ESP32 with a USB cable.</aside>
-              <div class="connection-steps">
-                <p><b>1</b> Plug the USB cable into your computer.</p><p><b>2</b> Click once to allow this board the first time.</p><p><b>3</b> Makeable prepares and loads everything automatically.</p>
+              <header class="flash-panel-heading">
+                <div><span>Ready to load</span><h2>Your build is wired.<br />Let’s give it a brain.</h2><p>I’ll prepare the code, check it, and put it on your board.</p></div>
+                <aside class="flash-board-note"><span aria-hidden="true">USB</span><div><strong>Keep your board plugged in</strong><p>Use a USB cable that can carry data, not only power.</p></div></aside>
+              </header>
+              <div class="flash-load-layout">
+                <section class="connection-guide" aria-labelledby="connectionGuideTitle">
+                  <h3 id="connectionGuideTitle">Three quick steps</h3>
+                  <div class="connection-steps">
+                    <p><b>1</b><span>Plug the USB cable into your computer.</span></p>
+                    <p><b>2</b><span>Choose your board when the browser asks.</span></p>
+                    <p><b>3</b><span>Keep this tab open while Makeable finishes.</span></p>
+                  </div>
+                </section>
+                <section class="flash-action-panel">
+                  <span>Automatic load</span>
+                  <h3>Makeable handles the code from here.</h3>
+                  <p>One click prepares, checks, and loads everything. You’ll see each step below.</p>
+                  <button class="torn-button torn-button--coral" id="compileFlashButton" type="button">Connect &amp; load automatically</button>
+                  <div class="flash-progress"><span id="flashProgressBar"></span></div>
+                  <div class="status-strip" id="esp32Status">The board tools are ready. Connect your board when you’re ready.</div>
+                </section>
               </div>
-              <button class="torn-button torn-button--coral" id="compileFlashButton" type="button">Connect &amp; load automatically</button>
-              <div class="flash-progress"><span id="flashProgressBar"></span></div>
-              <div class="status-strip" id="esp32Status">The ESP32 compiler is online. Connect your board when you’re ready.</div>
               <div class="flash-success-transition" id="flashSuccessTransition" aria-live="polite" hidden>
                 <span class="flash-success-mark" aria-hidden="true">✓</span>
                 <div>
@@ -210,9 +224,9 @@
             </section>
 
             <section class="test-card behavior-panel">
-              <div class="op-header"><span>2</span><div><h2>Understand the code</h2><p>See the board’s behavior without digging through source files.</p></div></div>
+              <div class="op-header"><span>2</span><div><h2>What the board is doing</h2><p>A simple explanation, without code words.</p></div></div>
               <div class="behavior-overview">
-                <span>Project behavior</span>
+                <span>In plain English</span>
                 <p id="behaviorSummary">Create your guide first, then I’ll explain the behavior here.</p>
               </div>
               <ul class="code-function-list" id="codeFunctionList"></ul>
@@ -296,6 +310,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="./app.js?v=makeable-workbench-20260721-scan-hierarchy"></script>
+    <script type="module" src="./app.js?v=makeable-workbench-20260721-plain-english"></script>
   </body>
 </html>
