@@ -31,7 +31,7 @@
     />
     <link rel="stylesheet" href="/styles/landing-v2.css" />
   </head>
-  <body class="waitlist-page">
+  <body class="waitlist-page waitlist-page--static-hero">
     <a class="waitlist-skip" href="#main">Skip to Makeable</a>
 
     <!--
@@ -90,6 +90,14 @@
         aria-labelledby="hero-title"
         data-sticky-signup
       >
+        <figure class="hero-static-art" aria-hidden="true">
+          <img
+        src="/assets/landing/hero-static-reference-sharpened-v2.png"
+            alt=""
+        width="1832"
+        height="2844"
+          />
+        </figure>
         <div class="hero-message">
           <div class="hero-title-block">
             <div class="hero-heading-wrap">
@@ -184,26 +192,23 @@
           <p class="story-index">Your parts are the starting point</p>
           <h2 id="desk-reveal-title">Your desk. Makeable sees a build.</h2>
           <p>
-            Drag the handle to see Makeable recognize the useful parts already
-            in front of you.
+            See the before-and-after view of Makeable recognizing the useful
+            parts already in front of you.
           </p>
         </div>
 
-        <div class="comparison paper-card" data-comparison data-recognition-visible="true">
+        <div class="comparison paper-card" data-recognition-visible="true">
+          <img class="comparison-reference-photo" src="/assets/landing/comparison-photo-wide-topdown-v15.png" alt="" />
           <section class="desk-half desk-half--before" aria-label="Your desk: OLED display, PIR sensor, and ESP32 DevKit">
-            <img class="desk-reference-photo" src="/assets/landing/desk-parts.jpeg" alt="" />
+            <img class="desk-reference-photo" src="/assets/landing/comparison-your-desk-shared-table.png" alt="" />
             <span class="desk-pill desk-pill--before">Your desk</span>
           </section>
           <section class="desk-half desk-half--after" aria-label="Makeable sees: OLED display, PIR motion sensor, and ESP32 DevKit">
             <img class="desk-reference-photo desk-reference-photo--unlabelled" src="/assets/landing/desk-parts.jpeg" alt="" />
-            <img class="desk-reference-photo desk-reference-photo--annotated" src="/assets/landing/desk-parts-labelled.jpeg" alt="" />
+            <img class="desk-reference-photo desk-reference-photo--annotated" src="/assets/landing/comparison-makeable-sees-shared-table.png" alt="" />
             <span class="desk-pill desk-pill--after">Makeable sees</span>
           </section>
           <span class="comparison-divider" aria-hidden="true"></span>
-          <button class="comparison-toggle" type="button" data-comparison-toggle aria-pressed="true" aria-label="Hide Makeable part labels">
-            <img src="/assets/icons/lucide/arrow-left.svg" alt="" width="18" height="18" />
-            <img src="/assets/icons/lucide/arrow-right.svg" alt="" width="18" height="18" />
-          </button>
         </div>
         </section>
 
@@ -213,6 +218,25 @@
           data-active-story="recognize"
           aria-label="How Makeable works"
         >
+        <figure class="workflow-overview-fit" aria-label="Recognize, connect, and test workflow">
+          <img
+            src="/assets/landing/workflow-overview-fit-v1.png"
+            alt=""
+            width="1694"
+            height="929"
+          />
+          <div class="workflow-connect-demo" data-workflow-connect data-selected-wire="vcc">
+            <div class="workflow-wire-controls" role="group" aria-label="Example wiring connections">
+              <button class="workflow-wire-button is-selected" type="button" data-workflow-wire="vcc" aria-pressed="true">VCC → 5V</button>
+              <button class="workflow-wire-button" type="button" data-workflow-wire="gnd" aria-pressed="false">GND → GND</button>
+              <button class="workflow-wire-button" type="button" data-workflow-wire="sig" aria-pressed="false">SIG → A0</button>
+            </div>
+            <span class="workflow-wire-trace" aria-hidden="true"></span>
+            <span class="workflow-connection-scope" data-workflow-scope aria-hidden="true">
+              <span data-workflow-scope-label>VCC → 5V</span>
+            </span>
+          </div>
+        </figure>
         <div class="story-stage" data-story-stage>
           <article
             class="story-scene story-scene--recognize paper-card"
@@ -346,28 +370,29 @@
         </div>
         </section>
 
-        <footer class="waitlist-footer" aria-label="Legal and footer links">
-          <a class="makeable-wordmark makeable-wordmark--footer" href="/" aria-label="Makeable home">
-            <span class="makeable-wordmark-text" aria-hidden="true">Makeable</span>
-            <span class="makeable-logo-spark" aria-hidden="true"></span>
-          </a>
-          <p class="footer-purpose">
-            Makeable is an AI hardware prototyping studio that turns the parts on your desk
-            into wiring plans, working firmware, and guided tests.
-          </p>
-          <p class="footer-contact">
-            <a href="tel:+14157389390">US +1 (415) 738-9390</a>
-            <span aria-hidden="true">·</span>
-            <a href="tel:+6583087479">SG +65 8308 7479</a>
-          </p>
-          <p class="footer-links">
-            <a href="/privacy/">Privacy</a>
-            <span aria-hidden="true">·</span>
-            <a href="/terms/">Terms</a>
-          </p>
-          <p>© <span data-current-year></span> Makeable</p>
-        </footer>
       </div>
+
+      <footer class="waitlist-footer" aria-label="Legal and footer links">
+        <a class="makeable-wordmark makeable-wordmark--footer" href="/" aria-label="Makeable home">
+          <span class="makeable-wordmark-text" aria-hidden="true">Makeable</span>
+          <span class="makeable-logo-spark" aria-hidden="true"></span>
+        </a>
+        <p class="footer-purpose">
+          Makeable is an AI hardware prototyping studio that turns the parts on your desk
+          into wiring plans, working firmware, and guided tests.
+        </p>
+        <p class="footer-contact">
+          <a href="tel:+14157389390">US +1 (415) 738-9390</a>
+          <span aria-hidden="true">·</span>
+          <a href="tel:+6583087479">SG +65 8308 7479</a>
+        </p>
+        <p class="footer-links">
+          <a href="/privacy/">Privacy</a>
+          <span aria-hidden="true">·</span>
+          <a href="/terms/">Terms</a>
+        </p>
+        <p>© <span data-current-year></span> Makeable</p>
+      </footer>
 
       <span class="hero-tear" aria-hidden="true"></span>
     </main>

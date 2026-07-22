@@ -246,6 +246,361 @@ figure {
   background-repeat: repeat;
 }
 
+/* Reference-led static hero: the supplied artwork owns the full visual
+ * treatment. Only the transparent, real Google control above it can receive
+ * pointer input. */
+.waitlist-page--static-hero .waitlist-nav {
+  display: none;
+}
+
+.waitlist-page--static-hero .waitlist-hero {
+  padding: 0;
+  place-items: stretch;
+}
+
+.hero-static-art {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  pointer-events: none;
+}
+
+.hero-static-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+}
+
+.waitlist-page--static-hero .hero-message {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  margin: 0;
+  pointer-events: none;
+  transform: none !important;
+}
+
+.waitlist-page--static-hero .hero-title-block,
+.waitlist-page--static-hero .launch-poster {
+  display: none;
+}
+
+.waitlist-page--static-hero .hero-signup-anchor {
+  position: absolute;
+  top: 80.7%;
+  left: 4.35%;
+  width: 87.55%;
+  height: 12.65%;
+  min-height: 0;
+  pointer-events: auto;
+}
+
+.waitlist-page--static-hero .hero-signup,
+.waitlist-page--static-hero .hero-signup [data-signup-content],
+.waitlist-page--static-hero .google-slot {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+}
+
+.waitlist-page--static-hero .hero-signup {
+  position: relative;
+  z-index: 1;
+}
+
+.waitlist-page--static-hero .hero-signup h2,
+.waitlist-page--static-hero .signup-note,
+.waitlist-page--static-hero .signup-data-use {
+  display: none;
+}
+
+.waitlist-page--static-hero .google-slot {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  opacity: 0;
+}
+
+.waitlist-page--static-hero .google-slot::after {
+  display: none;
+}
+
+.workflow-overview-fit {
+  display: none;
+  margin: 0;
+}
+
+/* Desktop first view: the reference-led hero, desk comparison, and the full
+ * three-step workflow are intentionally composed as one fixed viewport. */
+@media (min-width: 1280px) {
+  /* Keep the landing composition as one poster-sized grid row. When the
+     visitor scrolls to the footer, the left poster and right content travel
+     together instead of leaving the left rail pinned in place. */
+  .waitlist-page--static-hero .waitlist-hero {
+    position: relative;
+    top: auto;
+    align-self: stretch;
+  }
+
+  .waitlist-page--static-hero .landing-story-column {
+    height: 100svh;
+    min-height: 100svh;
+    grid-template-rows: 35% minmax(0, 1fr);
+    gap: 0.375rem;
+    overflow: hidden;
+  }
+
+  .waitlist-page--static-hero .desk-reveal {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .waitlist-page--static-hero .build-story {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .waitlist-page--static-hero .workflow-overview-fit {
+    position: relative;
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    container-type: size;
+    background: #fffdf8;
+  }
+
+  .waitlist-page--static-hero .workflow-overview-fit img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: fill;
+  }
+
+  /* The composite workflow artwork has a white paper edge baked into its
+     bottom pixels. Match that edge to the page paper so the footer begins
+     through one continuous beige surface. */
+  .waitlist-page--static-hero .workflow-overview-fit::after {
+    position: absolute;
+    z-index: 6;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 0.5rem;
+    background: var(--bench-bg);
+    content: "";
+    pointer-events: none;
+  }
+
+  /* The overview is a compact static composition, except for the Connect
+   * row: its three controls remain real buttons above the artwork. */
+  .waitlist-page--static-hero .workflow-connect-demo {
+    --focus-color: #f05e74;
+    --scope-top: 38%;
+    --scope-left: 71.5%;
+    --scope-background: 46% 42%;
+    --trace-top: 49%;
+    --trace-left: 57%;
+    --trace-width: 16%;
+    --trace-rotation: -5deg;
+    position: absolute;
+    z-index: 4;
+    inset: 0;
+  }
+
+  .waitlist-page--static-hero .workflow-wire-controls {
+    position: absolute;
+    z-index: 5;
+    top: 57.5%;
+    left: 3.55%;
+    display: flex;
+    gap: clamp(0.6875rem, 1.65vw, 1.375rem);
+    align-items: center;
+    isolation: isolate;
+  }
+
+  .waitlist-page--static-hero .workflow-wire-controls::before {
+    position: absolute;
+    z-index: 0;
+    /* The source artwork contains its own static chips. This backing is
+       deliberately larger than that original chip strip, so the real
+       buttons fully replace it at every desktop width. */
+    top: -0.75rem;
+    bottom: -0.75rem;
+    left: -0.5rem;
+    /* Match the width of the static chips in the scaled overview artwork.
+       `cqw` tracks the artwork rather than the button text, so no legacy
+       chip can reappear on wider displays. */
+    right: min(-0.75rem, calc(15.3125rem - 31.5cqw));
+    border-radius: 0;
+    /* Opaque by design: even the source image's dark text and coloured
+       shadows must not bleed through behind the live controls. */
+    background: #e6e8f4;
+    content: "";
+  }
+
+  .waitlist-page--static-hero .workflow-wire-button {
+    display: grid;
+    position: relative;
+    z-index: 1;
+    min-height: 1.75rem;
+    padding: 0.25rem 0.5rem;
+    place-items: center;
+    border: 0.125rem solid #f05e74;
+    border-radius: 0.3125rem;
+    background: #fff4f5;
+    box-shadow: 0 0.09375rem 0.1875rem rgb(35 29 27 / 15%);
+    color: var(--bench-ink);
+    font-family: var(--font-hand);
+    font-size: clamp(0.5rem, 0.76vw, 0.6875rem);
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    opacity: 0.76;
+    transition: opacity 180ms ease, transform 180ms ease, filter 180ms ease;
+  }
+
+  .waitlist-page--static-hero .workflow-wire-button:nth-child(1) {
+    min-width: 4.875rem;
+  }
+
+  .waitlist-page--static-hero .workflow-wire-button:nth-child(2) {
+    min-width: 5.75rem;
+    border-color: #777b83;
+    background: #f7f7f7;
+  }
+
+  .waitlist-page--static-hero .workflow-wire-button:nth-child(3) {
+    min-width: 4.75rem;
+    border-color: #f0b528;
+    background: #fff9df;
+  }
+
+  .waitlist-page--static-hero .workflow-wire-button.is-selected {
+    opacity: 1;
+    filter: saturate(1.2) brightness(1.03);
+    transform: translateY(-0.0625rem);
+  }
+
+  .waitlist-page--static-hero .workflow-wire-button:focus-visible {
+    outline: 0.125rem solid var(--bench-ink);
+    outline-offset: 0.125rem;
+  }
+
+  .waitlist-page--static-hero .workflow-wire-trace {
+    position: absolute;
+    z-index: 2;
+    top: var(--trace-top);
+    left: var(--trace-left);
+    width: var(--trace-width);
+    border-top: 0.1875rem solid var(--focus-color);
+    border-radius: 100%;
+    box-shadow: 0 0 0.25rem color-mix(in srgb, var(--focus-color), white 25%);
+    transform: rotate(var(--trace-rotation));
+    transform-origin: left center;
+    transition: top 220ms ease, left 220ms ease, width 220ms ease, transform 220ms ease, border-color 220ms ease;
+  }
+
+  .waitlist-page--static-hero .workflow-connection-scope {
+    position: absolute;
+    z-index: 3;
+    top: var(--scope-top);
+    left: var(--scope-left);
+    display: grid;
+    width: clamp(3.125rem, 5.25vw, 4.5rem);
+    aspect-ratio: 1;
+    overflow: hidden;
+    place-items: end center;
+    border: 0.1875rem solid #fffefa;
+    border-radius: 50%;
+    background-color: #accbbd;
+    background-image: url("../assets/landing/connect-hardware-clean.png");
+    background-position: var(--scope-background);
+    background-size: 21.25rem auto;
+    box-shadow: 0 0.1875rem 0.5625rem rgb(36 42 42 / 28%), 0 0 0 0.125rem var(--focus-color);
+    color: var(--bench-ink);
+    transform: translate(-50%, -50%);
+    transition: top 220ms ease, left 220ms ease, background-position 220ms ease, box-shadow 220ms ease;
+  }
+
+  .waitlist-page--static-hero .workflow-connection-scope::before {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: radial-gradient(circle, transparent 38%, rgb(19 25 26 / 18%) 100%);
+    content: "";
+  }
+
+  .waitlist-page--static-hero .workflow-connection-scope span {
+    position: relative;
+    z-index: 1;
+    margin: 0 0.1875rem 0.25rem;
+    padding: 0.125rem 0.1875rem;
+    border-radius: 0.1875rem;
+    background: rgb(255 253 248 / 94%);
+    font-size: clamp(0.375rem, 0.54vw, 0.5rem);
+    font-weight: 900;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .waitlist-page--static-hero .workflow-connect-demo[data-selected-wire="gnd"] {
+    --focus-color: #333943;
+    --scope-top: 45%;
+    --scope-left: 76%;
+    --scope-background: 54% 48%;
+    --trace-top: 53%;
+    --trace-left: 58%;
+    --trace-width: 17%;
+    --trace-rotation: 2deg;
+  }
+
+  .waitlist-page--static-hero .workflow-connect-demo[data-selected-wire="sig"] {
+    --focus-color: #e2b219;
+    --scope-top: 50%;
+    --scope-left: 79%;
+    --scope-background: 62% 56%;
+    --trace-top: 57%;
+    --trace-left: 58%;
+    --trace-width: 19%;
+    --trace-rotation: 9deg;
+  }
+
+  .waitlist-page--static-hero .build-story > .story-stage {
+    display: none;
+  }
+
+  .waitlist-page--static-hero .hero-tear {
+    top: 0;
+    bottom: auto;
+    height: 100svh;
+  }
+
+  .waitlist-page--static-hero .waitlist-footer {
+    display: flex;
+    min-height: 12rem;
+    margin-top: 0.5rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  .waitlist-page--static-hero {
+    --landing-rail-width: min(40vw, calc(100svh * 0.644163));
+  }
+}
+
 /*
   Vertical torn-paper seam between the hero (left) and story (right)
   columns — a white grainy strip roughened with the shared torn-paper
@@ -413,6 +768,45 @@ figure {
 .hero-lede span {
   display: block;
   white-space: nowrap;
+}
+
+/* Keep the hero copy on the same left guide as the wordmark. The title and
+ * supporting lines share their natural type rhythm rather than being centred
+ * or squeezed independently. */
+.hero-message {
+  transform-origin: left center;
+}
+
+.hero-title-block {
+  align-self: flex-start;
+  text-align: left;
+}
+
+.hero-heading-wrap,
+.hero-message h1 {
+  width: max-content;
+}
+
+.hero-message h1 {
+  line-height: 0.9;
+}
+
+.hero-message h1 > span {
+  margin-inline: 0;
+  transform: none;
+  transform-origin: left;
+}
+
+.hero-message h1 > span:nth-child(2),
+.hero-message h1 > .hero-underlined {
+  font-size: 1em;
+  transform: none;
+}
+
+.hero-lede {
+  margin-left: 0;
+  text-align: left;
+  line-height: 1.28;
 }
 
 .launch-tag {
@@ -1014,14 +1408,37 @@ figure {
 }
 
 .comparison {
-  --comparison-split: 44.5%;
+  --comparison-split: 50%;
   position: relative;
   display: grid;
   width: 100%;
   height: 100%;
   overflow: hidden;
+  box-sizing: border-box;
+  border-top: 0.1875rem solid #fffdf8;
   grid-template-columns: var(--comparison-split) calc(100% - var(--comparison-split));
   background: #8f6947;
+}
+
+.comparison::before {
+  display: none;
+}
+
+.comparison-reference-photo {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: fill;
+}
+
+/* The real reference photo carries the finished labels, so no duplicate UI
+ * treatment sits above the photographed composition. */
+.comparison .desk-pill {
+  display: none;
 }
 
 .desk-half {
@@ -1048,6 +1465,20 @@ figure {
   pointer-events: none;
 }
 
+/* Crop the baked slider artwork out at each inner edge; the images retain
+ * their composition while the divider remains the only comparison marker. */
+.desk-half::before {
+  display: none;
+}
+
+.desk-half--before .desk-reference-photo {
+  transform: none;
+}
+
+.desk-half--after .desk-reference-photo {
+  transform: none;
+}
+
 .desk-reference-photo {
   position: absolute;
   z-index: 1;
@@ -1057,6 +1488,7 @@ figure {
   height: 100%;
   max-width: none;
   object-fit: cover;
+  object-position: center;
   transition: opacity 220ms ease;
 }
 
@@ -1074,19 +1506,20 @@ figure {
 
 .desk-pill {
   position: absolute;
-  z-index: 3;
-  top: 1.125rem;
+  z-index: 9;
+  top: 0.5625rem;
   left: 50%;
   transform: translateX(-50%);
-  padding: 0.4375rem 1rem;
+  padding: 0.375rem 1rem;
   border-radius: 62.4375rem;
-  font-family: inherit;
+  font-family: var(--font-hand);
   font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-weight: 800;
+  letter-spacing: 0.015em;
+  line-height: 1;
   text-transform: uppercase;
   white-space: nowrap;
-  box-shadow: 0 0.375rem 1rem rgb(23 12 4 / 22%);
+  box-shadow: 0 0.125rem 0.25rem rgb(23 12 4 / 14%);
   pointer-events: none;
 }
 
@@ -1098,6 +1531,23 @@ figure {
 .desk-pill--after {
   color: #fff;
   background: #ef4b47;
+}
+
+/* The paper rail above replaces the labels baked into the reference images. */
+.desk-pill {
+  display: block;
+}
+
+/* Keep the centre handle clickable without drawing a second handle over it. */
+.comparison-toggle {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.comparison-toggle::before,
+.comparison-toggle::after {
+  display: none;
 }
 
 .desk-component {
@@ -1274,16 +1724,47 @@ figure {
 }
 
 .comparison-divider {
+  display: none;
+}
+
+/* The paired image-edge patches hide the baked slider; only the line remains. */
+.comparison-divider::before {
+  display: none;
+}
+
+.comparison-divider::after {
   position: absolute;
-  z-index: 7;
-  top: 0;
-  bottom: 0;
-  left: var(--comparison-split);
-  width: 0.25rem;
-  background: white;
-  box-shadow: 0 0 0 0.0625rem rgb(23 19 20 / 10%);
-  pointer-events: none;
-  transform: translateX(-50%);
+  z-index: 2;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0 12%, #fffdf8 20% 84%, transparent 100%);
+  box-shadow: 0 0 0.1875rem rgb(31 18 10 / 20%);
+  clip-path: polygon(
+    36% 0,
+    78% 0.5%,
+    60% 7%,
+    88% 14%,
+    64% 23%,
+    82% 31%,
+    54% 41%,
+    76% 52%,
+    58% 63%,
+    86% 74%,
+    62% 85%,
+    80% 94%,
+    48% 100%,
+    14% 100%,
+    34% 93%,
+    10% 84%,
+    32% 73%,
+    12% 62%,
+    30% 51%,
+    8% 40%,
+    28% 30%,
+    12% 21%,
+    30% 12%,
+    16% 4%
+  );
+  content: "";
 }
 
 .comparison-toggle {
@@ -1327,6 +1808,19 @@ figure {
 .comparison-toggle::after {
   margin-left: -0.0625rem;
   transform: rotate(45deg);
+}
+
+/* The reference assets draw the visible arrows; the real button remains a
+ * transparent click target over that artwork. */
+.comparison-toggle {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.comparison-toggle::before,
+.comparison-toggle::after {
+  display: none;
 }
 
 .recognition-callout {
@@ -2074,6 +2568,10 @@ figure {
   position: relative;
   z-index: 40;
   display: flex;
+  width: 100%;
+  box-sizing: border-box;
+  grid-column: 1 / -1;
+  grid-row: 2;
   flex-direction: column;
   gap: 0.625rem;
   align-items: center;
@@ -2088,19 +2586,10 @@ figure {
   text-align: center;
 }
 
-/* Torn white grainy separator between the columns above and the footer,
-   matching the seams between the story sections. */
+/* The footer meets the landing canvas through the same beige paper surface,
+   without a separate torn-paper divider. */
 .waitlist-footer::before {
-  content: "";
-  position: absolute;
-  z-index: 1;
-  top: -0.25rem;
-  right: -0.375rem;
-  left: -0.375rem;
-  height: 1rem;
-  background-color: #fffefb;
-  filter: url("#torn-paper-fine") drop-shadow(0 0.125rem 0.09375rem rgb(57 42 29 / 14%));
-  pointer-events: none;
+  display: none;
 }
 
 .footer-links,
@@ -2995,6 +3484,18 @@ figure {
 
   .signup-note-rays {
     right: -1.5rem;
+  }
+}
+
+@media (max-width: 1279px) {
+  .hero-heading-wrap,
+  .hero-message h1 {
+    width: max-content;
+  }
+
+  .hero-message h1 > span:nth-child(2),
+  .hero-message h1 > .hero-underlined {
+    font-size: 1em;
   }
 }
 

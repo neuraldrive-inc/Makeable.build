@@ -15,6 +15,7 @@ setupBuildStory();
 setupMobileSignup();
 setupRecognition();
 setupConnect();
+setupWorkflowConnect();
 setupTestPanel();
 setupGoogleWave();
 setupHeroFit();
@@ -453,6 +454,76 @@ function setupConnect() {
   startAutoCycle();
 }
 
+function setupWorkflowConnect() {
+  const scene = document.querySelector("[data-workflow-connect]");
+  const scope = scene?.querySelector("[data-workflow-scope]");
+  const scopeLabel = scope?.querySelector("[data-workflow-scope-label]");
+  const controls = [...(scene?.querySelectorAll("[data-workflow-wire]") || [])];
+  if (!scene || !scope || !scopeLabel || !controls.length) return;
+
+  const wireOrder = ["vcc", "gnd", "sig"];
+  const details = {
+    vcc: "VCC → 5V",
+    gnd: "GND → GND",
+    sig: "SIG → A0",
+  };
+  const desktop = window.matchMedia("(min-width: 1280px)");
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let autoCycleTimer = null;
+
+  const selectWire = (wire) => {
+    scene.dataset.selectedWire = wire;
+    scope.dataset.wire = wire;
+    scopeLabel.textContent = details[wire];
+    controls.forEach((control) => {
+      const selected = control.dataset.workflowWire === wire;
+      control.classList.toggle("is-selected", selected);
+      control.setAttribute("aria-pressed", String(selected));
+    });
+  };
+
+  const stopAutoCycle = () => {
+    if (autoCycleTimer === null) return;
+    window.clearInterval(autoCycleTimer);
+    autoCycleTimer = null;
+  };
+
+  const startAutoCycle = () => {
+    if (
+      !desktop.matches ||
+      reducedMotion.matches ||
+      document.hidden ||
+      autoCycleTimer !== null
+    ) return;
+    autoCycleTimer = window.setInterval(() => {
+      const currentIndex = wireOrder.indexOf(scene.dataset.selectedWire);
+      selectWire(wireOrder[(currentIndex + 1) % wireOrder.length]);
+    }, 1000);
+  };
+
+  const restartAutoCycle = () => {
+    stopAutoCycle();
+    startAutoCycle();
+  };
+
+  controls.forEach((control) => {
+    control.addEventListener("click", () => {
+      selectWire(control.dataset.workflowWire);
+      restartAutoCycle();
+    });
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopAutoCycle();
+    else startAutoCycle();
+  });
+  desktop.addEventListener("change", restartAutoCycle);
+  reducedMotion.addEventListener?.("change", restartAutoCycle);
+
+  selectWire("vcc");
+  startAutoCycle();
+}
+
 function setupTestPanel() {
   const panel = document.querySelector("[data-test-panel]");
   const run = panel?.querySelector("[data-test-run]");
@@ -506,6 +577,7 @@ function setupTestPanel() {
 }
 
 function setupMobileSignup() {
+  if (document.body.classList.contains("waitlist-page--static-hero")) return;
   const anchor = document.querySelector("[data-signup-anchor]");
   const signup = anchor?.querySelector(".hero-signup");
   if (!anchor || !signup || !("IntersectionObserver" in window)) return;
