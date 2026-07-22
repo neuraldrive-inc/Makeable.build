@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23ef2d83'/%3E%3Cpath d='M18 43V21l14 14 14-14v22' stroke='white' stroke-width='7' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=makeable-workbench-20260721-describe-flow" />
+    <link rel="stylesheet" href="./styles.css?v=makeable-workbench-20260721-play-dashboard" />
     <script src="/config.local.js"></script>
   </head>
   <body>
@@ -35,7 +35,10 @@
           <span class="step-number">4</span><span class="step-note step-note--mint"><img src="images/makeable/icon-bolt.svg" alt="" /><strong>Test</strong></span>
         </button>
         <button class="timeline-step" data-workflow-stage="4" type="button">
-          <span class="step-number">5</span><span class="step-note step-note--yellow"><img src="images/makeable/icon-globe.svg" alt="" /><strong>Finish</strong></span>
+          <span class="step-number">5</span><span class="step-note step-note--coral"><img src="images/makeable/icon-controls.svg" alt="" /><strong>Play</strong></span>
+        </button>
+        <button class="timeline-step" data-workflow-stage="5" type="button" disabled title="Try one control before finishing">
+          <span class="step-number">6</span><span class="step-note step-note--yellow"><img src="images/makeable/icon-globe.svg" alt="" /><strong>Finish</strong></span>
         </button>
       </nav>
 
@@ -246,20 +249,60 @@
           </div>
 
           <footer class="verify-completion-bar">
-            <div class="verify-completion-copy"><span aria-hidden="true">✓</span><div><strong>Everything working the way you want?</strong><p>Save the guide, code behavior, and test notes as one finished build.</p></div></div>
+            <div class="verify-completion-copy"><span aria-hidden="true">✓</span><div><strong>Everything working the way you want?</strong><p>Open the live controls and take your finished hardware for a spin.</p></div></div>
             <button class="verify-back-button" id="verifyBackButton" type="button">← Back to wiring</button>
-            <button class="verify-publish-button" id="verifyPublishButton" type="button">Publish my build <span aria-hidden="true">→</span></button>
+            <button class="verify-publish-button" id="verifyPublishButton" type="button">Open my controls <span aria-hidden="true">→</span></button>
           </footer>
         </div>
       </section>
 
-      <section class="workflow-stage" id="document" data-stage-index="4" hidden>
-        <header class="stage-heading stage-heading--row"><div><h1>You built it.<br /><span>Nice work.</span></h1><p>Makeable keeps the guide, parts list, and test results together while you build.</p></div><svg class="sparkles" viewBox="0 0 110 82" aria-hidden="true"><path d="m38 4 8 22 19 9-19 8-8 24-8-24-19-8 19-9 8-22ZM83 39l4 12 11 5-11 5-4 13-5-13-10-5 10-5 5-12Z" /></svg></header>
+      <section class="workflow-stage" id="play" data-stage-index="4" hidden>
+        <header class="stage-heading stage-heading--play">
+          <div><h1>Take it for<br />a <span>spin.</span></h1><p>Watch your build, press its buttons, and see how it responds.</p></div>
+          <aside class="play-project-badge"><span>Live controls for</span><strong id="playProjectTitle">Your Makeable build</strong><p id="playProjectSummary">Controls will appear from the parts in your project.</p></aside>
+        </header>
+
+        <div class="play-dashboard paper-sheet tape-blue">
+          <header class="play-dashboard-bar">
+            <div class="play-live-status"><i id="playConnectionDot"></i><span><strong id="playConnectionLabel">Preview mode</strong><small id="playConnectionHint">Connect over USB for live readings.</small></span></div>
+            <button class="play-connect-button" id="playConnectButton" type="button">Connect my board</button>
+          </header>
+
+          <div class="play-dashboard-grid">
+            <section class="play-panel play-telemetry-panel" aria-labelledby="playTelemetryTitle">
+              <div class="play-panel-heading"><span>1</span><div><h2 id="playTelemetryTitle">Live right now</h2><p>These cards update as your board talks.</p></div></div>
+              <div class="play-telemetry-grid" id="playTelemetryGrid"></div>
+              <div class="play-activity">
+                <div><strong>Activity</strong><span>Newest first</span></div>
+                <ol id="playActivityFeed"><li>Waiting for your first action.</li></ol>
+              </div>
+            </section>
+
+            <section class="play-panel play-controls-panel" aria-labelledby="playControlsTitle">
+              <div class="play-panel-heading"><span>2</span><div><h2 id="playControlsTitle">Try the controls</h2><p>Chosen for the parts and job in this build.</p></div></div>
+              <div class="play-controls-grid" id="playControlsGrid"></div>
+              <p class="play-preview-note" id="playPreviewNote"><span aria-hidden="true">i</span> Without USB, controls preview here. Connect the board to send them for real.</p>
+            </section>
+          </div>
+
+          <footer class="play-completion-bar">
+            <div class="play-completion-copy"><span id="playProgressMark" aria-hidden="true">1</span><div><strong id="playProgressTitle">Try one control to continue.</strong><p id="playProgressText">Play with the build first. Then you can save it and push it to GitHub.</p></div></div>
+            <button class="verify-back-button" id="playBackButton" type="button">← Back to test</button>
+            <button class="verify-publish-button" id="playFinishButton" type="button" disabled>Finish my build <span aria-hidden="true">→</span></button>
+          </footer>
+        </div>
+      </section>
+
+      <section class="workflow-stage" id="document" data-stage-index="5" hidden>
+        <header class="stage-heading stage-heading--row"><div><h1>You built it.<br /><span>Nice work.</span></h1><p>Save the guide, the controls you tried, and your test results to GitHub.</p></div><svg class="sparkles" viewBox="0 0 110 82" aria-hidden="true"><path d="m38 4 8 22 19 9-19 8-8 24-8-24-19-8 19-9 8-22ZM83 39l4 12 11 5-11 5-4 13-5-13-10-5 10-5 5-12Z" /></svg></header>
         <div class="doc-grid paper-sheet tape-blue">
           <div class="doc-actions">
-            <div class="package-list"><span>✓ project notes</span><span>✓ build guide</span><span>✓ parts list</span><span>✓ test results</span></div>
+            <div class="package-list"><span>✓ project notes</span><span>✓ build guide</span><span>✓ parts list</span><span>✓ test results</span><span>✓ controls you tried</span></div>
+            <label class="github-field" for="repoNameInput"><span>GitHub repository name</span><input id="repoNameInput" type="text" value="makeable-build" autocomplete="off" /></label>
+            <label class="github-private" for="privateRepoInput"><input id="privateRepoInput" type="checkbox" checked /><span>Keep this repository private</span></label>
+            <button class="torn-button torn-button--coral" id="publishGithubButton" type="button">Push my build to GitHub</button>
             <button class="paper-button" id="generateReadmeButton" type="button">Refresh project notes</button>
-            <div class="status-strip" id="githubStatus">Your notes stay here with your build session.</div>
+            <div class="status-strip" id="githubStatus">Your project is ready to save.</div>
           </div>
           <div class="readme-card"><div class="project-preview"><img src="images/makeable/self-watering-kit.png" alt="Illustrated self-watering plant electronics build" /><strong>My Makeable project</strong><span>Tested &amp; working</span></div><pre class="readme-preview" id="readmePreview">Your project notes will appear here.</pre></div>
         </div>
@@ -317,6 +360,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="./app.js?v=makeable-workbench-20260721-describe-flow"></script>
+    <script type="module" src="./app.js?v=makeable-workbench-20260721-play-dashboard"></script>
   </body>
 </html>

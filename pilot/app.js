@@ -6,6 +6,11 @@ import {
   explainRunningForChild,
   explainStartupForChild,
 } from "./lib/plain-language.mjs";
+import {
+  buildPlayDashboard,
+  dashboardFirmwareRequirements,
+  parseDashboardTelemetry,
+} from "./lib/control-dashboard.mjs";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -44,8 +49,13 @@ const WORKFLOW_STAGES = [
     hint: "Listen to the board and check the real behavior.",
   },
   {
+    hash: "#play",
+    label: "Step 5: Play",
+    hint: "Use live controls made for this project.",
+  },
+  {
     hash: "#document",
-    label: "Step 5: Finish",
+    label: "Step 6: Finish",
     hint: "Review the guide, parts, and test results.",
   },
 ];
@@ -102,6 +112,11 @@ const state = {
   analysisInProgress: false,
   photoPrepStep: 0,
   photoPrepComplete: false,
+  playDashboardModel: null,
+  playTelemetry: {},
+  playActivity: [],
+  playInteractionCount: 0,
+  playSerialBuffer: "",
   auth: loadStoredAuth(),
   account: null,
 };
@@ -172,6 +187,21 @@ const els = {
   behaviorChangeStatus: $("#behaviorChangeStatus"),
   verifyBackButton: $("#verifyBackButton"),
   verifyPublishButton: $("#verifyPublishButton"),
+  playProjectTitle: $("#playProjectTitle"),
+  playProjectSummary: $("#playProjectSummary"),
+  playConnectionDot: $("#playConnectionDot"),
+  playConnectionLabel: $("#playConnectionLabel"),
+  playConnectionHint: $("#playConnectionHint"),
+  playConnectButton: $("#playConnectButton"),
+  playTelemetryGrid: $("#playTelemetryGrid"),
+  playControlsGrid: $("#playControlsGrid"),
+  playActivityFeed: $("#playActivityFeed"),
+  playPreviewNote: $("#playPreviewNote"),
+  playProgressMark: $("#playProgressMark"),
+  playProgressTitle: $("#playProgressTitle"),
+  playProgressText: $("#playProgressText"),
+  playBackButton: $("#playBackButton"),
+  playFinishButton: $("#playFinishButton"),
   compileFlashButton: $("#compileFlashButton"),
   flashProgressBar: $("#flashProgressBar"),
   esp32Status: $("#esp32Status"),
@@ -331,9 +361,14 @@ refreshServerConfig().then(initializeAuth);
 refreshEsp32Status();
 if (/^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
   globalThis.__MAKEABLE_TEST_API__ = {
-    loadPlan(plan) {
+    loadPlan(plan, idea = "") {
+      if (idea) {
+        els.ideaText.value = idea;
+        renderProjectBrief();
+      }
       state.plan = plan;
       state.compiledFirmware = null;
+      resetPlayDashboardState();
       renderPlan();
       setActiveWorkflowStage(2);
       setBuildMode("code");
@@ -407,6 +442,9 @@ function bindEvents() {
   els.behaviorChangeForm.addEventListener("submit", applyBehaviorChange);
   els.verifyBackButton?.addEventListener("click", () => setActiveWorkflowStage(2));
   els.verifyPublishButton?.addEventListener("click", () => setActiveWorkflowStage(4));
+  els.playConnectButton?.addEventListener("click", connectSerial);
+  els.playBackButton?.addEventListener("click", () => setActiveWorkflowStage(3));
+  els.playFinishButton?.addEventListener("click", () => setActiveWorkflowStage(5));
   els.compileFlashButton.addEventListener("click", compileAndFlashFirmware);
   els.testHardwareNowButton.addEventListener("click", goToTestStage);
   els.generateReadmeButton.addEventListener("click", () => {
@@ -522,7 +560,9 @@ async function advanceFromIdea() {
 }
 
 function setActiveWorkflowStage(index, options = {}) {
-  const activeIndex = clamp(index, 0, WORKFLOW_STAGES.length - 1);
+  const requestedIndex = clamp(index, 0, WORKFLOW_STAGES.length - 1);
+  const finishIsLocked = requestedIndex === 5 && state.playInteractionCount < 1;
+  const activeIndex = finishIsLocked ? 4 : requestedIndex;
   state.activeWorkflowStageIndex = activeIndex;
   document.body.dataset.stage = String(activeIndex + 1);
 
@@ -544,12 +584,20 @@ function setActiveWorkflowStage(index, options = {}) {
   els.stageControlHint.textContent = stage.hint;
   els.stageBackButton.disabled = activeIndex === 0;
   els.stageNextButton.disabled = activeIndex === WORKFLOW_STAGES.length - 1;
-  els.stageNextButton.textContent = ["Scan my parts", "Build it", "Let’s test it", "Publish my build", "All set"][activeIndex];
+  els.stageNextButton.textContent = ["Scan my parts", "Build it", "Let’s test it", "Open my controls", "Finish my build", "All set"][activeIndex];
 
   if (activeIndex === 2 && els.codeWorkspace?.hidden !== false) setBuildMode("wiring");
   if (activeIndex === 1) renderProjectBrief();
   if (activeIndex === 3) renderCodeExplanation();
+  if (activeIndex === 4) renderPlayDashboard();
+  if (activeIndex === 5) {
+    state.readme = buildReadme();
+    els.readmePreview.textContent = state.readme;
+  }
   if (activeIndex !== 2) stopFlashSuccessTransition();
+
+  updatePlayProgressGate();
+  if (finishIsLocked) pushPlayActivity("Try one dashboard control before finishing.");
 
   if (options.updateHash !== false) {
     const url = `${window.location.pathname}${stage.hash}`;
@@ -824,6 +872,7 @@ function handlePhotoUpload(event) {
   if (state.activeWorkflowStageIndex === 0) setActiveWorkflowStage(1);
   state.plan = null;
   state.compiledFirmware = null;
+  resetPlayDashboardState();
   state.lastBehaviorChange = "";
   state.pendingBehaviorChange = "";
   stopFlashSuccessTransition({ hide: true });
@@ -890,6 +939,7 @@ function clearPhoto() {
   state.imageFit = null;
   state.plan = null;
   state.compiledFirmware = null;
+  resetPlayDashboardState();
   state.lastBehaviorChange = "";
   state.pendingBehaviorChange = "";
   state.photoPrepComplete = false;
@@ -1356,6 +1406,7 @@ async function analyzeHardware() {
       },
     });
     state.plan = normalizePlan(parseStructuredJson(data, "hardware plan"));
+    resetPlayDashboardState();
     state.lastBehaviorChange = "";
     state.pendingBehaviorChange = "";
     state.plan.warnings = [...validatePlan(state.plan), ...state.plan.warnings];
@@ -1606,7 +1657,7 @@ async function generateFirmwareForPlan(idea) {
       {
         role: "system",
         content:
-          "You are Makeable's ESP32 firmware engineer. Generate a compact, compile-ready ESP32 Arduino-core C++ sketch from the provided hardware plan. Support ESP32-family targets only. Use only the libraries explicitly listed as available in the user prompt. Output only schema-valid JSON. Do not include markdown fences. Keep the sketch under 180 lines unless absolutely required.",
+          "You are Makeable's ESP32 firmware engineer. Generate a compact, compile-ready ESP32 Arduino-core C++ sketch from the provided hardware plan. Support ESP32-family targets only. Use only the libraries explicitly listed as available in the user prompt. Output only schema-valid JSON. Do not include markdown fences. Include the requested Makeable Play serial protocol and keep the sketch under 240 lines unless absolutely required.",
       },
       {
         role: "user",
@@ -1652,6 +1703,7 @@ async function generateFirmwareForPlan(idea) {
 }
 
 function buildFirmwarePrompt(idea, plan) {
+  const playModel = buildPlayDashboard(buildDashboardProject(plan, idea));
   return [
     `Project idea: ${idea}`,
     "",
@@ -1683,6 +1735,7 @@ function buildFirmwarePrompt(idea, plan) {
     "- Print clear diagnostic markers matching the diagnostic tests.",
     "- Avoid unsafe boot pins unless the plan explicitly requires them.",
     "- If the hardware plan is uncertain, make the sketch conservative and explain the assumption in notes.",
+    dashboardFirmwareRequirements(playModel),
     `- Use only these hosted compiler libraries: ${HOSTED_FIRMWARE_LIBRARIES.join(", ")}.`,
     "- Do not invent headers, packages, classes, methods, pin aliases, or APIs that are not supplied by those libraries.",
     "- Do not include markdown fences in the sketch string.",
@@ -1740,7 +1793,7 @@ async function repairFirmwareForCompilerError({ idea, profile, sketch, details, 
       {
         role: "system",
         content:
-          "You repair ESP32 Arduino-core C++ after a real compiler failure. Return a complete corrected sketch, not a patch. Preserve the intended behavior and pin assignments. Use only the explicitly available libraries. Resolve every reported diagnostic. Output only schema-valid JSON without markdown fences.",
+          "You repair ESP32 Arduino-core C++ after a real compiler failure. Return a complete corrected sketch, not a patch. Preserve the intended behavior, pin assignments, Makeable Play serial commands, and MAKEABLE:DASHBOARD status snapshots. Use only the explicitly available libraries. Resolve every reported diagnostic. Output only schema-valid JSON without markdown fences.",
       },
       {
         role: "user",
@@ -2465,9 +2518,13 @@ function setVoiceStatus(text, tone) {
 async function connectSerial(options = {}) {
   if (!("serial" in navigator)) {
     setStatus(els.logEvaluation, "This browser can’t listen to the board. Use Chrome or Edge on desktop.", "danger");
+    syncPlayConnectionUi("This browser cannot use USB serial. Preview controls still work here.");
     return;
   }
-  if (state.serialPort) return;
+  if (state.serialPort) {
+    syncPlayConnectionUi();
+    return;
+  }
 
   try {
     if (options.automatic) {
@@ -2486,10 +2543,13 @@ async function connectSerial(options = {}) {
     els.sendSerialButton.disabled = false;
     appendSerial("Makeable: I’m listening now. If the board speaks, you’ll see it here.\n");
     setStatus(els.logEvaluation, "Connected. Waiting for the board to say something.", "ok");
+    syncPlayConnectionUi();
     readSerialLoop();
+    void writeSerialCommand("MAKEABLE:STATUS?", { echo: false });
   } catch (error) {
     console.error(error);
     setStatus(els.logEvaluation, `I couldn’t connect yet: ${error.message}`, "danger");
+    syncPlayConnectionUi(`I couldn’t connect yet: ${error.message}`);
   }
 }
 
@@ -2545,17 +2605,23 @@ async function disconnectSerial() {
   els.sendSerialButton.disabled = true;
   appendSerial("Makeable: I stopped listening to the board.\n");
   setStatus(els.logEvaluation, "Listening paused. The board can stay connected over USB.", "warn");
+  syncPlayConnectionUi();
 }
 
 async function sendSerialCommand() {
   const command = els.serialCommandInput.value;
   if (!state.serialPort || !command) return;
+  await writeSerialCommand(command);
+  els.serialCommandInput.value = "";
+}
 
+async function writeSerialCommand(command, options = {}) {
+  if (!state.serialPort?.writable || !command) return false;
   const writer = state.serialPort.writable.getWriter();
   try {
     await writer.write(new TextEncoder().encode(`${command}\n`));
-    appendSerial(`> ${command}\n`);
-    els.serialCommandInput.value = "";
+    if (options.echo !== false) appendSerial(`> ${command}\n`);
+    return true;
   } finally {
     writer.releaseLock();
   }
@@ -2569,6 +2635,7 @@ function appendSerial(text) {
   if (state.serialLog.length > 25000) state.serialLog = state.serialLog.slice(-25000);
   els.serialLog.textContent = state.serialLog;
   els.serialLog.scrollTop = els.serialLog.scrollHeight;
+  updatePlayDashboardFromSerial(text);
 }
 
 function evaluateSerialLogs() {
@@ -2645,6 +2712,215 @@ function renderCodeExplanation() {
   });
 }
 
+function resetPlayDashboardState() {
+  state.playDashboardModel = null;
+  state.playTelemetry = {};
+  state.playActivity = [];
+  state.playInteractionCount = 0;
+  state.playSerialBuffer = "";
+  updatePlayProgressGate();
+}
+
+function buildDashboardProject(plan = state.plan, idea = els.ideaText.value.trim()) {
+  const spec = plan?.firmwareSpec || {};
+  return {
+    projectTitle: plan?.projectTitle,
+    idea,
+    summary: plan?.summary,
+    behavior: spec.behavior,
+    parts: plan?.parts || [],
+    pinAssignments: spec.pinAssignments || [],
+    serialProtocol: spec.serialProtocol || [],
+  };
+}
+
+function renderPlayDashboard() {
+  const project = buildDashboardProject();
+  const model = buildPlayDashboard(project);
+  state.playDashboardModel = model;
+  els.playProjectTitle.textContent = model.title;
+  els.playProjectSummary.textContent = compactSentence(explainProjectForChild(project), 150);
+
+  model.telemetry.forEach((item) => {
+    if (!state.playTelemetry[item.id]) state.playTelemetry[item.id] = item.initial;
+  });
+
+  els.playTelemetryGrid.innerHTML = "";
+  model.telemetry.forEach((item) => {
+    const card = document.createElement("article");
+    const label = document.createElement("span");
+    const value = document.createElement("strong");
+    const detail = document.createElement("small");
+    card.className = "play-telemetry-card";
+    card.dataset.telemetryId = item.id;
+    card.dataset.icon = item.icon;
+    label.textContent = item.label;
+    value.textContent = state.playTelemetry[item.id] || item.initial;
+    detail.textContent = item.detail;
+    card.append(label, value, detail);
+    els.playTelemetryGrid.append(card);
+  });
+
+  els.playControlsGrid.innerHTML = "";
+  model.controls.forEach((control, index) => {
+    const card = document.createElement(control.type === "text" ? "form" : "div");
+    const copy = document.createElement("div");
+    const title = document.createElement("strong");
+    const description = document.createElement("small");
+    card.className = `play-control-card${control.type === "text" ? " play-text-control" : ""}`;
+    copy.className = "play-control-copy";
+    title.textContent = control.label;
+    description.textContent = control.description;
+    copy.append(title, description);
+    card.append(copy);
+
+    if (control.type === "text") {
+      const composer = document.createElement("div");
+      const input = document.createElement("input");
+      const action = document.createElement("button");
+      input.id = `playControlInput${index}`;
+      input.type = "text";
+      input.maxLength = 64;
+      input.placeholder = control.placeholder;
+      input.setAttribute("aria-label", control.label);
+      action.type = "submit";
+      action.className = "play-control-button";
+      action.textContent = control.actionLabel;
+      composer.className = "play-text-composer";
+      composer.append(input, action);
+      card.append(composer);
+      card.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const value = input.value.trim();
+        if (!value) {
+          input.focus();
+          return;
+        }
+        void handlePlayControl(control, value);
+      });
+    } else {
+      const action = document.createElement("button");
+      action.type = "button";
+      action.className = "play-control-button";
+      action.textContent = "Try it";
+      action.addEventListener("click", () => void handlePlayControl(control));
+      card.append(action);
+    }
+    els.playControlsGrid.append(card);
+  });
+
+  renderPlayActivity();
+  syncPlayConnectionUi();
+  updatePlayProgressGate();
+}
+
+async function handlePlayControl(control, rawValue = "") {
+  const value = String(rawValue || "").replace(/[\r\n]+/g, " ").trim().slice(0, 64);
+  const command = control.type === "text" ? `${control.commandPrefix}${value}` : control.command;
+  let sentToBoard = false;
+  try {
+    sentToBoard = await writeSerialCommand(command);
+  } catch (error) {
+    console.error(error);
+    pushPlayActivity(`The board did not accept that command: ${error.message}`);
+  }
+
+  const preview = { ...(control.preview || {}) };
+  if (control.type === "text") preview.screen = `Showing “${value}”`;
+  Object.entries(preview).forEach(([id, nextValue]) => {
+    if (nextValue) setPlayTelemetry(id, nextValue);
+  });
+  setPlayTelemetry("lastAction", control.feedback);
+  state.playInteractionCount += 1;
+  pushPlayActivity(`${sentToBoard ? "Live" : "Preview"}: ${control.feedback}.`);
+  updatePlayProgressGate();
+  if (sentToBoard) window.setTimeout(() => void writeSerialCommand("MAKEABLE:STATUS?", { echo: false }), 180);
+}
+
+function setPlayTelemetry(id, value) {
+  if (!id || value == null) return;
+  state.playTelemetry[id] = String(value);
+  const card = [...(els.playTelemetryGrid?.children || [])].find((item) => item.dataset.telemetryId === id);
+  if (!card) return;
+  const valueNode = card.querySelector("strong");
+  if (valueNode) valueNode.textContent = state.playTelemetry[id];
+  card.classList.remove("has-update");
+  requestAnimationFrame(() => card.classList.add("has-update"));
+}
+
+function pushPlayActivity(message) {
+  if (!message) return;
+  state.playActivity.unshift({
+    message: String(message),
+    time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+  });
+  state.playActivity = state.playActivity.slice(0, 6);
+  renderPlayActivity();
+}
+
+function renderPlayActivity() {
+  if (!els.playActivityFeed) return;
+  els.playActivityFeed.innerHTML = "";
+  if (!state.playActivity.length) {
+    const empty = document.createElement("li");
+    empty.textContent = "Waiting for your first action.";
+    els.playActivityFeed.append(empty);
+    return;
+  }
+  state.playActivity.forEach((activity) => {
+    const item = document.createElement("li");
+    item.textContent = `${activity.time} · ${activity.message}`;
+    els.playActivityFeed.append(item);
+  });
+}
+
+function updatePlayProgressGate() {
+  const ready = state.playInteractionCount > 0;
+  const finishTimelineButton = [...(els.timelineButtons || [])].find((button) => Number(button.dataset.workflowStage) === 5);
+  if (finishTimelineButton) {
+    finishTimelineButton.disabled = !ready;
+    finishTimelineButton.title = ready ? "Finish and save this build" : "Try one control before finishing";
+  }
+  if (!els.playFinishButton) return;
+  els.playFinishButton.disabled = !ready;
+  const completionCopy = els.playProgressTitle?.closest(".play-completion-copy");
+  completionCopy?.classList.toggle("is-ready", ready);
+  els.playProgressMark.textContent = ready ? "✓" : "1";
+  els.playProgressTitle.textContent = ready ? "Nice — your dashboard is working." : "Try one control to continue.";
+  els.playProgressText.textContent = ready
+    ? `You tried ${state.playInteractionCount} ${state.playInteractionCount === 1 ? "control" : "controls"}. Keep playing or finish and save the build.`
+    : "Play with the build first. Then you can save it and push it to GitHub.";
+}
+
+function syncPlayConnectionUi(message = "") {
+  if (!els.playConnectButton) return;
+  const isLive = Boolean(state.serialPort);
+  els.playConnectionDot.classList.toggle("is-live", isLive);
+  els.playConnectionLabel.textContent = isLive ? "Board connected" : "Preview mode";
+  els.playConnectionHint.textContent = message || (isLive
+    ? "Live readings and controls are moving over USB."
+    : "Connect over USB for live readings.");
+  els.playConnectButton.disabled = isLive;
+  els.playConnectButton.textContent = isLive ? "Connected" : "Connect my board";
+  if (els.playPreviewNote) {
+    els.playPreviewNote.lastChild.textContent = isLive
+      ? " Controls are live. Every action is sent to your board over USB."
+      : " Without USB, controls preview here. Connect the board to send them for real.";
+  }
+}
+
+function updatePlayDashboardFromSerial(chunk) {
+  state.playSerialBuffer += String(chunk || "");
+  const lines = state.playSerialBuffer.split(/\r?\n/);
+  state.playSerialBuffer = lines.pop() || "";
+  if (!lines.length) return;
+  const updates = parseDashboardTelemetry(lines.join("\n"));
+  if (!updates.length) return;
+  updates.forEach((update) => setPlayTelemetry(update.id, update.value));
+  const labels = new Map((state.playDashboardModel?.telemetry || []).map((item) => [item.id, item.label]));
+  pushPlayActivity(`Board update: ${updates.map((update) => `${labels.get(update.id) || update.id} is ${update.value}`).join(", ")}.`);
+}
+
 async function applyBehaviorChange(event) {
   event.preventDefault();
   const change = els.behaviorChangeInput.value.trim();
@@ -2668,6 +2944,7 @@ async function applyBehaviorChange(event) {
   els.behaviorChangeInput.disabled = true;
   setStatus(els.behaviorChangeStatus, "Updating the behavior and checking the new code...", "warn");
   stopFlashSuccessTransition({ hide: true });
+  resetPlayDashboardState();
   closeBehaviorTuneDialog();
   setActiveWorkflowStage(2);
   setBuildMode("code");
@@ -2709,7 +2986,7 @@ async function regenerateFirmwareForBehaviorChange(change) {
       {
         role: "system",
         content:
-          "You update an existing ESP32 Arduino-core C++ sketch for a beginner. Make only the requested behavior change. Preserve the existing board, wiring, pin assignments, safety choices, diagnostic markers, and supported libraries. Return one complete compile-ready sketch, not a patch. Output only schema-valid JSON without markdown fences.",
+          "You update an existing ESP32 Arduino-core C++ sketch for a beginner. Make only the requested behavior change. Preserve the existing board, wiring, pin assignments, safety choices, diagnostic markers, supported libraries, Makeable Play serial commands, and MAKEABLE:DASHBOARD status snapshots. Return one complete compile-ready sketch, not a patch. Output only schema-valid JSON without markdown fences.",
       },
       {
         role: "user",
@@ -2734,6 +3011,9 @@ async function regenerateFirmwareForBehaviorChange(change) {
                 null,
                 2,
               ),
+              "",
+              "Keep this dashboard contract:",
+              dashboardFirmwareRequirements(buildPlayDashboard(buildDashboardProject())),
               "",
               "Current complete sketch:",
               currentSketch,
@@ -2964,6 +3244,11 @@ function buildReadme() {
   const behaviorChange = state.lastBehaviorChange
     ? `\n## Latest behavior change\n\n${state.lastBehaviorChange}\n`
     : "";
+  const dashboardModel = state.playDashboardModel || buildPlayDashboard(buildDashboardProject(plan));
+  const dashboardControls = dashboardModel.controls.map((control) => `- ${control.label}`).join("\n");
+  const dashboardActivity = state.playActivity.length
+    ? state.playActivity.slice(0, 5).map((activity) => `- ${activity.message}`).join("\n")
+    : "- No dashboard actions recorded.";
 
   return `# ${plan.projectTitle}
 
@@ -2989,6 +3274,16 @@ ${warnings}
 
 Makeable securely prepares and loads the board software from the browser. No source-code download or desktop IDE is required.
 ${behaviorChange}
+## Play dashboard
+
+The dashboard was generated for this project's parts and behavior.
+
+Controls available:
+${dashboardControls || "- Board connection check"}
+
+Latest activity:
+${dashboardActivity}
+
 ## Notes
 
 ${firmwareNotes}
