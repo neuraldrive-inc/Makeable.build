@@ -39,6 +39,10 @@ const ARDUINO_COMPILE_JOBS = Math.max(1, Number(initialEnv.ARDUINO_COMPILE_JOBS 
 const COMPILE_TIMEOUT_MS = Math.max(30000, Number(initialEnv.COMPILE_TIMEOUT_MS || 240000));
 const MAX_VOICE_SESSION_MS = Math.max(30000, Number(initialEnv.MAX_VOICE_SESSION_MS || 120000));
 const INITIAL_FREE_CREDITS = Math.max(0, Number(initialEnv.INITIAL_FREE_CREDITS || 10));
+const HTTP_KEEP_ALIVE_TIMEOUT_MS = 65_000;
+const HTTP_HEADERS_TIMEOUT_MS = 66_000;
+const HTTP_REQUEST_TIMEOUT_MS = Math.max(COMPILE_TIMEOUT_MS + 10_000, 310_000);
+const SHUTDOWN_GRACE_MS = 25_000;
 const dynamodb = new DynamoDBClient({ region: initialEnv.AWS_REGION || "us-east-1" });
 const jwksByIssuer = new Map();
 const localWaitlistSessions = new Map();
@@ -222,9 +226,35 @@ function handleHttpRequestError(res, error) {
 
 server.on("upgrade", handleDeepgramUpgrade);
 
+server.keepAliveTimeout = HTTP_KEEP_ALIVE_TIMEOUT_MS;
+server.headersTimeout = HTTP_HEADERS_TIMEOUT_MS;
+server.requestTimeout = HTTP_REQUEST_TIMEOUT_MS;
+
 server.listen(port, () => {
   console.log(`Makeable running at http://localhost:${port}`);
 });
+
+let shutdownStarted = false;
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  process.on(signal, () => beginGracefulShutdown(signal));
+}
+
+function beginGracefulShutdown(signal) {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  console.log(`Makeable received ${signal}; draining active requests.`);
+  const forceExit = setTimeout(() => {
+    console.error("Makeable shutdown grace period expired.");
+    process.exit(1);
+  }, SHUTDOWN_GRACE_MS);
+  forceExit.unref();
+  server.close((error) => {
+    clearTimeout(forceExit);
+    if (error) console.error("Makeable could not close cleanly.", error);
+    process.exit(error ? 1 : 0);
+  });
+  server.closeIdleConnections?.();
+}
 
 function handleDeepgramUpgrade(req, socket, head) {
   try {

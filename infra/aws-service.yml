@@ -100,10 +100,10 @@ Resources:
           - Name: DEEPGRAM_API_KEY
             ValueFrom: !Ref DeepgramSecretArn
       ScalingTarget:
-        MinTaskCount: 1
-        MaxTaskCount: 1
+        MinTaskCount: 2
+        MaxTaskCount: 10
         AutoScalingMetric: AVERAGE_CPU
-        AutoScalingTargetValue: 60
+        AutoScalingTargetValue: 35
       Tags:
         - Key: Project
           Value: Makeable

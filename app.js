@@ -10,6 +10,7 @@ const LEGACY_REASONING_EFFORT_DEFAULTS = new Set(["low"]);
 const AI_BACKGROUND_TIMEOUT_MS = 8 * 60 * 1000;
 const AI_POLL_BASE_INTERVAL_MS = 2200;
 const AI_TRANSIENT_RETRY_ATTEMPTS = 2;
+const COMPILE_BUSY_RETRY_ATTEMPTS = 36;
 const ANNOTATION_LABEL_PADDING = 12;
 const ANNOTATION_LABEL_GAP = 10;
 const AUTH_STORAGE_KEY = "makeable.auth.v1";
@@ -1485,7 +1486,7 @@ function buildFirmwarePrompt(idea, plan) {
 async function compileFirmwareWithAutomaticRepair(profile, options = {}) {
   let sketch = state.plan?.firmware?.sketch || "";
   try {
-    return await compileFirmwareSketch(sketch, profile);
+    return await compileFirmwareSketch(sketch, profile, options.onProgress);
   } catch (error) {
     const details = compilerFailureDetails(error);
     if (!details || !state.generationId) throw error;
@@ -1503,7 +1504,7 @@ async function compileFirmwareWithAutomaticRepair(profile, options = {}) {
     sketch = repaired.sketch;
     options.onProgress?.("The repair is ready. Verifying it with the ESP32 compiler...");
     try {
-      return await compileFirmwareSketch(sketch, profile);
+      return await compileFirmwareSketch(sketch, profile, options.onProgress);
     } catch (repairError) {
       console.error("Automatic firmware repair did not compile", repairError);
       throw new Error("The automatic code repair could not pass the ESP32 compiler. Please make the guide again.");
@@ -1511,13 +1512,25 @@ async function compileFirmwareWithAutomaticRepair(profile, options = {}) {
   }
 }
 
-async function compileFirmwareSketch(sketch, profile) {
-  const compiled = await apiJson("/api/firmware/compile", {
-    method: "POST",
-    body: JSON.stringify({ sketch, boardProfile: profile.id }),
-  });
-  compiled.sourceSketch = sketch;
-  return compiled;
+async function compileFirmwareSketch(sketch, profile, onProgress) {
+  for (let attempt = 0; attempt <= COMPILE_BUSY_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      const compiled = await apiJson("/api/firmware/compile", {
+        method: "POST",
+        body: JSON.stringify({ sketch, boardProfile: profile.id }),
+      });
+      compiled.sourceSketch = sketch;
+      return compiled;
+    } catch (error) {
+      const compilerIsBusy = Number(error?.status) === 429 && /compiler is busy/i.test(error.message);
+      if (!compilerIsBusy || attempt === COMPILE_BUSY_RETRY_ATTEMPTS) throw error;
+      const retryAfterMs = Math.max(1, Number(error.retryAfterSeconds) || 5) * 1000;
+      const jitterMs = Math.round(Math.random() * 1200);
+      onProgress?.("The compiler is helping another build. I’ll retry automatically...");
+      await sleep(retryAfterMs + jitterMs);
+    }
+  }
+  throw new Error("The hosted compiler stayed busy for too long. Please try again in a moment.");
 }
 
 function compilerFailureDetails(error) {
@@ -2782,6 +2795,10 @@ async function apiJson(path, options = {}) {
     const error = new Error(`${response.status} ${message}`);
     error.status = response.status;
     error.apiData = data;
+    const retryAfterSeconds = Number(response.headers.get("Retry-After"));
+    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+      error.retryAfterSeconds = retryAfterSeconds;
+    }
     throw error;
   }
   if (data?.upstreamStatus && data?.error) {

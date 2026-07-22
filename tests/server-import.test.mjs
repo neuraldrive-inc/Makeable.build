@@ -36,11 +36,12 @@ test("the local server imports and starts without module-linking errors", async 
   assert.equal(child.exitCode, null, stderr || "Server exited before becoming ready.");
   assert.match(stdout, /Makeable running at/);
   child.kill("SIGTERM");
-  await exitPromise;
+  const [exitCode, exitSignal] = await exitPromise;
+  assert.equal(exitCode, 0, stderr || `Server exited from ${exitSignal || "an unknown signal"}.`);
   assert.doesNotMatch(stderr, /SyntaxError|does not provide an export/);
 });
 
-test("an oversized asynchronous request returns 413 without terminating the server", async (t) => {
+test("50 concurrent asynchronous request failures stay isolated and keep the server healthy", async (t) => {
   const port = await availablePort();
   const child = spawn(process.execPath, ["server.mjs"], {
     cwd: root,
@@ -72,20 +73,30 @@ test("an oversized asynchronous request returns 413 without terminating the serv
   assert.equal(child.exitCode, null, stderr || "Server exited before becoming ready.");
   assert.match(stdout, /Makeable running at/);
 
-  const oversized = await fetch(`http://127.0.0.1:${port}/api/auth/google`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      credential: "a".repeat(21 * 1024),
-      intent: "waitlist",
-    }),
-  });
-  assert.equal(oversized.status, 413);
-  assert.deepEqual(await oversized.json(), { error: "Request body is too large." });
+  const oversizedResponses = await Promise.all(
+    Array.from({ length: 50 }, () =>
+      fetch(`http://127.0.0.1:${port}/api/auth/google`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          credential: "a".repeat(21 * 1024),
+          intent: "waitlist",
+        }),
+      }),
+    ),
+  );
+  for (const response of oversizedResponses) {
+    assert.equal(response.status, 413);
+    assert.deepEqual(await response.json(), { error: "Request body is too large." });
+  }
 
-  const health = await fetch(`http://127.0.0.1:${port}/api/health`);
-  assert.equal(health.status, 200);
-  assert.equal((await health.json()).ok, true);
+  const healthResponses = await Promise.all(
+    Array.from({ length: 50 }, () => fetch(`http://127.0.0.1:${port}/api/health`)),
+  );
+  for (const health of healthResponses) {
+    assert.equal(health.status, 200);
+    assert.equal((await health.json()).ok, true);
+  }
   assert.equal(child.exitCode, null, stderr || "Server exited after rejecting the request.");
 });
 
