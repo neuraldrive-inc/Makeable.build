@@ -29,7 +29,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
 const initialEnv = getEnv();
 const port = Number(initialEnv.PORT || 8787);
-const MAX_REQUEST_BYTES = 512 * 1024;
+const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
 const MAX_SKETCH_BYTES = 96 * 1024;
 const DEFAULT_OPENAI_MODEL = "gpt-5.6-terra";
 const DEFAULT_OPENAI_REASONING_EFFORT = "xhigh";
@@ -68,7 +68,11 @@ const mimeTypes = new Map([
   [".woff2", "font/woff2"],
 ]);
 
-const server = createServer(async (req, res) => {
+const server = createServer((req, res) => {
+  handleHttpRequest(req, res).catch((error) => handleHttpRequestError(res, error));
+});
+
+async function handleHttpRequest(req, res) {
   try {
     const env = getEnv();
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
@@ -190,23 +194,31 @@ const server = createServer(async (req, res) => {
     if (env.NODE_ENV === "production") return sendJson(res, { error: "Not found" }, 404);
     return serveStatic(url, res);
   } catch (error) {
-    const status =
-      Number.isInteger(error?.statusCode) && error.statusCode >= 400 && error.statusCode < 600
-        ? error.statusCode
-        : 500;
-    if (status === 500) console.error(error);
-    return sendJson(
-      res,
-      {
-        error:
-          status === 500
-            ? "The Makeable server could not complete the request."
-            : String(error.message || error),
-      },
-      status,
-    );
+    return handleHttpRequestError(res, error);
   }
-});
+}
+
+function handleHttpRequestError(res, error) {
+  const status =
+    Number.isInteger(error?.statusCode) && error.statusCode >= 400 && error.statusCode < 600
+      ? error.statusCode
+      : 500;
+  if (status === 500) console.error(error);
+  if (res.headersSent) {
+    if (!res.writableEnded) res.destroy(error);
+    return;
+  }
+  return sendJson(
+    res,
+    {
+      error:
+        status === 500
+          ? "The Makeable server could not complete the request."
+          : String(error.message || error),
+    },
+    status,
+  );
+}
 
 server.on("upgrade", handleDeepgramUpgrade);
 
