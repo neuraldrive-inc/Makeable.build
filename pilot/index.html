@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23ef2d83'/%3E%3Cpath d='M18 43V21l14 14 14-14v22' stroke='white' stroke-width='7' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-    <link rel="stylesheet" href="./styles.css?v=makeable-workbench-20260721-plain-english" />
+    <link rel="stylesheet" href="./styles.css?v=makeable-workbench-20260721-describe-flow" />
     <script src="/config.local.js"></script>
   </head>
   <body>
@@ -66,22 +66,29 @@
           <img class="idea-doodle" src="images/makeable/plant-doodle.svg" alt="A hand-drawn plant and water drop" />
           <div class="idea-underline" aria-hidden="true"></div>
           <div class="idea-tools">
-            <button class="paper-button add-sketch" id="addSketchButton" type="button"><img src="images/makeable/icon-paperclip.svg" alt="" /> Add a sketch</button>
-            <div class="voice-row">
-              <button class="paper-button" id="startVoiceButton" type="button">Use my voice</button>
-              <button class="paper-button" id="stopVoiceButton" type="button" disabled>Stop</button>
-              <span class="status-pill" id="voiceStatus">Ready</span>
+            <div class="idea-input-options">
+              <button class="paper-button add-sketch" id="addSketchButton" type="button"><img src="images/makeable/icon-paperclip.svg" alt="" /> Add a sketch</button>
+              <div class="voice-row">
+                <button class="paper-button" id="startVoiceButton" type="button">Use my voice</button>
+                <button class="paper-button" id="stopVoiceButton" type="button" disabled>Stop</button>
+                <span class="status-pill" id="voiceStatus">Ready</span>
+              </div>
             </div>
             <button class="torn-button torn-button--pink" id="ideaNextButton" type="button">Start my build</button>
           </div>
           <div class="voice-transcript" id="voiceTranscriptBox" aria-live="polite">Your words will appear here while you talk.</div>
-        </div>
-
-        <div class="idea-suggestions" aria-label="Example project ideas">
-          <div class="messy-note">Messy ideas<br />welcome.<svg viewBox="0 0 90 38" aria-hidden="true"><path d="M4 5c16 2 28 7 39 19M36 16l8 8-12 3" /></svg></div>
-          <button class="idea-prompt note-card note-card--blush tape-grid-pink" data-idea="Build a pet feeder that serves food on a schedule." type="button"><span>♨</span>A pet feeder</button>
-          <button class="idea-prompt note-card note-card--lilac tape-blue" data-idea="Build a mini fan that turns on when the room gets warm." type="button"><span>✺</span>A mini fan</button>
-          <button class="idea-prompt note-card note-card--mint tape-grid-mint" data-idea="Build a self-watering plant that checks when the soil is dry." type="button"><span>♧</span>A plant helper</button>
+          <section class="idea-suggestions" aria-labelledby="ideaSuggestionsTitle">
+            <header class="idea-suggestions-copy">
+              <span>Need a spark?</span>
+              <h2 id="ideaSuggestionsTitle">Messy ideas are welcome.</h2>
+              <p>Choose a starting point, then change it to make it yours.</p>
+            </header>
+            <div class="idea-prompt-grid" aria-label="Example project ideas">
+              <button class="idea-prompt note-card note-card--blush tape-grid-pink" data-idea="Build a pet feeder that serves food on a schedule." type="button"><span aria-hidden="true">♨</span><span><strong>A pet feeder</strong><small>Serve food on a schedule</small></span></button>
+              <button class="idea-prompt note-card note-card--lilac tape-blue" data-idea="Build a mini fan that turns on when the room gets warm." type="button"><span aria-hidden="true">✺</span><span><strong>A mini fan</strong><small>Cool the room when it is warm</small></span></button>
+              <button class="idea-prompt note-card note-card--mint tape-grid-mint" data-idea="Build a self-watering plant that checks when the soil is dry." type="button"><span aria-hidden="true">♧</span><span><strong>A plant helper</strong><small>Water a plant when it is dry</small></span></button>
+            </div>
+          </section>
         </div>
       </section>
 
@@ -310,6 +317,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="./app.js?v=makeable-workbench-20260721-plain-english"></script>
+    <script type="module" src="./app.js?v=makeable-workbench-20260721-describe-flow"></script>
   </body>
 </html>

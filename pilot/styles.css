@@ -453,16 +453,16 @@ a {
 
 .idea-paper {
   display: grid;
-  min-height: 410px;
-  grid-template-columns: minmax(0, 1fr) 210px;
+  min-height: 555px;
+  grid-template-columns: minmax(0, 1fr) 175px;
   align-items: center;
-  gap: 20px;
-  padding: 76px 72px 44px;
+  gap: 18px 28px;
+  padding: 54px 58px 36px;
 }
 
 .idea-paper textarea {
   width: 100%;
-  min-height: 170px;
+  min-height: 148px;
   resize: none;
   border: 0;
   outline: none;
@@ -484,25 +484,32 @@ a {
 }
 
 .idea-doodle {
-  width: 190px;
-  max-height: 180px;
+  width: 160px;
+  max-height: 155px;
   object-fit: contain;
 }
 
 .idea-underline {
-  width: 82%;
+  width: 88%;
   height: 12px;
-  margin-top: -28px;
+  margin-top: -24px;
   background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 500 16' preserveAspectRatio='none'%3E%3Cpath d='M3 8c160-9 340-6 494 1M28 14c118-6 262-5 401 0' fill='none' stroke='%23ef2d83' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E") center/100% 100% no-repeat;
 }
 
 .idea-tools {
   grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
+  display: flex;
   align-items: center;
-  gap: 18px;
-  margin-top: 8px;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 2px;
+}
+
+.idea-input-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
 }
 
 .voice-row,
@@ -516,9 +523,10 @@ a {
 
 .voice-transcript {
   grid-column: 1 / -1;
-  min-height: 26px;
+  min-height: 22px;
   color: var(--muted);
-  font-size: 0.94rem;
+  font-size: 0.9rem;
+  font-weight: 400;
 }
 
 .paper-button,
@@ -605,35 +613,52 @@ summary:focus-visible {
 .status-pill.danger { color: #c4263f; }
 
 .idea-suggestions {
+  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 145px repeat(3, minmax(150px, 1fr));
+  grid-template-columns: minmax(210px, .72fr) minmax(0, 2.28fr);
   align-items: center;
-  gap: 28px;
-  max-width: 1100px;
-  margin: 46px auto 0;
+  gap: 30px;
+  width: 100%;
+  margin-top: 6px;
+  padding-top: 30px;
+  border-top: 1px dashed rgba(17,16,15,.2);
 }
 
-.messy-note {
-  position: relative;
-  font-size: 1.1rem;
+.idea-suggestions-copy > span {
+  color: var(--pink-dark);
+  font-family: var(--display);
+  font-size: .78rem;
   font-weight: 700;
-  line-height: 1.12;
+  letter-spacing: .1em;
+  text-transform: uppercase;
 }
 
-.messy-note svg {
-  width: 88px;
-  margin-top: 8px;
-  fill: none;
-  stroke: var(--ink);
-  stroke-width: 4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+.idea-suggestions-copy h2 {
+  margin: 6px 0 7px;
+  font-family: var(--display);
+  font-size: 1.55rem;
+  font-weight: 600;
+  line-height: 1.05;
+}
+
+.idea-suggestions-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.idea-prompt-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 17px;
 }
 
 .note-card {
   position: relative;
-  min-height: 116px;
-  padding: 28px 18px 15px;
+  min-height: 112px;
+  padding: 30px 18px 18px;
   border: 0;
   clip-path: polygon(1% 1%, 99% 3%, 98% 98%, 3% 99%, 0 48%);
   box-shadow: var(--paper-shadow);
@@ -644,8 +669,23 @@ summary:focus-visible {
   transition: transform 160ms ease;
 }
 
+.idea-prompt {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  transition: transform 150ms ease, filter 150ms ease;
+}
+
+.idea-prompt:hover { transform: translateY(-3px) rotate(-.5deg); filter: saturate(1.08); }
+.idea-prompt > span:first-child { margin: 0; font-size: 1.65rem; line-height: 1; }
+.idea-prompt > span:last-child { display: grid; gap: 4px; margin: 0; }
+.idea-prompt strong { font-family: var(--display); font-size: 1.06rem; font-weight: 600; }
+.idea-prompt small { color: rgba(17,16,15,.68); font-size: .82rem; font-weight: 400; line-height: 1.25; }
+
 .note-card:hover { transform: translateY(-5px) rotate(1deg); }
-.note-card > span { margin-right: 11px; font-size: 1.8rem; }
+.note-card > span:first-child { margin-right: 11px; font-size: 1.8rem; }
 .note-card--blush { background: #f6d8df; }
 .note-card--lilac { background: #c4c9f7; }
 .note-card--mint { background: #c2eadf; }
@@ -2210,6 +2250,7 @@ body[data-stage="5"] .stage-controls {
   .workflow-stage { padding-inline: 34px; }
   .stage-heading h1 { font-size: 3.7rem; }
   .idea-paper { padding-inline: 45px; }
+  .idea-suggestions { grid-template-columns: 1fr; gap: 18px; }
   .build-workspace { grid-template-columns: 1fr; }
   .build-workspace > .sticky-note { display: none; }
   .visual-step-card { grid-template-columns: 1.35fr .75fr; }
@@ -2229,9 +2270,12 @@ body[data-stage="5"] .stage-controls {
   .workflow-stage { padding-top: 24px; }
   .stage-heading { min-height: 140px; }
   .stage-heading h1 { font-size: 3.55rem; }
-  .idea-paper { min-height: 350px; padding-block: 54px 30px; }
-  .idea-suggestions { margin-top: 25px; }
-  .note-card { min-height: 96px; }
+  .idea-paper { min-height: 470px; padding-block: 42px 28px; }
+  .idea-paper textarea { min-height: 105px; font-size: 2.2rem; }
+  .idea-suggestions { gap: 16px; padding-top: 20px; }
+  .idea-suggestions-copy h2 { font-size: 1.35rem; }
+  .idea-suggestions-copy p { font-size: .9rem; }
+  .note-card { min-height: 92px; }
   .canvas-frame { height: 380px; }
   .visual-step-list, .visual-step-empty, .visual-step-card { min-height: 430px; }
   .visual-step-card canvas { min-height: 375px; }

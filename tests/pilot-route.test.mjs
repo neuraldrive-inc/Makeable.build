@@ -109,6 +109,20 @@ test("the parts scan teaches photo setup and starts recognition automatically", 
   assert.match(pilotStyles, /body:not\(\.has-parts-photo\) \.scan-clear-button/);
 });
 
+test("the Describe stage keeps inspiration in the same visual flow as the idea editor", async () => {
+  const pilotHtml = await readFile(path.join(root, "pilot", "index.html"), "utf8");
+  const pilotStyles = await readFile(path.join(root, "pilot", "styles.css"), "utf8");
+
+  assert.match(pilotHtml, /<div class="idea-paper[\s\S]*?<section class="idea-suggestions"/);
+  assert.match(pilotHtml, />Messy ideas are welcome\.</);
+  assert.match(pilotHtml, />Serve food on a schedule</);
+  assert.match(pilotHtml, />Cool the room when it is warm</);
+  assert.match(pilotHtml, />Water a plant when it is dry</);
+  assert.match(pilotStyles, /\.idea-suggestions\s*\{[\s\S]*?grid-column: 1 \/ -1/);
+  assert.match(pilotStyles, /\.idea-prompt-grid\s*\{[\s\S]*?repeat\(3, minmax\(0, 1fr\)\)/);
+  assert.doesNotMatch(pilotHtml, /class="messy-note"/);
+});
+
 test("Netlify serves the landing at root and rewrites only the pilot entrypoint", async () => {
   const config = await readFile(path.join(root, "netlify.toml"), "utf8");
   assert.match(
