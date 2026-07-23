@@ -12,12 +12,6 @@
   status = 200
   force = true
 
-[[redirects]]
-  from = "/dashboard"
-  to = "/dashboard/"
-  status = 301
-  force = true
-
 [[headers]]
   for = "/dashboard/*"
   [headers.values]

@@ -134,10 +134,6 @@ test("Netlify serves the landing at root and routes the private product surfaces
   );
   assert.match(
     config,
-    /from = "\/dashboard"[\s\S]*?to = "\/dashboard\/"[\s\S]*?status = 301[\s\S]*?force = true/,
-  );
-  assert.match(
-    config,
     /for = "\/dashboard\/\*"[\s\S]*?Cache-Control = "no-store"[\s\S]*?X-Robots-Tag = "noindex, nofollow, noarchive"/,
   );
   assert.doesNotMatch(config, /from = "\/"/);
