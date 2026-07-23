@@ -171,7 +171,7 @@ test("landing acquisition rejects oversized request bodies", async (t) => {
 });
 
 test("dashboard routes stay private and issue signed owner sessions", async (t) => {
-  const dashboardAccessKey = "makeable-owner-access-key-123";
+  const dashboardAccessKey = "neuraldrive";
   installEnvironment(t, {
     DASHBOARD_ACCESS_KEY: dashboardAccessKey,
     DASHBOARD_SESSION_SECRET:

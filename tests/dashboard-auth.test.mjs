@@ -9,7 +9,7 @@ import {
   verifyDashboardAccessKey,
 } from "../lib/dashboard-auth.mjs";
 
-const accessKey = "makeable-owner-access-key-123";
+const accessKey = "neuraldrive";
 const sessionSecret = "dashboard-session-secret-with-at-least-32-characters";
 const now = new Date("2026-07-23T18:00:00.000Z");
 
