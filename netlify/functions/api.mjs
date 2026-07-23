@@ -2,9 +2,20 @@ import { getStore } from "@netlify/blobs";
 import { OAuth2Client } from "google-auth-library";
 import { createGoogleWaitlistResult } from "../../lib/acquisition.mjs";
 import {
+  clearDashboardSessionCookie,
+  createDashboardSessionCookie,
+  dashboardAccessConfigured,
+  dashboardSessionState,
+  verifyDashboardAccessKey,
+} from "../../lib/dashboard-auth.mjs";
+import {
   persistVerifiedWaitlistRecord,
   waitlistStoreNameForFunctionContext,
 } from "../../lib/waitlist-storage.mjs";
+import {
+  readVerifiedWaitlist,
+  waitlistCsv,
+} from "../../lib/waitlist-report.mjs";
 import {
   clearWaitlistSessionCookie,
   createWaitlistSession,
@@ -28,6 +39,18 @@ export default async function handler(req, context = {}) {
 
     if (url.pathname === "/api/config") {
       return jsonResponse(await resolvedPublicConfig(env));
+    }
+
+    if (localApiPath === "/api/dashboard/session") {
+      return await dashboardSession(req, env);
+    }
+
+    if (localApiPath === "/api/dashboard/export") {
+      return await dashboardExport(req, env, context);
+    }
+
+    if (localApiPath === "/api/dashboard") {
+      return await dashboardData(req, env, context);
     }
 
     if (localApiPath === "/api/waitlist/status") {
@@ -104,6 +127,8 @@ function getEnv() {
     "GOOGLE_CLIENT_ID",
     "WAITLIST_WEBHOOK_URL",
     "WAITLIST_WEBHOOK_SECRET",
+    "DASHBOARD_ACCESS_KEY",
+    "DASHBOARD_SESSION_SECRET",
   ];
   return Object.fromEntries(keys.map((key) => [key, envValue(key)]));
 }
@@ -116,6 +141,140 @@ function normalizedLocalApiPath(pathname) {
   let normalized = pathname.replace(/\/+$/, "");
   if (normalized.endsWith(".html")) normalized = normalized.slice(0, -5);
   return normalized;
+}
+
+async function dashboardSession(req, env) {
+  if (req.method === "DELETE") {
+    return jsonResponse({ ok: true }, 200, {
+      "Cache-Control": "no-store",
+      "Set-Cookie": clearDashboardSessionCookie(),
+    });
+  }
+  if (!new Set(["GET", "POST"]).has(req.method)) {
+    return jsonResponse({ error: "Method not allowed" }, 405, {
+      Allow: "GET, POST, DELETE",
+      "Cache-Control": "no-store",
+    });
+  }
+  if (!dashboardAccessConfigured(
+    env.DASHBOARD_ACCESS_KEY,
+    env.DASHBOARD_SESSION_SECRET,
+  )) {
+    return jsonResponse({ error: "Dashboard access is not configured." }, 503, {
+      "Cache-Control": "no-store",
+    });
+  }
+
+  if (req.method === "GET") {
+    const session = dashboardSessionState(req, env.DASHBOARD_SESSION_SECRET);
+    return jsonResponse(
+      { authenticated: session.authenticated },
+      200,
+      {
+        "Cache-Control": "no-store",
+        Vary: "Cookie",
+        ...(session.state === "invalid"
+          ? { "Set-Cookie": clearDashboardSessionCookie() }
+          : {}),
+      },
+    );
+  }
+
+  const body = await readLimitedJsonRequest(req, 4 * 1024);
+  if (
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body) ||
+    typeof body.accessKey !== "string" ||
+    Object.keys(body).some((key) => key !== "accessKey")
+  ) {
+    return jsonResponse({ error: "Enter a valid access key." }, 400, {
+      "Cache-Control": "no-store",
+    });
+  }
+  if (!verifyDashboardAccessKey(body.accessKey, env.DASHBOARD_ACCESS_KEY)) {
+    return jsonResponse({ error: "That access key is not valid." }, 401, {
+      "Cache-Control": "no-store",
+    });
+  }
+  return jsonResponse(
+    { authenticated: true },
+    200,
+    {
+      "Cache-Control": "no-store",
+      "Set-Cookie": createDashboardSessionCookie(env.DASHBOARD_SESSION_SECRET),
+    },
+  );
+}
+
+async function dashboardData(req, env, context) {
+  const authFailure = dashboardAuthorizationFailure(req, env, "GET");
+  if (authFailure) return authFailure;
+  const records = await loadDashboardRecords(context);
+  return jsonResponse(
+    {
+      generatedAt: new Date().toISOString(),
+      records,
+    },
+    200,
+    {
+      "Cache-Control": "no-store",
+      Vary: "Cookie",
+    },
+  );
+}
+
+async function dashboardExport(req, env, context) {
+  const authFailure = dashboardAuthorizationFailure(req, env, "GET");
+  if (authFailure) return authFailure;
+  const records = await loadDashboardRecords(context);
+  return textResponse(
+    waitlistCsv(records),
+    "text/csv; charset=utf-8",
+    200,
+    {
+      "Cache-Control": "no-store",
+      "Content-Disposition": `attachment; filename="makeable-waitlist-${new Date()
+        .toISOString()
+        .slice(0, 10)}.csv"`,
+      Vary: "Cookie",
+    },
+  );
+}
+
+function dashboardAuthorizationFailure(req, env, allowedMethod) {
+  if (req.method !== allowedMethod) {
+    return jsonResponse({ error: "Method not allowed" }, 405, {
+      Allow: allowedMethod,
+      "Cache-Control": "no-store",
+    });
+  }
+  if (!dashboardAccessConfigured(
+    env.DASHBOARD_ACCESS_KEY,
+    env.DASHBOARD_SESSION_SECRET,
+  )) {
+    return jsonResponse({ error: "Dashboard access is not configured." }, 503, {
+      "Cache-Control": "no-store",
+    });
+  }
+  const session = dashboardSessionState(req, env.DASHBOARD_SESSION_SECRET);
+  if (session.authenticated) return null;
+  return jsonResponse({ error: "Dashboard authentication required." }, 401, {
+    "Cache-Control": "no-store",
+    Vary: "Cookie",
+    ...(session.state === "invalid"
+      ? { "Set-Cookie": clearDashboardSessionCookie() }
+      : {}),
+  });
+}
+
+async function loadDashboardRecords(context) {
+  const store = getStore({
+    name: waitlistStoreNameForFunctionContext(context),
+    consistency: "strong",
+  });
+  const records = await readVerifiedWaitlist(store);
+  return records.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 function publicConfig(env) {

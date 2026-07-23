@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { getStore } from "@netlify/blobs";
 import { waitlistSignupKey } from "../lib/waitlist-storage.mjs";
 import { waitlistSessionStoreName } from "../lib/waitlist-session.mjs";
+import { readVerifiedWaitlist, waitlistCsv } from "../lib/waitlist-report.mjs";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
@@ -42,34 +43,6 @@ async function main() {
     return;
   }
   throw new Error(`Unknown command: ${command}`);
-}
-
-export async function readVerifiedWaitlist(store) {
-  const recordsByEmail = new Map();
-  for await (const page of store.list({ prefix: "signup-", paginate: true })) {
-    for (const blob of page.blobs) {
-      const record = await store.get(blob.key, { type: "json" });
-      const normalized = normalizeStoredRecord(record);
-      if (!normalized) continue;
-      const existing = recordsByEmail.get(normalized.email);
-      if (!existing || normalized.createdAt < existing.createdAt) {
-        recordsByEmail.set(normalized.email, normalized);
-      }
-    }
-  }
-  return [...recordsByEmail.values()].sort((a, b) => a.email.localeCompare(b.email));
-}
-
-export function waitlistCsv(records) {
-  const rows = ["email,name,source,created_at"];
-  for (const record of records) {
-    rows.push(
-      [record.email, record.name, record.source, record.createdAt]
-        .map(csvCell)
-        .join(","),
-    );
-  }
-  return `${rows.join("\n")}\n`;
 }
 
 async function exportWaitlist(store, args) {
@@ -115,20 +88,6 @@ async function deleteSignup(store, sessionStore, args) {
   );
 }
 
-function normalizeStoredRecord(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const email = normalizeEmail(value.email);
-  if (!email || value.source !== "google") return null;
-  const createdAt = validTimestamp(value.createdAt || value.firstSeenAt);
-  if (!createdAt) return null;
-  return {
-    email,
-    name: typeof value.name === "string" ? value.name.trim().slice(0, 120) : "",
-    source: "google",
-    createdAt,
-  };
-}
-
 function normalizeEmail(value) {
   if (typeof value !== "string") return "";
   const email = value.trim().toLowerCase();
@@ -136,18 +95,6 @@ function normalizeEmail(value) {
     return "";
   }
   return email;
-}
-
-function validTimestamp(value) {
-  if (typeof value !== "string" || !value) return "";
-  const timestamp = new Date(value);
-  return Number.isNaN(timestamp.getTime()) ? "" : timestamp.toISOString();
-}
-
-function csvCell(value) {
-  let text = String(value ?? "");
-  if (/^[=+\-@]/.test(text)) text = `'${text}`;
-  return `"${text.replaceAll('"', '""')}"`;
 }
 
 function optionValue(args, name) {

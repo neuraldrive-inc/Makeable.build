@@ -17,7 +17,15 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { WebSocket, WebSocketServer } from "ws";
 import { getBoardProfile, supportedBoardSummary } from "./lib/board-profiles.mjs";
 import { createGoogleWaitlistResult } from "./lib/acquisition.mjs";
+import {
+  clearDashboardSessionCookie,
+  createDashboardSessionCookie,
+  dashboardAccessConfigured,
+  dashboardSessionState,
+  verifyDashboardAccessKey,
+} from "./lib/dashboard-auth.mjs";
 import { waitlistSignupKey } from "./lib/waitlist-storage.mjs";
+import { readVerifiedWaitlist, waitlistCsv } from "./lib/waitlist-report.mjs";
 import {
   clearWaitlistSessionCookie,
   createWaitlistSession,
@@ -91,6 +99,18 @@ async function handleHttpRequest(req, res) {
 
     if (url.pathname === "/api/config") {
       return sendJson(res, publicConfig(env));
+    }
+
+    if (localApiPath === "/api/dashboard/session") {
+      return localDashboardSession(req, res, env);
+    }
+
+    if (localApiPath === "/api/dashboard/export") {
+      return localDashboardExport(req, res, env);
+    }
+
+    if (localApiPath === "/api/dashboard") {
+      return localDashboardData(req, res, env);
     }
 
     if (localApiPath === "/api/waitlist/status") {
@@ -415,6 +435,98 @@ function normalizedLocalApiPath(pathname) {
   return normalized;
 }
 
+async function localDashboardSession(req, res, env) {
+  if (req.method === "DELETE") {
+    res.setHeader("Set-Cookie", clearDashboardSessionCookie());
+    return sendJson(res, { ok: true });
+  }
+  if (!new Set(["GET", "POST"]).has(req.method)) {
+    res.setHeader("Allow", "GET, POST, DELETE");
+    return sendJson(res, { error: "Method not allowed" }, 405);
+  }
+  if (!dashboardAccessConfigured(
+    env.DASHBOARD_ACCESS_KEY,
+    env.DASHBOARD_SESSION_SECRET,
+  )) {
+    return sendJson(res, { error: "Dashboard access is not configured." }, 503);
+  }
+  const sessionRequest = localCookieRequest(req, "/api/dashboard/session");
+  if (req.method === "GET") {
+    const session = dashboardSessionState(sessionRequest, env.DASHBOARD_SESSION_SECRET);
+    if (session.state === "invalid") {
+      res.setHeader("Set-Cookie", clearDashboardSessionCookie());
+    }
+    return sendJson(res, { authenticated: session.authenticated });
+  }
+
+  const body = await readJsonBody(req, 4 * 1024);
+  if (
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body) ||
+    typeof body.accessKey !== "string" ||
+    Object.keys(body).some((key) => key !== "accessKey")
+  ) {
+    return sendJson(res, { error: "Enter a valid access key." }, 400);
+  }
+  if (!verifyDashboardAccessKey(body.accessKey, env.DASHBOARD_ACCESS_KEY)) {
+    return sendJson(res, { error: "That access key is not valid." }, 401);
+  }
+  res.setHeader(
+    "Set-Cookie",
+    createDashboardSessionCookie(env.DASHBOARD_SESSION_SECRET),
+  );
+  return sendJson(res, { authenticated: true });
+}
+
+async function localDashboardData(req, res, env) {
+  if (!localDashboardAuthorized(req, res, env)) return;
+  const records = await readVerifiedWaitlist(localWaitlistSignupStore);
+  records.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return sendJson(res, {
+    generatedAt: new Date().toISOString(),
+    records,
+  });
+}
+
+async function localDashboardExport(req, res, env) {
+  if (!localDashboardAuthorized(req, res, env)) return;
+  const records = await readVerifiedWaitlist(localWaitlistSignupStore);
+  records.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="makeable-waitlist-${new Date()
+      .toISOString()
+      .slice(0, 10)}.csv"`,
+  );
+  return sendText(res, waitlistCsv(records), "text/csv; charset=utf-8");
+}
+
+function localDashboardAuthorized(req, res, env) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    sendJson(res, { error: "Method not allowed" }, 405);
+    return false;
+  }
+  if (!dashboardAccessConfigured(
+    env.DASHBOARD_ACCESS_KEY,
+    env.DASHBOARD_SESSION_SECRET,
+  )) {
+    sendJson(res, { error: "Dashboard access is not configured." }, 503);
+    return false;
+  }
+  const session = dashboardSessionState(
+    localCookieRequest(req, "/api/dashboard"),
+    env.DASHBOARD_SESSION_SECRET,
+  );
+  if (session.authenticated) return true;
+  if (session.state === "invalid") {
+    res.setHeader("Set-Cookie", clearDashboardSessionCookie());
+  }
+  sendJson(res, { error: "Dashboard authentication required." }, 401);
+  return false;
+}
+
 async function completeLocalGoogleWaitlist(req, res, env) {
   if (!env.GOOGLE_CLIENT_ID) {
     return sendJson(res, { error: "Google sign-in is not configured." }, 503);
@@ -516,12 +628,46 @@ const localWaitlistSignupStore = {
     }
     return null;
   },
+  async *list() {
+    const records = await readLocalWaitlistRecords();
+    yield {
+      blobs: records.map((record) => ({
+        key: waitlistSignupKey(record.email),
+      })),
+      directories: [],
+    };
+  },
 };
 
 function localWaitlistSessionRequest(req) {
   return new Request(`http://${req.headers.host || "localhost"}/api/waitlist/status`, {
     headers: { Cookie: String(req.headers.cookie || "") },
   });
+}
+
+function localCookieRequest(req, pathname) {
+  return new Request(`http://${req.headers.host || "localhost"}${pathname}`, {
+    headers: { Cookie: String(req.headers.cookie || "") },
+  });
+}
+
+async function readLocalWaitlistRecords() {
+  const filePath = path.join(__dirname, "data", "waitlist.jsonl");
+  try {
+    const contents = await readFile(filePath, "utf8");
+    return contents
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .flatMap((line) => {
+        try {
+          return [JSON.parse(line)];
+        } catch {
+          return [];
+        }
+      });
+  } catch {
+    return [];
+  }
 }
 
 function applyCors(req, res, env) {
@@ -828,6 +974,10 @@ async function serveStatic(url, res) {
 
   if (pathname === "/terms/" || pathname === "/terms") {
     return serveFile("/terms/index.html", res);
+  }
+
+  if (pathname === "/dashboard/" || pathname === "/dashboard") {
+    return serveFile("/dashboard/index.html", res);
   }
 
   const safePath =

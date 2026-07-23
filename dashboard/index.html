@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#07090e" />
+    <title>Waitlist dashboard · Makeable</title>
+    <link rel="stylesheet" href="/dashboard/styles.css" />
+    <script src="/dashboard/app.js" defer></script>
+  </head>
+  <body>
+    <div class="ambient-glow" aria-hidden="true"></div>
+
+    <main id="authView" class="auth-shell">
+      <section class="auth-card" aria-labelledby="authTitle">
+        <a class="brand auth-brand" href="/" aria-label="Makeable home">MAKEABLE</a>
+        <div class="auth-copy">
+          <div class="auth-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M13.2 2.8 5.7 13.1h5.6l-.8 8.1 7.8-10.9h-5.7l.6-7.5Z"></path>
+            </svg>
+          </div>
+          <h1 id="authTitle">Private dashboard</h1>
+          <p>Enter the owner access key to view verified waitlist signups.</p>
+        </div>
+        <form id="authForm" class="auth-form">
+          <label for="accessKey">Access key</label>
+          <div class="password-field">
+            <input
+              id="accessKey"
+              name="accessKey"
+              type="password"
+              autocomplete="current-password"
+              placeholder="Enter your access key"
+              required
+            />
+            <button
+              id="toggleAccessKey"
+              class="icon-button field-action"
+              type="button"
+              aria-label="Show access key"
+              aria-pressed="false"
+            >
+              <svg class="eye-open" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M2.6 12s3.4-6 9.4-6 9.4 6 9.4 6-3.4 6-9.4 6-9.4-6-9.4-6Z"></path>
+                <circle cx="12" cy="12" r="2.5"></circle>
+              </svg>
+              <svg class="eye-closed" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m3 3 18 18M10.6 6.1A9.4 9.4 0 0 1 12 6c6 0 9.4 6 9.4 6a15 15 0 0 1-2.1 2.8M6.2 6.3C3.9 8 2.6 12 2.6 12s3.4 6 9.4 6a9 9 0 0 0 3.3-.6M9.9 9.9a3 3 0 0 0 4.2 4.2"></path>
+              </svg>
+            </button>
+          </div>
+          <p id="authError" class="form-message" role="alert" aria-live="polite"></p>
+          <button id="authSubmit" class="button button-primary button-wide" type="submit">
+            <span>Open dashboard</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 12h14M13 6l6 6-6 6"></path>
+            </svg>
+          </button>
+        </form>
+        <p class="auth-note">
+          Access expires automatically after 12 hours.
+        </p>
+      </section>
+    </main>
+
+    <main id="dashboardView" class="dashboard-shell" hidden>
+      <header class="topbar">
+        <div class="topbar-identity">
+          <a class="brand" href="/" aria-label="Makeable home">MAKEABLE</a>
+          <span class="topbar-rule" aria-hidden="true"></span>
+          <h1>Waitlist dashboard</h1>
+        </div>
+        <div class="topbar-actions">
+          <div class="live-status" aria-label="Live data">
+            <span class="live-dot"></span>
+            <span>Live data</span>
+          </div>
+          <button id="refreshButton" class="button button-secondary" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 6v5h-5M4 18v-5h5M5.7 9a7 7 0 0 1 11.8-2.6L20 9M4 15l2.5 2.6A7 7 0 0 0 18.3 15"></path>
+            </svg>
+            <span>Refresh</span>
+          </button>
+          <button id="downloadButton" class="button button-primary" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 3v12M7 10l5 5 5-5M4 19h16"></path>
+            </svg>
+            <span>Download CSV</span>
+          </button>
+          <button id="signOutButton" class="icon-button sign-out" type="button" aria-label="Sign out">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M10 4H5v16h5M14 8l4 4-4 4M8 12h10"></path>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="dashboard-content">
+        <section class="metric-rail" aria-label="Waitlist summary">
+          <article class="metric">
+            <p>Total signups</p>
+            <strong id="totalMetric">—</strong>
+          </article>
+          <article class="metric">
+            <p>Last 7 days</p>
+            <strong id="weekMetric">—</strong>
+          </article>
+          <article class="metric">
+            <p>Last 30 days</p>
+            <strong id="monthMetric">—</strong>
+          </article>
+        </section>
+
+        <section class="panel chart-panel" aria-labelledby="chartTitle">
+          <div class="panel-heading chart-heading">
+            <div>
+              <h2 id="chartTitle">Signup growth</h2>
+              <p id="lastUpdated" class="sr-only">Loading verified signups…</p>
+            </div>
+            <div class="chart-controls">
+              <div class="range-toggle" role="group" aria-label="Chart range">
+                <button type="button" data-range="7">7D</button>
+                <button class="is-selected" type="button" data-range="30">30D</button>
+                <button type="button" data-range="all">All</button>
+              </div>
+              <div class="chart-total">
+                <span>Total</span>
+                <strong id="chartTotal">—</strong>
+              </div>
+            </div>
+          </div>
+          <div id="chartWrap" class="chart-wrap">
+            <svg
+              id="growthChart"
+              class="growth-chart"
+              viewBox="0 0 1200 320"
+              role="img"
+              aria-labelledby="chartTitle chartDescription"
+              preserveAspectRatio="none"
+            >
+              <desc id="chartDescription">Cumulative verified waitlist signups over time.</desc>
+            </svg>
+            <div id="chartTooltip" class="chart-tooltip" role="status" hidden></div>
+          </div>
+        </section>
+
+        <section class="panel table-panel" aria-labelledby="tableTitle">
+          <div class="panel-heading table-heading">
+            <div>
+              <h2 id="tableTitle">Recent signups</h2>
+              <p class="sr-only">Verified people, newest first</p>
+            </div>
+            <span id="resultCount" class="result-count">—</span>
+          </div>
+          <div class="table-tools">
+            <label class="search-field" for="searchInput">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="11" cy="11" r="6.5"></circle>
+                <path d="m16 16 4.2 4.2"></path>
+              </svg>
+              <input
+                id="searchInput"
+                type="search"
+                autocomplete="off"
+                placeholder="Search name or email"
+              />
+              <span class="sr-only">Search signups by name or email</span>
+            </label>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Person</th>
+                  <th scope="col">Email</th>
+                  <th scope="col">
+                    <span class="sorted-column">
+                      Joined
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 5v14M7 14l5 5 5-5"></path>
+                      </svg>
+                    </span>
+                  </th>
+                  <th scope="col">Source</th>
+                </tr>
+              </thead>
+              <tbody id="signupRows"></tbody>
+            </table>
+            <div id="emptyState" class="empty-state" hidden>
+              <div class="empty-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <circle cx="11" cy="11" r="6.5"></circle>
+                  <path d="m16 16 4.2 4.2"></path>
+                </svg>
+              </div>
+              <h3>No signups found</h3>
+              <p>Try a different name or email.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+      <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    </main>
+  </body>
+</html>

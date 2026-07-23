@@ -48,6 +48,9 @@ test("the production landing and pilot stay packaged as self-contained experienc
     "sitemap.xml",
     "privacy/index.html",
     "terms/index.html",
+    "dashboard/index.html",
+    "dashboard/app.js",
+    "dashboard/styles.css",
   ]) {
     await access(path.join(root, "dist", relativePath));
   }
@@ -123,11 +126,19 @@ test("the Describe stage keeps inspiration in the same visual flow as the idea e
   assert.doesNotMatch(pilotHtml, /class="messy-note"/);
 });
 
-test("Netlify serves the landing at root and rewrites only the pilot entrypoint", async () => {
+test("Netlify serves the landing at root and routes the private product surfaces", async () => {
   const config = await readFile(path.join(root, "netlify.toml"), "utf8");
   assert.match(
     config,
     /from = "\/pilot"[\s\S]*?to = "\/pilot-app\.html"[\s\S]*?status = 200[\s\S]*?force = true/,
+  );
+  assert.match(
+    config,
+    /from = "\/dashboard"[\s\S]*?to = "\/dashboard\/"[\s\S]*?status = 301[\s\S]*?force = true/,
+  );
+  assert.match(
+    config,
+    /for = "\/dashboard\/\*"[\s\S]*?Cache-Control = "no-store"[\s\S]*?X-Robots-Tag = "noindex, nofollow, noarchive"/,
   );
   assert.doesNotMatch(config, /from = "\/"/);
 });

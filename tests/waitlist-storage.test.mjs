@@ -12,7 +12,7 @@ import {
 import {
   readVerifiedWaitlist,
   waitlistCsv,
-} from "../scripts/waitlist-admin.mjs";
+} from "../lib/waitlist-report.mjs";
 
 const record = {
   email: "maker@example.com",

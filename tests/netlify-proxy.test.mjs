@@ -170,6 +170,87 @@ test("landing acquisition rejects oversized request bodies", async (t) => {
   assert.deepEqual(await response.json(), { error: "Request body is too large." });
 });
 
+test("dashboard routes stay private and issue signed owner sessions", async (t) => {
+  const dashboardAccessKey = "makeable-owner-access-key-123";
+  installEnvironment(t, {
+    DASHBOARD_ACCESS_KEY: dashboardAccessKey,
+    DASHBOARD_SESSION_SECRET:
+      "dashboard-session-secret-with-at-least-32-characters",
+  });
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error("Dashboard routes must never reach the AWS proxy");
+  };
+
+  const unauthorized = await handler(
+    new Request(`${productionOrigin}/api/dashboard`),
+  );
+  assert.equal(unauthorized.status, 401);
+  assert.deepEqual(await unauthorized.json(), {
+    error: "Dashboard authentication required.",
+  });
+
+  const wrongKey = await handler(
+    new Request(`${productionOrigin}/api/dashboard/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accessKey: `${dashboardAccessKey}-wrong` }),
+    }),
+  );
+  assert.equal(wrongKey.status, 401);
+
+  const login = await handler(
+    new Request(`${productionOrigin}/api/dashboard/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accessKey: dashboardAccessKey }),
+    }),
+  );
+  assert.equal(login.status, 200);
+  assert.deepEqual(await login.json(), { authenticated: true });
+  const cookie = login.headers.get("Set-Cookie");
+  assert.match(cookie, /^__Host-makeable_dashboard=/);
+  assert.match(cookie, /HttpOnly/);
+  assert.match(cookie, /SameSite=Strict/);
+
+  const status = await handler(
+    new Request(`${productionOrigin}/api/dashboard/session`, {
+      headers: { Cookie: cookie.split(";")[0] },
+    }),
+  );
+  assert.deepEqual(await status.json(), { authenticated: true });
+
+  const exportWithoutSession = await handler(
+    new Request(`${productionOrigin}/api/dashboard/export`),
+  );
+  assert.equal(exportWithoutSession.status, 401);
+
+  const logout = await handler(
+    new Request(`${productionOrigin}/api/dashboard/session`, {
+      method: "DELETE",
+      headers: { Cookie: cookie.split(";")[0] },
+    }),
+  );
+  assert.deepEqual(await logout.json(), { ok: true });
+  assert.match(logout.headers.get("Set-Cookie"), /Max-Age=0/);
+  assert.equal(fetchCalls, 0);
+});
+
+test("dashboard routes fail closed when private access is not configured", async (t) => {
+  installEnvironment(t, {
+    DASHBOARD_ACCESS_KEY: "",
+    DASHBOARD_SESSION_SECRET: "",
+  });
+  const response = await handler(
+    new Request(`${productionOrigin}/api/dashboard/session`),
+  );
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    error: "Dashboard access is not configured.",
+  });
+});
+
 test("Google acquisition rejects null bodies and unsupported methods without proxying", async (t) => {
   installEnvironment(t);
   let fetchCalls = 0;

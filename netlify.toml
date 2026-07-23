@@ -1,7 +1,7 @@
 [build]
   publish = "dist"
   functions = "netlify/functions"
-  command = "node --check app.js && node --check landing.js && node --check lib/acquisition.mjs && node --check lib/waitlist-storage.mjs && node --check lib/waitlist-session.mjs && node --check scripts/waitlist-admin.mjs && node --check server.mjs && node --check netlify/functions/api.mjs && node --test tests/server-import.test.mjs && node scripts/build-static.mjs"
+  command = "node --check app.js && node --check landing.js && node --check dashboard/app.js && node --check lib/acquisition.mjs && node --check lib/dashboard-auth.mjs && node --check lib/waitlist-report.mjs && node --check lib/waitlist-storage.mjs && node --check lib/waitlist-session.mjs && node --check scripts/waitlist-admin.mjs && node --check server.mjs && node --check netlify/functions/api.mjs && node --test tests/server-import.test.mjs && node scripts/build-static.mjs"
 
 [functions]
   node_bundler = "esbuild"
@@ -11,6 +11,21 @@
   to = "/pilot-app.html"
   status = 200
   force = true
+
+[[redirects]]
+  from = "/dashboard"
+  to = "/dashboard/"
+  status = 301
+  force = true
+
+[[headers]]
+  for = "/dashboard/*"
+  [headers.values]
+    Cache-Control = "no-store"
+    Content-Security-Policy = "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    Referrer-Policy = "no-referrer"
+    X-Frame-Options = "DENY"
+    X-Robots-Tag = "noindex, nofollow, noarchive"
 
 [[headers]]
   for = "/*"
